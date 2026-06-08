@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>TILE SHIFT</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- ── Header ── -->
+<div class="hdr">
+  <h1>TILE SHIFT</h1>
+  <span style="font-size:9px;color:var(--mut);white-space:nowrap">v1.0.0</span>
+  <span style="font-size:9px;color:var(--mut);white-space:nowrap;margin-left:16px">By Reuben Malcolm (reubogames)</span>
+  <div class="tabs">
+    <button class="tab on" data-screen="editor" onclick="showScreen('editor')">editor</button>
+    <button class="tab" data-screen="play" onclick="showScreen('play')">play</button>
+  </div>
+</div>
+
+<!-- ── Editor screen ── -->
+<div class="screen active" id="screenEditor">
+  <div class="col-side">
+
+    <div class="panel" id="gridSizePanel">
+      <div class="ptitle">grid size</div>
+      <div class="slrow">
+        <label>cols</label>
+        <input type="range" id="sCols" min="2" max="10" value="4">
+        <span class="val" id="sColsV">4</span>
+      </div>
+      <div class="slrow">
+        <label>rows</label>
+        <input type="range" id="sRows" min="2" max="10" value="4">
+        <span class="val" id="sRowsV">4</span>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="ptitle">paint tool</div>
+      <div class="tool-row">
+        <button class="tbtn on" id="tActive"  onclick="setTool('active')">tile</button>
+        <button class="tbtn"    id="tBlocked" onclick="setTool('blocked')">block</button>
+        <button class="tbtn"    id="tHole"    onclick="setTool('hole')">empty</button>
+        <button class="tbtn"    id="tBarrier" onclick="setTool('barrier')">barrier</button>
+      </div>
+      <p class="hint">
+        drag to draw a tile shape — all cells in one stroke form one tile<br>
+        barrier: click the edge between two cells<br>
+        row ↔ = H wrap · col ↕ = V wrap
+      </p>
+    </div>
+
+
+    <button class="sec-btn" onclick="clearGrid()">clear grid</button>
+  </div>
+
+  <div class="col-main">
+    <div id="editorMount"></div>
+  </div>
+
+  <div class="col-side right" style="overflow-y:hidden;padding:0">
+    <div style="flex:1;overflow-y:auto;padding:10px;display:flex;flex-direction:column;gap:8px;min-height:0">
+      <div class="panel">
+        <div class="ptitle">saved layouts</div>
+        <div id="savedList" style="display:flex;flex-direction:column;gap:4px;margin-bottom:8px"></div>
+        <div style="display:flex;flex-direction:column;gap:4px">
+          <button class="sec-btn" onclick="newLayout()">+ new layout</button>
+          <button class="sec-btn" id="saveBtn" onclick="saveCurrentLayout()">↓ save changes</button>
+          <button class="sec-btn" id="revertBtn" onclick="revertLayout()" style="display:none">✕ remove changes</button>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="ptitle">on play</div>
+        <div class="opt-row">
+          <label class="opt-label" for="rndGoals">
+            randomise goals<span class="opt-sub">shuffle which tile goes where</span>
+          </label>
+          <label class="toggle">
+            <input type="checkbox" id="rndGoals">
+            <div class="toggle-track"><div class="toggle-thumb"></div></div>
+          </label>
+        </div>
+        <div class="opt-row">
+          <label class="opt-label" for="rndBarriers">
+            randomise barriers<span class="opt-sub">move barriers to new positions</span>
+          </label>
+          <label class="toggle">
+            <input type="checkbox" id="rndBarriers">
+            <div class="toggle-track"><div class="toggle-thumb"></div></div>
+          </label>
+        </div>
+        <div class="opt-row" style="margin-bottom:0">
+          <label class="opt-label" for="rndWarps">
+            randomise warps<span class="opt-sub">move wraps to new rows/cols</span>
+          </label>
+          <label class="toggle">
+            <input type="checkbox" id="rndWarps">
+            <div class="toggle-track"><div class="toggle-thumb"></div></div>
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <div style="padding:10px;border-top:1px solid var(--bdr)">
+      <button class="big-btn" onclick="startGame();showScreen('play')">play ▶</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Play screen ── -->
+<div class="screen" id="screenPlay">
+  <div class="col-side">
+    <div class="panel play-wrap" style="flex:1">
+      <div class="ptitle">options</div>
+      <div class="opt-row">
+        <label class="opt-label" for="optHighlightMoves">
+          highlight moves<span class="opt-sub">colour movable tiles</span>
+        </label>
+        <label class="toggle">
+          <input type="checkbox" id="optHighlightMoves"
+                 onchange="setOption('highlightMoves',this.checked)">
+          <div class="toggle-track"><div class="toggle-thumb"></div></div>
+        </label>
+      </div>
+      <div class="opt-row">
+        <label class="opt-label" for="optHighlightCorrect">
+          highlight correct<span class="opt-sub">colour tiles in solved position</span>
+        </label>
+        <label class="toggle">
+          <input type="checkbox" id="optHighlightCorrect" checked
+                 onchange="setOption('highlightCorrect',this.checked)">
+          <div class="toggle-track"><div class="toggle-thumb"></div></div>
+        </label>
+      </div>
+      <div class="opt-row">
+        <label class="opt-label" for="optShowArrows">
+          show arrows<span class="opt-sub">show move arrows on all tiles</span>
+        </label>
+        <label class="toggle">
+          <input type="checkbox" id="optShowArrows"
+                 onchange="setOption('showArrows',this.checked)">
+          <div class="toggle-track"><div class="toggle-thumb"></div></div>
+        </label>
+      </div>
+      <div class="opt-row">
+        <label class="opt-label" for="optSounds">
+          sounds<span class="opt-sub">move, invalid &amp; victory</span>
+        </label>
+        <label class="toggle">
+          <input type="checkbox" id="optSounds" checked
+                 onchange="setOption('sounds',this.checked)">
+          <div class="toggle-track"><div class="toggle-thumb"></div></div>
+        </label>
+      </div>
+      <div style="margin-top:4px">
+        <div class="opt-label" style="margin-bottom:6px">
+          autosolve speed<span class="opt-sub">delay between moves</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:4px">
+          <span style="font-size:9px;color:var(--mut)">fast</span>
+          <div style="flex:1;min-width:0;position:relative">
+            <input type="range" id="optSolveSpeed" min="10" max="1000" step="10" value="250"
+                   style="width:100%;accent-color:var(--acc)"
+                   oninput="setOption('solveSpeed',+this.value); (function(el){var f=(+el.value-+el.min)/(+el.max-+el.min),r=8,w=el.offsetWidth-r*2,lbl=document.getElementById('optSolveSpeedV');lbl.textContent=el.value+'ms';lbl.style.left=(r+f*w)+'px'})(this)">
+            <span id="optSolveSpeedV" style="position:absolute;top:100%;left:50%;transform:translateX(-50%);font-size:9px;color:var(--val);white-space:nowrap;pointer-events:none">250ms</span>
+          </div>
+          <span style="font-size:9px;color:var(--mut)">slow</span>
+        </div>
+      </div>
+      <div style="margin-top:20px">
+        <div class="opt-label" style="margin-bottom:6px">
+          mark colour<span class="opt-sub">right-click tile to mark</span>
+        </div>
+        <div id="markColorPicker" style="display:flex;gap:5px;align-items:center;flex-wrap:wrap"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-main">
+    <div id="puzzleMount"></div>
+  </div>
+
+  <div class="col-side right">
+    <div class="stats-grid">
+      <div class="stat"><span class="sv" id="moveCount">0</span><span class="sl">moves</span></div>
+      <div class="stat"><span class="sv" id="timerVal">0:00.00</span><span class="sl">time</span></div>
+      <div class="stat hoverable" id="misplacedStat">
+        <span class="sv" id="misplacedV">—</span><span class="sl">wrong</span>
+      </div>
+      <div class="stat hoverable" id="goalStat" style="cursor:help;justify-content:flex-end">
+        <span class="sv" style="font-size:13px">⊙</span><span class="sl">goal</span>
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:5px;margin-top:4px">
+      <button class="big-btn" onclick="reshuffleGame()">↺ reshuffle</button>
+      <button class="sec-btn" id="solveBtn" onclick="showSolution()" style="height:auto;padding:6px 8px;line-height:1.3">
+        🔍 autosolve<br>
+        <span style="font-size:9px;color:var(--mut);font-weight:normal">(takes a long time on hard puzzles)</span>
+      </button>
+      <div id="solveStatus" style="display:none;font-size:9px;color:var(--mut);text-align:center;padding:2px 0"></div>
+
+    </div>
+    <div class="panel" id="layoutStatsPanel" style="display:none">
+      <div class="ptitle">records</div>
+      <div id="layoutStatsContent"></div>
+      <button class="sec-btn" style="margin-top:8px" onclick="clearLayoutStats()">clear records</button>
+    </div>
+    <button class="big-btn" onclick="showScreen('editor')" style="margin-top:4px">← edit layout</button>
+    <div class="win-overlay" id="winOverlay">
+      <div class="win-t">SOLVED!</div>
+      <div class="win-s" id="winStats"></div>
+      <button class="big-btn"
+              onclick="reshuffleGame();document.getElementById('winOverlay').classList.remove('show')">
+        play again
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Scripts (load order matters — dependencies first) ── -->
+<script src="js/constants.js"></script>
+<script src="js/builtins.js"></script>
+<script src="js/solver.js"></script>
+<script src="js/utils.js"></script>
+<script src="js/audio.js"></script>
+<script src="js/layout.js"></script>
+<script src="js/editor.js"></script>
+<script src="js/game.js"></script>
+<script src="js/main.js"></script>
+
+</body>
+</html>

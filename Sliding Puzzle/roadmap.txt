@@ -1,0 +1,19 @@
+-Fix bugs with new implementation of non-rectangular tiles
+-Don't allow placing a barrier on the interior of a tile
+-Toggle to show move arrows even in non-ambiguous cases
+-Fix wrong and goal hovers with multi-cell tiles
+-Save and remember settings
+-Implement best time tracking
+-Implement default uneditable layouts
+-Improve quality of scrambles
+-Implement solver
+Improve transition between editor and play
+-Add more builtin layouts
+Add additional levels as builtins and add pages
+Stop scrambling on app start
+Fix speed slider to be readable
+-Check parameters for scrambler are optimal
+Clicking reshuffle or view solution should register the most recent time as a DNF
+Fix fonts
+Improve general appearance and layout
+Add "by Reuben Malcolm (reubogames)" next to the title
