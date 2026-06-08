@@ -201,7 +201,7 @@ const BUILTIN_LAYOUTS = {
 
   'builtin_restricted_loopover': {
     // 5×5, all single-cell, all rows wrap, only col 2 wraps vertically.
-    name: 'restricted loopover', builtin: true, difficulty: 2, cols: 5, rows: 5,
+    name: 'restricted loopover', builtin: true, difficulty: 1, cols: 5, rows: 5,
     cells: [
       [{type:'active'},{type:'active'},{type:'active'},{type:'active'},{type:'active'}],
       [{type:'active'},{type:'active'},{type:'active'},{type:'active'},{type:'active'}],
