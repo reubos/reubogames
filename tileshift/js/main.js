@@ -19,6 +19,18 @@ renderMarkPicker();
 syncOptionCheckboxes();
 startGameSolved();
 
+// Spacebar to play again after solving
+document.addEventListener('keydown', e => {
+  if (e.code === 'Space') {
+    const overlay = document.getElementById('winOverlay');
+    if (overlay && overlay.classList.contains('show')) {
+      e.preventDefault();
+      reshuffleGame();
+      overlay.classList.remove('show');
+    }
+  }
+});
+
 // Stats hover: highlight wrong / show goal ghosts
 (function () {
   const mount = document.getElementById('puzzleMount');
