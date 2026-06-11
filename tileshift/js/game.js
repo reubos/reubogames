@@ -7,7 +7,7 @@ let timerInterval = null, startTime = null;
 let currentLayoutKey = '__current__';
 const options = {
   markColor: MARK_COLORS[0],
-  highlightMoves: false, highlightCorrect: true, sounds: true, showArrows: false,
+  highlightMoves: true, highlightCorrect: true, sounds: true, showArrows: false,
   solveSpeed: 250 // ms between moves during auto-solve playback
 };
 
@@ -464,7 +464,7 @@ function reshuffleGame() {
   const shuffled = _tryShuffleBoard(layout, goalPos);
   if (!shuffled) return; // failed — message already shown
   gameState = {...gameState, board: shuffled.board, tilePos: shuffled.tilePos, moves: 0, won: false,
-               scrambleMoves: shuffled.scrambleMoves || [], moveHistory: []};
+               scrambleMoves: shuffled.scrambleMoves || [], moveHistory: [], solverAssisted: false};
   document.getElementById('moveCount').textContent = '0';
   document.getElementById('misplacedV').textContent = countMisplaced(shuffled.tilePos, goalPos);
   document.getElementById('winOverlay').classList.remove('show');

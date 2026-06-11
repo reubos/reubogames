@@ -20,21 +20,26 @@ const BUILTIN_ORDER = [
   'builtin_double_cross_loopover',
   'builtin_traffic_jam',
   'builtin_domino_slide',
-  // Page 4 — group slide / bandaged
+  // Page 4 — multi-cell sliding + bandaged
+  'builtin_rush_hour',
+  'builtin_rush_hour_2',
+  'builtin_clusterf',
   'builtin_tidying_up',
   'builtin_bandaged_loopover',
   'builtin_bandaged_loopover_2',
+  // Page 5 — bandaged + structural
   'builtin_bandaged_loopover_3',
   'builtin_exploration',
-  // Page 5 — structural / barriers
   'builtin_islands',
   'builtin_around_the_bend',
   'builtin_bridge_crossings',
+  // Page 6 — hard
   'builtin_siamese',
   'builtin_ouroboros',
-  // Page 6 — hard
   'builtin_big_tile',
+  'builtin_rush_hour_3',
   'builtin_chaos',
+  // Page 7
   'builtin_sausage'
 ];
 
@@ -188,6 +193,72 @@ const BUILTIN_LAYOUTS = {
     rowWrap: [false,false,false,false,false,false],
     colWrap: [false,false,false,false],
     barriers: ['2,2,2,3','1,2,1,3','0,2,1,2','0,1,1,1','1,0,2,0','1,1,2,1','2,2,3,2','2,1,3,1','3,0,4,0','3,1,4,1','3,2,3,3']
+  },
+
+  'builtin_rush_hour': {
+    // 6×6, no wrap, no barriers. Mix of dominoes and triples, many holes.
+    // (Original layout named "rush hour 3".)
+    name: 'rush hour', builtin: true, difficulty: 2, cols: 6, rows: 6,
+    cells: [
+      [{type:'active',group:1}, {type:'active',group:1}, {type:'hole'},          {type:'active',group:3}, {type:'active',group:4}, {type:'blocked'}       ],
+      [{type:'active',group:2}, {type:'active',group:2}, {type:'active',group:2},{type:'active',group:3}, {type:'active',group:4}, {type:'hole'}          ],
+      [{type:'active',group:5}, {type:'active',group:6}, {type:'active',group:6},{type:'active',group:7}, {type:'hole'},           {type:'hole'}          ],
+      [{type:'active',group:5}, {type:'hole'},           {type:'active',group:8},{type:'active',group:7}, {type:'active',group:12},{type:'active',group:12}],
+      [{type:'hole'},           {type:'hole'},           {type:'active',group:8},{type:'active',group:10},{type:'active',group:10},{type:'active',group:11}],
+      [{type:'hole'},           {type:'active',group:9}, {type:'active',group:9},{type:'hole'},           {type:'blocked'},        {type:'active',group:11}]
+    ],
+    rowWrap: [false,false,false,false,false,false],
+    colWrap: [false,false,false,false,false,false],
+    barriers: []
+  },
+
+  'builtin_rush_hour_2': {
+    // 6×6, no wrap, one blocked cell at (0,3). Mix of dominoes and triples, many holes.
+    name: 'rush hour 2', builtin: true, difficulty: 2, cols: 6, rows: 6,
+    cells: [
+      [{type:'active',group:1}, {type:'active',group:2}, {type:'active',group:2}, {type:'blocked'},        {type:'hole'},           {type:'hole'}          ],
+      [{type:'active',group:1}, {type:'hole'},           {type:'hole'},           {type:'active',group:5}, {type:'active',group:6}, {type:'active',group:6}],
+      [{type:'active',group:3}, {type:'active',group:4}, {type:'active',group:4}, {type:'active',group:5}, {type:'hole'},           {type:'hole'}          ],
+      [{type:'active',group:3}, {type:'hole'},           {type:'active',group:9}, {type:'active',group:8}, {type:'active',group:8}, {type:'active',group:7}],
+      [{type:'active',group:12},{type:'active',group:12},{type:'active',group:9}, {type:'hole'},           {type:'hole'},           {type:'active',group:7}],
+      [{type:'active',group:11},{type:'active',group:11},{type:'active',group:10},{type:'active',group:10},{type:'active',group:10},{type:'active',group:7}]
+    ],
+    rowWrap: [false,false,false,false,false,false],
+    colWrap: [false,false,false,false,false,false],
+    barriers: []
+  },
+
+  'builtin_clusterf': {
+    // 6×6, no wrap, 2 barriers. L-shape, triples, vertical dominoes, a 2×2 block, many holes top-left/bottom-left.
+    name: 'clusterf', builtin: true, difficulty: 2, cols: 6, rows: 6,
+    cells: [
+      [{type:'hole'},          {type:'hole'},          {type:'hole'},          {type:'hole'},          {type:'active',group:2}, {type:'active',group:3}],
+      [{type:'hole'},          {type:'active',group:1},{type:'active',group:1},{type:'active',group:1},{type:'active',group:2}, {type:'active',group:3}],
+      [{type:'active',group:5},{type:'active',group:5},{type:'active',group:9},{type:'active',group:4},{type:'hole'},           {type:'hole'}          ],
+      [{type:'hole'},          {type:'active',group:5},{type:'active',group:9},{type:'active',group:4},{type:'active',group:6}, {type:'active',group:6}],
+      [{type:'hole'},          {type:'active',group:7},{type:'active',group:7},{type:'active',group:7},{type:'active',group:6}, {type:'active',group:6}],
+      [{type:'hole'},          {type:'hole'},          {type:'hole'},          {type:'active',group:8},{type:'active',group:8}, {type:'hole'}          ]
+    ],
+    rowWrap: [false,false,false,false,false,false],
+    colWrap: [false,false,false,false,false,false],
+    barriers: ['0,2,0,3','2,0,3,0']
+  },
+
+  'builtin_rush_hour_3': {
+    // 6×6, no wrap, no barriers. Densely packed mix of dominoes and triples.
+    // (Original layout named "rush hour".)
+    name: 'rush hour 3', builtin: true, difficulty: 3, cols: 6, rows: 6,
+    cells: [
+      [{type:'active',group:1}, {type:'active',group:2}, {type:'active',group:2}, {type:'hole'},           {type:'active',group:13},{type:'hole'}          ],
+      [{type:'active',group:1}, {type:'active',group:3}, {type:'active',group:4}, {type:'hole'},           {type:'active',group:13},{type:'active',group:12}],
+      [{type:'active',group:1}, {type:'active',group:3}, {type:'active',group:4}, {type:'active',group:11},{type:'active',group:11},{type:'active',group:12}],
+      [{type:'active',group:5}, {type:'active',group:5}, {type:'active',group:5}, {type:'active',group:7}, {type:'hole'},           {type:'active',group:12}],
+      [{type:'hole'},           {type:'hole'},           {type:'active',group:6}, {type:'active',group:7}, {type:'active',group:10},{type:'active',group:10}],
+      [{type:'active',group:9}, {type:'active',group:9}, {type:'active',group:6}, {type:'active',group:8}, {type:'active',group:8}, {type:'hole'}          ]
+    ],
+    rowWrap: [false,false,false,false,false,false],
+    colWrap: [false,false,false,false,false,false],
+    barriers: []
   },
 
   'builtin_traffic_jam': {
