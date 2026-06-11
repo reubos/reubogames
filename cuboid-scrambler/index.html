@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cuboid Scramble Generator</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/tabler-icons.min.css">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #f5f5f0;
+      color: #1a1a18;
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      padding: 2rem 1rem;
+    }
+
+    .container {
+      width: 100%;
+      max-width: 680px;
+    }
+
+    h1 {
+      font-size: 22px;
+      font-weight: 500;
+      margin-bottom: 1.5rem;
+    }
+
+    label {
+      font-size: 13px;
+      color: #666;
+      display: block;
+      margin-bottom: 6px;
+    }
+
+    .inputs {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 16px;
+      margin-bottom: 1.25rem;
+    }
+
+    input[type="number"] {
+      width: 100%;
+      text-align: center;
+      font-size: 18px;
+      font-weight: 500;
+      padding: 8px;
+      border: 0.5px solid #ccc;
+      border-radius: 8px;
+      background: #fff;
+      color: #1a1a18;
+      outline: none;
+    }
+
+    input[type="number"]:focus {
+      box-shadow: 0 0 0 3px rgba(0,0,0,0.1);
+    }
+
+    .slider-row {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      margin-bottom: 1.25rem;
+    }
+
+    .slider-row span {
+      font-size: 13px;
+      color: #666;
+      white-space: nowrap;
+    }
+
+    .slider-row #depth-label {
+      font-size: 13px;
+      font-weight: 500;
+      min-width: 72px;
+      text-align: right;
+      color: #1a1a18;
+    }
+
+    input[type="range"] {
+      flex: 1;
+      accent-color: #1a1a18;
+    }
+
+    button {
+      font-size: 14px;
+      padding: 8px 20px;
+      border: 0.5px solid #ccc;
+      border-radius: 8px;
+      background: #fff;
+      color: #1a1a18;
+      cursor: pointer;
+    }
+
+    button:hover { background: #f0f0ec; }
+    button:active { transform: scale(0.98); }
+
+    .phase-label {
+      font-size: 12px;
+      color: #666;
+      margin: 14px 0 6px;
+    }
+
+    .phase-label strong {
+      color: #1a1a18;
+      font-weight: 500;
+    }
+
+    .move {
+      display: inline-block;
+      font-family: 'Courier New', monospace;
+      font-size: 15px;
+      padding: 3px 6px;
+      margin: 2px;
+      border-radius: 6px;
+      background: #ebebeb;
+      border: 0.5px solid #d0d0d0;
+      color: #1a1a18;
+    }
+
+    .move.qt {
+      background: #e6f1fb;
+      border-color: #a0c4ed;
+      color: #185fa5;
+    }
+
+    .full-scramble {
+      font-family: 'Courier New', monospace;
+      font-size: 14px;
+      line-height: 1.8;
+      word-break: break-all;
+      padding: 12px 14px;
+      background: #ebebeb;
+      border: 0.5px solid #d0d0d0;
+      border-radius: 8px;
+      color: #1a1a18;
+      margin-top: 8px;
+    }
+
+    .scramble-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 4px;
+    }
+
+    .scramble-header span {
+      font-size: 12px;
+      color: #666;
+    }
+
+    .scramble-header button {
+      font-size: 12px;
+      padding: 3px 10px;
+    }
+
+    #out { margin-top: 1.25rem; }
+
+    @media (prefers-color-scheme: dark) {
+      body { background: #1a1a18; color: #e8e8e4; }
+      input[type="number"] { background: #2a2a28; border-color: #444; color: #e8e8e4; }
+      button { background: #2a2a28; border-color: #444; color: #e8e8e4; }
+      button:hover { background: #333330; }
+      label, .phase-label, .scramble-header span, .slider-row span { color: #999; }
+      .phase-label strong, .slider-row #depth-label { color: #e8e8e4; }
+      .move { background: #2a2a28; border-color: #444; color: #e8e8e4; }
+      .move.qt { background: #0c2a44; border-color: #185fa5; color: #78b4e8; }
+      .full-scramble { background: #2a2a28; border-color: #444; color: #e8e8e4; }
+      h1 { color: #e8e8e4; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Cuboid scramble generator</h1>
+
+    <div class="inputs">
+      <div>
+        <label for="iw">Width (L–R)</label>
+        <input type="number" id="iw" min="1" max="20" value="3">
+      </div>
+      <div>
+        <label for="ih">Height (U–D)</label>
+        <input type="number" id="ih" min="1" max="20" value="5">
+      </div>
+      <div>
+        <label for="id">Depth (F–B)</label>
+        <input type="number" id="id" min="1" max="20" value="7">
+      </div>
+    </div>
+
+    <div class="slider-row">
+      <span>Quick</span>
+      <input type="range" id="depth-slider" min="0" max="10" step="1" value="7">
+      <span>Thorough</span>
+      <span id="depth-label">24 / 12</span>
+    </div>
+
+    <button onclick="doGenerate()">Generate scramble</button>
+
+    <div id="out"></div>
+  </div>
+
+  <script>
+    function getN() {
+      const s = parseInt(document.getElementById('depth-slider').value);
+      return { n1: 10 + s * 2, nk: 5 + s };
+    }
+
+    document.getElementById('depth-slider').addEventListener('input', function () {
+      const { n1, nk } = getN();
+      document.getElementById('depth-label').textContent = n1 + ' / ' + nk;
+    });
+
+    function faceAxis(f) { return f === 'R' || f === 'L' ? 'x' : f === 'U' || f === 'D' ? 'y' : 'z'; }
+    function faceAvail(f, w, h, d) { return f === 'R' || f === 'L' ? w >= 2 : f === 'U' || f === 'D' ? h >= 2 : d >= 2; }
+    function faceQT(f, w, h, d) {
+      if (f === 'R' || f === 'L') return h === d;
+      if (f === 'U' || f === 'D') return w === d;
+      return w === h;
+    }
+    function maxLayers(f, w, h, d) {
+      if (f === 'R' || f === 'L') return Math.floor(w / 2);
+      if (f === 'U' || f === 'D') return Math.floor(h / 2);
+      return Math.floor(d / 2);
+    }
+    function getTemplates(w, h, d) {
+      const out = [];
+      for (const f of ['R', 'L', 'U', 'D', 'F', 'B']) {
+        if (!faceAvail(f, w, h, d)) continue;
+        const qt = faceQT(f, w, h, d);
+        const ml = maxLayers(f, w, h, d);
+        for (let l = 1; l <= ml; l++) out.push({ face: f, layer: l, qt });
+      }
+      return out;
+    }
+    function facesQT(w, h, d) {
+      const a = [];
+      if (w >= 2 && h === d) a.push('R/L');
+      if (h >= 2 && w === d) a.push('U/D');
+      if (d >= 2 && w === h) a.push('F/B');
+      return a;
+    }
+    function canInc(w, h, d) {
+      const opts = [];
+      if (w >= 2 && h > 1 && d > 1 && h !== d && h % 2 === d % 2) opts.push({ label: 'R/L', hi: Math.max(h, d), lo: Math.min(h, d), idx: [1, 2] });
+      if (h >= 2 && w > 1 && d > 1 && w !== d && w % 2 === d % 2) opts.push({ label: 'U/D', hi: Math.max(w, d), lo: Math.min(w, d), idx: [0, 2] });
+      if (d >= 2 && w > 1 && h > 1 && w !== h && w % 2 === h % 2) opts.push({ label: 'F/B', hi: Math.max(w, h), lo: Math.min(w, h), idx: [0, 1] });
+      return opts;
+    }
+    function applyRed(dims, opt) {
+      const nd = [...dims];
+      const [i, j] = opt.idx;
+      if (nd[i] > nd[j]) nd[i] = opt.lo; else nd[j] = opt.lo;
+      return nd;
+    }
+    function getPath(w, h, d) {
+      const stages = [];
+      let dims = [w, h, d];
+      for (let iter = 0; iter < 20; iter++) {
+        const qt = facesQT(...dims);
+        const inc = canInc(...dims);
+        stages.push({ dims: [...dims], qt, inc });
+        if (!inc.length) break;
+        const maxHi = Math.max(...inc.map(o => o.hi));
+        const topHi = inc.filter(o => o.hi === maxHi);
+        const maxLo = Math.max(...topHi.map(o => o.lo));
+        const top = topHi.filter(o => o.lo === maxLo);
+        const best = top[Math.floor(Math.random() * top.length)];
+        dims = applyRed(dims, best);
+      }
+      return stages;
+    }
+    function makeMove(t) {
+      const pre = t.layer > 1 ? String(t.layer) : '';
+      const mod = t.qt ? ["", "'", "2"][Math.floor(Math.random() * 3)] : '2';
+      return pre + t.face + mod;
+    }
+    function scramblePhase(templates, n, lastAxisRef) {
+      const moves = [];
+      let lastFace = null, lastLayer = null;
+      for (let j = 0; j < n; j++) {
+        let avail = templates.filter(t => faceAxis(t.face) !== lastAxisRef.v);
+        if (!avail.length) {
+          avail = templates.filter(t => !(t.face === lastFace && t.layer === lastLayer));
+        }
+        if (!avail.length) avail = templates;
+        if (!avail.length) break;
+        const t = avail[Math.floor(Math.random() * avail.length)];
+        lastAxisRef.v = faceAxis(t.face);
+        lastFace = t.face; lastLayer = t.layer;
+        moves.push(makeMove(t));
+      }
+      return moves;
+    }
+    function phaseDesc(dims, qt) {
+      const [w, h, d] = dims;
+      const avail = [];
+      if (w >= 2) avail.push('R/L');
+      if (h >= 2) avail.push('U/D');
+      if (d >= 2) avail.push('F/B');
+      if (!avail.length) return 'no moves available';
+      const half = avail.filter(f => !qt.includes(f));
+      const parts = [];
+      if (qt.length) parts.push(qt.join(', ') + ' quarter turns');
+      if (half.length) parts.push(half.join(', ') + ' half turns only');
+      return parts.join(' · ');
+    }
+    function doGenerate() {
+      const W = Math.max(1, parseInt(document.getElementById('iw').value) || 1);
+      const H = Math.max(1, parseInt(document.getElementById('ih').value) || 1);
+      const D = Math.max(1, parseInt(document.getElementById('id').value) || 1);
+      const { n1, nk } = getN();
+      const stages = getPath(W, H, D);
+      const lastAxis = { v: null };
+      const phasesData = [];
+      for (let i = 0; i < stages.length; i++) {
+        const [w, h, d] = stages[i].dims;
+        const tmpl = getTemplates(w, h, d);
+        if (!tmpl.length) continue;
+        const moves = scramblePhase(tmpl, i === 0 ? n1 : nk, lastAxis);
+        if (moves.length) phasesData.push({ dims: stages[i].dims, qt: stages[i].qt, moves });
+      }
+      const out = document.getElementById('out');
+      if (!phasesData.length) {
+        out.innerHTML = '<p style="color:#666;font-size:14px;margin-top:1rem;">No moves possible for this puzzle.</p>';
+        return;
+      }
+      const allMoves = phasesData.flatMap(p => p.moves);
+      let html = '';
+      phasesData.forEach(p => {
+        const [w, h, d] = p.dims;
+        html += `<div class="phase-label"><strong>${w}×${h}×${d}</strong> — ${phaseDesc(p.dims, p.qt)}</div><div>`;
+        p.moves.forEach(m => { html += `<span class="move${!m.endsWith('2') ? ' qt' : ''}">${m}</span>`; });
+        html += `</div>`;
+      });
+      html += `<div style="margin-top:1.25rem;">
+        <div class="scramble-header">
+          <span>Full scramble (${allMoves.length} moves)</span>
+          <button onclick="copyScramble(this)"><i class="ti ti-copy" style="font-size:13px;margin-right:4px;vertical-align:-1px;"></i>Copy</button>
+        </div>
+        <div class="full-scramble" id="full-scr">${allMoves.join(' ')}</div>
+      </div>`;
+      out.innerHTML = html;
+    }
+    function copyScramble(btn) {
+      navigator.clipboard.writeText(document.getElementById('full-scr').textContent).then(() => {
+        btn.textContent = 'Copied!';
+        setTimeout(() => { btn.innerHTML = '<i class="ti ti-copy" style="font-size:13px;margin-right:4px;vertical-align:-1px;"></i>Copy'; }, 1500);
+      });
+    }
+
+    doGenerate();
+  </script>
+</body>
+</html>
