@@ -407,11 +407,12 @@
       }
       return false;
     }
-    function scramblePhase(templates, n, lastRef, dims) {
+    function scramblePhase(templates, n, lastRef, dims, forcedFirst) {
       const moves = [];
       for (let j = 0; j < n; j++) {
-        let avail = templates.filter(t => !conflicts(t, lastRef, dims));
-        if (!avail.length) avail = templates;
+        const pool = (j === 0 && forcedFirst && forcedFirst.length) ? forcedFirst : templates;
+        let avail = pool.filter(t => !conflicts(t, lastRef, dims));
+        if (!avail.length) avail = pool;
         if (!avail.length) break;
         const t = avail[Math.floor(Math.random() * avail.length)];
         lastRef.face = t.face;
@@ -441,11 +442,15 @@
       const stages = getPath(W, H, D);
       const lastRef = { face: null, layer: null };
       const phasesData = [];
+      let prevTmplKeys = new Set();
       for (let i = 0; i < stages.length; i++) {
         const [w, h, d] = stages[i].dims;
         const tmpl = getTemplates(w, h, d);
         if (!tmpl.length) continue;
-        const moves = scramblePhase(tmpl, i === 0 ? n1 : nk, lastRef, stages[i].dims);
+        const tmplKeys = new Set(tmpl.map(t => t.face + ':' + t.layer));
+        const forcedFirst = i === 0 ? null : tmpl.filter(t => !prevTmplKeys.has(t.face + ':' + t.layer));
+        prevTmplKeys = tmplKeys;
+        const moves = scramblePhase(tmpl, i === 0 ? n1 : nk, lastRef, stages[i].dims, forcedFirst);
         if (moves.length) phasesData.push({ dims: stages[i].dims, qt: stages[i].qt, moves });
       }
       const out = document.getElementById('out');
