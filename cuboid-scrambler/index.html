@@ -415,7 +415,7 @@
       return x ? { layer: x[1] ? parseInt(x[1]) : 1, face: x[2], mod: x[3] || '' } : null;
     }
     function cuboidSVG(W, H, D, face, layer, mod) {
-      const VW=160,VH=100,PL=28,PR=14,PT=10,PB=18;
+      const VW=190,VH=130,PL=32,PR=16,PT=22,PB=22;
       const dw=VW-PL-PR,dh=VH-PT-PB,AX=0.48,AY=0.28;
       let s=Math.min(dw/(W+D*AX),dh/(H+D*AY),16);
       const cw=W*s,ch=H*s,ddx=D*s*AX,ddy=D*s*AY;
@@ -469,7 +469,7 @@
       svg+=`<polygon points="${ps(['fbl','fbr','ftr','ftl'])}" fill="none" class="cv-stroke" stroke-width="1"/>`;
       // Arrow outside cuboid indicating direction of rotation
       if (mod !== undefined) {
-        const ac='#d97706', off=8;
+        const ac='#ff4500', off=8;
         function ah(x2,y2,dx,dy){const l=Math.sqrt(dx*dx+dy*dy);if(!l)return '';const ux=dx/l,uy=dy/l,s=5,bx=x2-ux*s,by=y2-uy*s;return `<polygon points="${v(x2)},${v(y2)} ${v(bx-uy*s*.5)},${v(by+ux*s*.5)} ${v(bx+uy*s*.5)},${v(by-ux*s*.5)}" fill="${ac}" stroke="none"/>`;}
         function seg(x1,y1,x2,y2){return `<line x1="${v(x1)}" y1="${v(y1)}" x2="${v(x2)}" y2="${v(y2)}" stroke="${ac}" stroke-width="1.8" fill="none"/>`;}
         function arr(x1,y1,x2,y2){return seg(x1,y1,x2,y2)+ah(x2,y2,x2-x1,y2-y1);}
