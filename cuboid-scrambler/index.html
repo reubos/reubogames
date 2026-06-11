@@ -393,6 +393,10 @@
       const mod = t.qt ? ["", "'", "2"][Math.floor(Math.random() * 3)] : '2';
       return pre + t.face + mod;
     }
+    function makeQTMove(t) {
+      const pre = t.layer > 1 ? String(t.layer) : '';
+      return pre + t.face + ["", "'"][Math.floor(Math.random() * 2)];
+    }
     const OPP = {R:'L',L:'R',U:'D',D:'U',F:'B',B:'F'};
     function conflicts(t, lastRef, dims) {
       if (lastRef.face === null) return false;
@@ -417,7 +421,8 @@
         const t = avail[Math.floor(Math.random() * avail.length)];
         lastRef.face = t.face;
         lastRef.layer = t.layer;
-        moves.push(makeMove(t));
+        const isForced = j === 0 && forcedFirst && forcedFirst.length;
+        moves.push(isForced ? makeQTMove(t) : makeMove(t));
       }
       return moves;
     }
