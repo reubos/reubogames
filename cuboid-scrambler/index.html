@@ -160,6 +160,28 @@
 
     #out { margin-top: 1.25rem; }
 
+    #cuboid-vis { margin: 1.25rem 0; display: flex; justify-content: center; }
+    #cuboid-vis svg { overflow: visible; }
+
+    @media (prefers-color-scheme: dark) {
+      .cv-front { fill: #1e3d1e; }
+      .cv-top   { fill: #274927; }
+      .cv-right { fill: #162816; }
+      .cv-stroke { stroke: #4ade80; }
+      .cv-hidden { stroke: #4ade80; opacity: 0.3; }
+      .cv-label  { fill: #d4e8d4; }
+      .cv-dim    { stroke: #86a886; }
+    }
+    @media (prefers-color-scheme: light), (prefers-color-scheme: no-preference) {
+      .cv-front { fill: #ddeedd; }
+      .cv-top   { fill: #cce0cc; }
+      .cv-right { fill: #b8cfb8; }
+      .cv-stroke { stroke: #3a6a3a; }
+      .cv-hidden { stroke: #3a6a3a; opacity: 0.25; }
+      .cv-label  { fill: #2a2a28; }
+      .cv-dim    { stroke: #5a8a5a; }
+    }
+
     @media (prefers-color-scheme: dark) {
       body { background: #1a1a18; color: #e8e8e4; }
       input[type="number"] { background: #2a2a28; border-color: #444; color: #e8e8e4; }
@@ -194,6 +216,8 @@
       </div>
     </div>
 
+    <div id="cuboid-vis"></div>
+
     <div class="slider-row">
       <span>Quick</span>
       <input type="range" id="depth-slider" min="0" max="20" step="1" value="7">
@@ -207,6 +231,66 @@
   </div>
 
   <script>
+    function drawCuboid() {
+      const W = Math.max(1, parseInt(document.getElementById('iw').value) || 1);
+      const H = Math.max(1, parseInt(document.getElementById('ih').value) || 1);
+      const D = Math.max(1, parseInt(document.getElementById('id').value) || 1);
+
+      const VW = 320, VH = 180;
+      const PL = 52, PR = 24, PT = 18, PB = 36;
+      const dw = VW - PL - PR, dh = VH - PT - PB;
+      const AX = 0.48, AY = 0.28;
+
+      let s = Math.min(dw / (W + D * AX), dh / (H + D * AY));
+      s = Math.min(s, 28);
+
+      const cw = W * s, ch = H * s, ddx = D * s * AX, ddy = D * s * AY;
+      const ox = PL + (dw - cw - ddx) / 2;
+      const oy = PT + ddy + (dh - ch - ddy) / 2 + ch;
+
+      const C = {
+        fbl:[ox,oy], fbr:[ox+cw,oy], ftr:[ox+cw,oy-ch], ftl:[ox,oy-ch],
+        bbl:[ox+ddx,oy-ddy], bbr:[ox+cw+ddx,oy-ddy],
+        btr:[ox+cw+ddx,oy-ch-ddy], btl:[ox+ddx,oy-ch-ddy]
+      };
+      const v = n => n.toFixed(1);
+      const ps = ks => ks.map(k => C[k].map(v).join(',')).join(' ');
+      const ln = (a,b,cls) => `<line x1="${v(a[0])}" y1="${v(a[1])}" x2="${v(b[0])}" y2="${v(b[1])}" class="${cls}" stroke-width="1" fill="none"/>`;
+
+      let svg = `<svg width="100%" viewBox="0 0 ${VW} ${VH}" xmlns="http://www.w3.org/2000/svg">`;
+
+      // Hidden back edges
+      svg += ln(C.fbl, C.bbl, 'cv-hidden cv-dim');
+      svg += ln(C.bbl, C.bbr, 'cv-hidden cv-dim');
+      svg += ln(C.bbl, C.btl, 'cv-hidden cv-dim');
+
+      // Three visible faces
+      svg += `<polygon points="${ps(['fbr','bbr','btr','ftr'])}" class="cv-right cv-stroke" stroke-width="1.5"/>`;
+      svg += `<polygon points="${ps(['ftl','ftr','btr','btl'])}" class="cv-top cv-stroke" stroke-width="1.5"/>`;
+      svg += `<polygon points="${ps(['fbl','fbr','ftr','ftl'])}" class="cv-front cv-stroke" stroke-width="1.5"/>`;
+
+      const lf = `font-size="11" font-family="Segoe UI, sans-serif"`;
+
+      // Width: arrow + label below front-bottom edge
+      const wMx = v(ox + cw / 2), wAy = v(oy + 7), wLy = v(oy + 19);
+      svg += `<line x1="${v(ox+2)}" y1="${wAy}" x2="${v(ox+cw-2)}" y2="${wAy}" class="cv-dim" stroke-width="1" fill="none"/>`;
+      svg += `<text x="${wMx}" y="${wLy}" text-anchor="middle" ${lf} class="cv-label">width ${W}</text>`;
+
+      // Height: arrow + label left of front-left edge
+      const hMy = v(oy - ch / 2), hAx = v(ox - 8), hLx = v(ox - 20);
+      svg += `<line x1="${hAx}" y1="${v(oy-2)}" x2="${hAx}" y2="${v(oy-ch+2)}" class="cv-dim" stroke-width="1" fill="none"/>`;
+      svg += `<text x="${hLx}" y="${hMy}" text-anchor="middle" ${lf} class="cv-label" transform="rotate(-90,${hLx},${hMy})">height ${H}</text>`;
+
+      // Depth: label along the bottom-right depth edge
+      const dMx = v((C.fbr[0] + C.bbr[0]) / 2 + 6);
+      const dMy = v((C.fbr[1] + C.bbr[1]) / 2 + 12);
+      svg += `<line x1="${v(C.fbr[0]+1)}" y1="${v(C.fbr[1]-1)}" x2="${v(C.bbr[0]-1)}" y2="${v(C.bbr[1]+1)}" class="cv-dim" stroke-width="1" fill="none"/>`;
+      svg += `<text x="${dMx}" y="${dMy}" text-anchor="start" ${lf} class="cv-label">depth ${D}</text>`;
+
+      svg += '</svg>';
+      document.getElementById('cuboid-vis').innerHTML = svg;
+    }
+
     function getN() {
       const s = parseInt(document.getElementById('depth-slider').value);
       return { n1: 10 + s * 2, nk: 5 + s };
@@ -216,6 +300,11 @@
       const { n1, nk } = getN();
       document.getElementById('depth-label').textContent = n1 + ' / ' + nk;
     });
+
+    ['iw', 'ih', 'id'].forEach(id => {
+      document.getElementById(id).addEventListener('input', drawCuboid);
+    });
+    drawCuboid();
 
     function faceAxis(f) { return f === 'R' || f === 'L' ? 'x' : f === 'U' || f === 'D' ? 'y' : 'z'; }
     function faceAvail(f, w, h, d) { return f === 'R' || f === 'L' ? w >= 2 : f === 'U' || f === 'D' ? h >= 2 : d >= 2; }
