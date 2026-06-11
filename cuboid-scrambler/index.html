@@ -442,14 +442,15 @@
       const stages = getPath(W, H, D);
       const lastRef = { face: null, layer: null };
       const phasesData = [];
-      let prevTmplKeys = new Set();
+      let prevQTFaces = new Set();
       for (let i = 0; i < stages.length; i++) {
         const [w, h, d] = stages[i].dims;
         const tmpl = getTemplates(w, h, d);
         if (!tmpl.length) continue;
-        const tmplKeys = new Set(tmpl.map(t => t.face + ':' + t.layer + ':' + t.qt));
-        const forcedFirst = i === 0 ? null : tmpl.filter(t => !prevTmplKeys.has(t.face + ':' + t.layer + ':' + t.qt));
-        prevTmplKeys = tmplKeys;
+        const curQTFaces = new Set(tmpl.filter(t => t.qt).map(t => t.face));
+        // Forced first move: outer (layer 1) quarter turn on faces that newly gained qt this phase
+        const forcedFirst = i === 0 ? null : tmpl.filter(t => t.qt && t.layer === 1 && !prevQTFaces.has(t.face));
+        prevQTFaces = curQTFaces;
         const moves = scramblePhase(tmpl, i === 0 ? n1 : nk, lastRef, stages[i].dims, forcedFirst);
         if (moves.length) phasesData.push({ dims: stages[i].dims, qt: stages[i].qt, moves });
       }
