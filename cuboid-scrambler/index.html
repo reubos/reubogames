@@ -437,21 +437,21 @@
       }
       const hp=[];
       if(face==='R'||face==='L'){
-        const j=face==='R'?W-layer:layer-1,t0=j/W,t1=(j+1)/W;
+        const t0=face==='R'?(W-layer)/W:0, t1=face==='R'?1:layer/W;
         hp.push([L(C.ftl,C.ftr,t0),L(C.ftl,C.ftr,t1),L(C.fbl,C.fbr,t1),L(C.fbl,C.fbr,t0)]);
         hp.push([L(C.btl,C.btr,t0),L(C.btl,C.btr,t1),L(C.ftl,C.ftr,t1),L(C.ftl,C.ftr,t0)]);
-        if(face==='R'&&layer===1)hp.push([C.ftr,C.btr,C.bbr,C.fbr]);
+        if(face==='R')hp.push([C.ftr,C.btr,C.bbr,C.fbr]);
       }else if(face==='U'||face==='D'){
-        const j=face==='U'?layer-1:H-layer,t0=j/H,t1=(j+1)/H;
+        const t0=face==='U'?0:(H-layer)/H, t1=face==='U'?layer/H:1;
         hp.push([L(C.ftl,C.fbl,t0),L(C.ftr,C.fbr,t0),L(C.ftr,C.fbr,t1),L(C.ftl,C.fbl,t1)]);
         hp.push([L(C.ftr,C.fbr,t0),L(C.btr,C.bbr,t0),L(C.btr,C.bbr,t1),L(C.ftr,C.fbr,t1)]);
-        if(face==='U'&&layer===1)hp.push([C.btl,C.btr,C.ftr,C.ftl]);
+        if(face==='U')hp.push([C.btl,C.btr,C.ftr,C.ftl]);
       }else if(face==='F'||face==='B'){
-        const rj=face==='F'?D-layer:layer-1,rt0=rj/D,rt1=(rj+1)/D;
+        const rt0=face==='F'?(D-layer)/D:0, rt1=face==='F'?1:layer/D;
         hp.push([L(C.btl,C.ftl,rt0),L(C.btr,C.ftr,rt0),L(C.btr,C.ftr,rt1),L(C.btl,C.ftl,rt1)]);
-        const cj=face==='F'?layer-1:D-layer,ct0=cj/D,ct1=(cj+1)/D;
+        const ct0=face==='F'?0:(D-layer)/D, ct1=face==='F'?layer/D:1;
         hp.push([L(C.ftr,C.btr,ct0),L(C.ftr,C.btr,ct1),L(C.fbr,C.bbr,ct1),L(C.fbr,C.bbr,ct0)]);
-        if(face==='F'&&layer===1)hp.push([C.ftl,C.ftr,C.fbr,C.fbl]);
+        if(face==='F')hp.push([C.ftl,C.ftr,C.fbr,C.fbl]);
       }
       let svg=`<svg width="${VW}" height="${VH}" viewBox="0 0 ${VW} ${VH}" xmlns="http://www.w3.org/2000/svg">`;
       svg+=`<line x1="${v(C.fbl[0])}" y1="${v(C.fbl[1])}" x2="${v(C.bbl[0])}" y2="${v(C.bbl[1])}" class="cv-hidden cv-dim" stroke-width="0.8" fill="none"/>`;
