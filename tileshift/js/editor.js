@@ -325,6 +325,16 @@ function revertLayout() {
   buildSavedLayoutButtons();
 }
 
+function renameLayout(key, newName) {
+  const trimmed = newName.trim();
+  if (!trimmed) return;
+  const saved = loadSavedLayouts();
+  if (!saved[key]) return;
+  saved[key].name = trimmed;
+  localStorage.setItem('tileshift_layouts', JSON.stringify(saved));
+  buildSavedLayoutButtons();
+}
+
 function deleteLayout(key) {
   if (key.startsWith('builtin_')) return;
   const saved = loadSavedLayouts();
@@ -448,6 +458,32 @@ function buildSavedLayoutButtons() {
     handle.textContent = '⠿';
     handle.style.cssText = 'display:flex;align-items:center;padding:0 4px;color:var(--mut);cursor:grab;font-size:14px;flex-shrink:0';
 
+    const ren = document.createElement('button');
+    ren.className = 'tbtn';
+    ren.style.cssText = 'flex-shrink:0;font-size:11px;padding:0 6px';
+    ren.textContent = '✏';
+    ren.title = 'rename';
+    ren.addEventListener('click', () => {
+      const btn = row.querySelector('.pi');
+      const nameSpan = btn?.querySelector('.pn');
+      if (!nameSpan) return;
+      const currentName = p.name;
+      const input = document.createElement('input');
+      input.value = currentName;
+      input.style.cssText = 'width:100%;background:var(--surf2);border:1px solid var(--acc);color:var(--txt);font-family:inherit;font-size:10px;padding:1px 4px;outline:none';
+      nameSpan.replaceWith(input);
+      input.focus();
+      input.select();
+      const commit = () => {
+        renameLayout(key, input.value);
+      };
+      input.addEventListener('keydown', e => {
+        if (e.key === 'Enter') { e.preventDefault(); commit(); }
+        if (e.key === 'Escape') { buildSavedLayoutButtons(); }
+      });
+      input.addEventListener('blur', commit);
+    });
+
     const del = document.createElement('button');
     del.className = 'tbtn';
     del.style.cssText = 'flex-shrink:0;color:#ff4466;border-color:#3a0010;font-size:14px;padding:0 7px';
@@ -478,7 +514,7 @@ function buildSavedLayoutButtons() {
       buildSavedLayoutButtons();
     });
 
-    row.appendChild(handle); row.appendChild(makeBtn(key, p)); row.appendChild(del);
+    row.appendChild(handle); row.appendChild(makeBtn(key, p)); row.appendChild(ren); row.appendChild(del);
     list.appendChild(row);
   });
 

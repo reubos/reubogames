@@ -327,8 +327,7 @@ async function showSolution() {
     if (idx >= moves.length) { stopAutoSolve(); return; }
     const m = moves[idx];
     if (m.slide) {
-      if (m.axis === 'row') _solverSlideRow(m.index, m.dir);
-      else                  _solverSlideCol(m.index, m.dir);
+      _solverApplySlide(m);
     } else {
       _solverMove(m.id, m.dr, m.dc);
     }
@@ -369,6 +368,36 @@ function startGameSolved() {
   document.getElementById('winOverlay').classList.remove('show');
   renderPuzzle();
   renderLayoutStats();
+}
+
+function _setShuffling(on) {
+  document.body.classList.toggle('is-shuffling', on);
+}
+
+function reshuffleWithFeedback(btn, before) {
+  const orig = btn.textContent;
+  btn.textContent = 'shuffling...';
+  btn.disabled = true;
+  _setShuffling(true);
+  setTimeout(() => {
+    if (before) before();
+    reshuffleGame();
+    btn.textContent = orig;
+    btn.disabled = false;
+    _setShuffling(false);
+  }, 0);
+}
+
+function startGameAndPlay() {
+  const btn = document.getElementById('playBtn');
+  if (btn) { btn.textContent = 'shuffling...'; btn.disabled = true; }
+  _setShuffling(true);
+  setTimeout(() => {
+    startGame();
+    showScreen('play');
+    if (btn) { btn.textContent = 'play ▶'; btn.disabled = false; }
+    _setShuffling(false);
+  }, 0);
 }
 
 function startGame() {
@@ -505,19 +534,10 @@ function _solverMove(id, dr, dc) {
   afterMove();
 }
 
-function _solverSlideRow(row, dir) {
+function _solverApplySlide(m) {
   if (!gameState || gameState.won) return;
   tickTimer();
-  slideRow(gameState.board, gameState.tilePos, row, dir, gameState.layout);
-  gameState.moves++;
-  playMove();
-  afterMove();
-}
-
-function _solverSlideCol(col, dir) {
-  if (!gameState || gameState.won) return;
-  tickTimer();
-  slideCol(gameState.board, gameState.tilePos, col, dir, gameState.layout);
+  applySlideMove(gameState.board, gameState.tilePos, m, gameState.layout);
   gameState.moves++;
   playMove();
   afterMove();
@@ -539,6 +559,26 @@ function doSlideCol(col, dir) {
   slideCol(gameState.board, gameState.tilePos, col, dir, gameState.layout);
   gameState.moves++;
   gameState.moveHistory.push({slide: true, axis: 'col', index: col, dir});
+  playMove();
+  afterMove();
+}
+
+function doSlideRowGroup(indices, dir) {
+  if (!gameState || gameState.won) return;
+  tickTimer();
+  slideRowGroup(gameState.board, gameState.tilePos, indices, dir, gameState.layout);
+  gameState.moves++;
+  gameState.moveHistory.push({slide: true, axis: 'row', indices, dir});
+  playMove();
+  afterMove();
+}
+
+function doSlideColGroup(indices, dir) {
+  if (!gameState || gameState.won) return;
+  tickTimer();
+  slideColGroup(gameState.board, gameState.tilePos, indices, dir, gameState.layout);
+  gameState.moves++;
+  gameState.moveHistory.push({slide: true, axis: 'col', indices, dir});
   playMove();
   afterMove();
 }
@@ -590,18 +630,23 @@ function renderPuzzle() {
     const d = document.createElement('div');
     d.style.cssText = `width:${TS}px;height:16px;display:flex;align-items:center;justify-content:center;font-size:9px;color:var(--cyan)`;
     if (colWrap[c]) {
-      if (canSlideCol(board, tilePos, c, layout)) {
+      const _colGroup = getColGroup(board, tilePos, c, layout);
+      const _colCanSlide = canSlideCol(board, tilePos, c, layout);
+      const _colGroupSlide = !_colCanSlide && canSlideColGroup(board, tilePos, _colGroup, layout);
+      if (_colCanSlide || _colGroupSlide) {
         d.style.gap = '2px';
         const bu = document.createElement('button');
         bu.className = 'slide-btn';
         bu.style.cssText = `flex:1;height:16px;font-size:${ASZ}px`;
         bu.textContent = '▲';
-        bu.addEventListener('click', () => doSlideCol(c, -1));
+        if (_colGroupSlide) bu.title = `slides ${_colGroup.length} cols together`;
+        bu.addEventListener('click', () => _colCanSlide ? doSlideCol(c, -1) : doSlideColGroup(_colGroup, -1));
         const bd = document.createElement('button');
         bd.className = 'slide-btn';
         bd.style.cssText = `flex:1;height:16px;font-size:${ASZ}px`;
         bd.textContent = '▼';
-        bd.addEventListener('click', () => doSlideCol(c, 1));
+        if (_colGroupSlide) bd.title = `slides ${_colGroup.length} cols together`;
+        bd.addEventListener('click', () => _colCanSlide ? doSlideCol(c, 1) : doSlideColGroup(_colGroup, 1));
         d.appendChild(bu); d.appendChild(bd);
       } else {
         d.textContent = '↕';
@@ -636,17 +681,22 @@ function renderPuzzle() {
     const lbl = document.createElement('div');
     lbl.style.cssText = `width:${wLW}px;height:${TS}px;flex-shrink:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;font-size:9px;color:var(--cyan)`;
     if (rowWrap[r]) {
-      if (canSlideRow(board, tilePos, r, layout)) {
+      const _rowGroup = getRowGroup(board, tilePos, r, layout);
+      const _rowCanSlide = canSlideRow(board, tilePos, r, layout);
+      const _rowGroupSlide = !_rowCanSlide && canSlideRowGroup(board, tilePos, _rowGroup, layout);
+      if (_rowCanSlide || _rowGroupSlide) {
         const bl = document.createElement('button');
         bl.className = 'slide-btn';
         bl.style.cssText = `width:${wLW-2}px;height:${Math.floor(TS/2)-1}px;font-size:${ASZ}px`;
         bl.textContent = '◀';
-        bl.addEventListener('click', () => doSlideRow(r, -1));
+        if (_rowGroupSlide) bl.title = `slides ${_rowGroup.length} rows together`;
+        bl.addEventListener('click', () => _rowCanSlide ? doSlideRow(r, -1) : doSlideRowGroup(_rowGroup, -1));
         const br = document.createElement('button');
         br.className = 'slide-btn';
         br.style.cssText = `width:${wLW-2}px;height:${Math.floor(TS/2)-1}px;font-size:${ASZ}px`;
         br.textContent = '▶';
-        br.addEventListener('click', () => doSlideRow(r, 1));
+        if (_rowGroupSlide) br.title = `slides ${_rowGroup.length} rows together`;
+        br.addEventListener('click', () => _rowCanSlide ? doSlideRow(r, 1) : doSlideRowGroup(_rowGroup, 1));
         lbl.appendChild(bl); lbl.appendChild(br);
       } else {
         lbl.textContent = '↔';
@@ -693,6 +743,57 @@ function renderPuzzle() {
         bDiv.appendChild(seg);
       }
       area.appendChild(bDiv);
+    }
+  }
+
+  // Group slide indicator lines — drawn over the arrow area to show which rows/cols move together
+  const seenRowGroupLines = new Set();
+  for (let r = 0; r < rows; r++) {
+    if (!rowWrap[r]) continue;
+    const grp = getRowGroup(board, tilePos, r, layout);
+    const gk = grp.join(',');
+    if (seenRowGroupLines.has(gk)) continue;
+    seenRowGroupLines.add(gk);
+    if (grp.length < 2 || !canSlideRowGroup(board, tilePos, grp, layout)) continue;
+    // Split into contiguous runs and draw one line per run
+    const rowRuns = [];
+    let rStart = grp[0], rEnd = grp[0];
+    for (let i = 1; i < grp.length; i++) {
+      if (grp[i] === rEnd + 1) { rEnd = grp[i]; }
+      else { rowRuns.push([rStart, rEnd]); rStart = rEnd = grp[i]; }
+    }
+    rowRuns.push([rStart, rEnd]);
+    for (const [r1, r2] of rowRuns) {
+      const lineTop    = colWrapH + r1 * (TS + PG);
+      const lineBottom = colWrapH + r2 * (TS + PG) + TS;
+      const line = document.createElement('div');
+      line.style.cssText = `position:absolute;left:${lnW + wLW - 2}px;top:${lineTop}px;width:2px;height:${lineBottom - lineTop}px;background:var(--cyan);pointer-events:none;border-radius:1px`;
+      area.appendChild(line);
+    }
+  }
+  const seenColGroupLines = new Set();
+  for (let c = 0; c < cols; c++) {
+    if (!colWrap[c]) continue;
+    const grp = getColGroup(board, tilePos, c, layout);
+    const gk = grp.join(',');
+    if (seenColGroupLines.has(gk)) continue;
+    seenColGroupLines.add(gk);
+    if (grp.length < 2 || !canSlideColGroup(board, tilePos, grp, layout)) continue;
+    // Split into contiguous runs and draw one line per run
+    const colRuns = [];
+    let cStart = grp[0], cEnd = grp[0];
+    for (let i = 1; i < grp.length; i++) {
+      if (grp[i] === cEnd + 1) { cEnd = grp[i]; }
+      else { colRuns.push([cStart, cEnd]); cStart = cEnd = grp[i]; }
+    }
+    colRuns.push([cStart, cEnd]);
+    const lineY = coordLabelH + 2 + 15;
+    for (const [c1, c2] of colRuns) {
+      const lineLeft  = leftOff + c1 * (TS + PG);
+      const lineRight = leftOff + c2 * (TS + PG) + TS;
+      const line = document.createElement('div');
+      line.style.cssText = `position:absolute;left:${lineLeft}px;top:${lineY}px;width:${lineRight - lineLeft}px;height:2px;background:var(--cyan);pointer-events:none;border-radius:1px`;
+      area.appendChild(line);
     }
   }
 

@@ -220,6 +220,145 @@ function slideCol(board, tilePos, col, dir, layout) {
 }
 
 // ---------------------------------------------------------------------------
+// Multi-row / multi-col group sliding (for tiles that span across rows/cols)
+// ---------------------------------------------------------------------------
+
+// Returns sorted array of all rows transitively linked to seedRow via multi-row tiles.
+function getRowGroup(board, tilePos, seedRow, layout) {
+  const {rows, cols} = layout;
+  const group = new Set([seedRow]);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const r of group) {
+      for (let c = 0; c < cols; c++) {
+        const id = board[r * cols + c];
+        if (id <= 0) continue;
+        const pos = tilePos.get(id);
+        if (!pos) continue;
+        for (const {dr} of pos.cells) {
+          const cellRow = mod(pos.r + dr, rows);
+          if (!group.has(cellRow)) { group.add(cellRow); changed = true; }
+        }
+      }
+    }
+  }
+  return [...group].sort((a, b) => a - b);
+}
+
+// Returns true if all rows in groupRows can slide together.
+function canSlideRowGroup(board, tilePos, groupRows, layout) {
+  const {cols, rows, rowWrap} = layout;
+  const groupSet = new Set(groupRows);
+  for (const r of groupRows) {
+    if (!rowWrap[r]) return false;
+    for (let c = 0; c < cols; c++) {
+      const id = board[r * cols + c];
+      if (id <= 0) return false;
+      const pos = tilePos.get(id);
+      if (!pos) return false;
+      if (!pos.cells.every(({dr}) => groupSet.has(mod(pos.r + dr, rows)))) return false;
+      if (c > 0 && hasBarrierL(layout, r, c - 1, r, c)) return false;
+    }
+  }
+  return true;
+}
+
+// Slides all rows in groupRows simultaneously by dir.
+function slideRowGroup(board, tilePos, groupRows, dir, layout) {
+  const {cols} = layout;
+  const rowData = {};
+  for (const r of groupRows) rowData[r] = Array.from({length: cols}, (_, c) => board[r * cols + c]);
+  const seen = new Set();
+  for (const r of groupRows) {
+    const ids = rowData[r];
+    const s = dir === 1 ? [ids[cols - 1], ...ids.slice(0, -1)] : [...ids.slice(1), ids[0]];
+    for (let c = 0; c < cols; c++) board[r * cols + c] = s[c];
+    for (let c = 0; c < cols; c++) {
+      const id = s[c];
+      if (id > 0 && !seen.has(id)) {
+        seen.add(id);
+        const pos = tilePos.get(id);
+        tilePos.set(id, {...pos, c: mod(pos.c + dir, cols)});
+      }
+    }
+  }
+}
+
+// Returns sorted array of all cols transitively linked to seedCol via multi-col tiles.
+function getColGroup(board, tilePos, seedCol, layout) {
+  const {rows, cols} = layout;
+  const group = new Set([seedCol]);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const c of group) {
+      for (let r = 0; r < rows; r++) {
+        const id = board[r * cols + c];
+        if (id <= 0) continue;
+        const pos = tilePos.get(id);
+        if (!pos) continue;
+        for (const {dc} of pos.cells) {
+          const cellCol = mod(pos.c + dc, cols);
+          if (!group.has(cellCol)) { group.add(cellCol); changed = true; }
+        }
+      }
+    }
+  }
+  return [...group].sort((a, b) => a - b);
+}
+
+// Returns true if all cols in groupCols can slide together.
+function canSlideColGroup(board, tilePos, groupCols, layout) {
+  const {cols, rows, colWrap} = layout;
+  const groupSet = new Set(groupCols);
+  for (const c of groupCols) {
+    if (!colWrap[c]) return false;
+    for (let r = 0; r < rows; r++) {
+      const id = board[r * cols + c];
+      if (id <= 0) return false;
+      const pos = tilePos.get(id);
+      if (!pos) return false;
+      if (!pos.cells.every(({dc}) => groupSet.has(mod(pos.c + dc, cols)))) return false;
+      if (r > 0 && hasBarrierL(layout, r - 1, c, r, c)) return false;
+    }
+  }
+  return true;
+}
+
+// Slides all cols in groupCols simultaneously by dir.
+function slideColGroup(board, tilePos, groupCols, dir, layout) {
+  const {cols, rows} = layout;
+  const colData = {};
+  for (const c of groupCols) colData[c] = Array.from({length: rows}, (_, r) => board[r * cols + c]);
+  const seen = new Set();
+  for (const c of groupCols) {
+    const ids = colData[c];
+    const s = dir === 1 ? [ids[rows - 1], ...ids.slice(0, -1)] : [...ids.slice(1), ids[0]];
+    for (let r = 0; r < rows; r++) board[r * cols + c] = s[r];
+    for (let r = 0; r < rows; r++) {
+      const id = s[r];
+      if (id > 0 && !seen.has(id)) {
+        seen.add(id);
+        const pos = tilePos.get(id);
+        tilePos.set(id, {...pos, r: mod(pos.r + dir, rows)});
+      }
+    }
+  }
+}
+
+// Apply a slide move object — handles both single (index) and group (indices) slides.
+function applySlideMove(board, tilePos, m, layout) {
+  if (m.axis === 'row') {
+    if (m.indices) slideRowGroup(board, tilePos, m.indices, m.dir, layout);
+    else           slideRow(board, tilePos, m.index, m.dir, layout);
+  } else {
+    if (m.indices) slideColGroup(board, tilePos, m.indices, m.dir, layout);
+    else           slideCol(board, tilePos, m.index, m.dir, layout);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Shuffle & solve helpers
 // ---------------------------------------------------------------------------
 
@@ -317,6 +456,42 @@ function shuffleBoard(board, tiles, layout) {
         open.push({ board: nb, tilePos: ntp, f: -(nh + Math.random() * NOISE_K), depth: node.depth + 1, parent: node, move: {slide: true, axis: 'col', index: c, dir} });
       }
     }
+    // Group slide moves
+    const p1SeenRowG = new Set(), p1SeenColG = new Set();
+    for (let r = 0; r < rows; r++) {
+      if (canSlideRow(node.board, node.tilePos, r, layout)) continue;
+      const grp = getRowGroup(node.board, node.tilePos, r, layout);
+      const gk = grp.join(',');
+      if (p1SeenRowG.has(gk)) continue;
+      p1SeenRowG.add(gk);
+      if (!canSlideRowGroup(node.board, node.tilePos, grp, layout)) continue;
+      for (const dir of [1, -1]) {
+        const nb = [...node.board], ntp = _copyTilePos(node.tilePos);
+        slideRowGroup(nb, ntp, grp, dir, layout);
+        const key = _encodeState(ntp);
+        if (visited.has(key)) continue;
+        visited.add(key);
+        const nh = _heuristic(ntp, goalPos, rows, cols, layout);
+        open.push({ board: nb, tilePos: ntp, f: -(nh + Math.random() * NOISE_K), depth: node.depth + 1, parent: node, move: {slide: true, axis: 'row', indices: grp, dir} });
+      }
+    }
+    for (let c = 0; c < cols; c++) {
+      if (canSlideCol(node.board, node.tilePos, c, layout)) continue;
+      const grp = getColGroup(node.board, node.tilePos, c, layout);
+      const gk = grp.join(',');
+      if (p1SeenColG.has(gk)) continue;
+      p1SeenColG.add(gk);
+      if (!canSlideColGroup(node.board, node.tilePos, grp, layout)) continue;
+      for (const dir of [1, -1]) {
+        const nb = [...node.board], ntp = _copyTilePos(node.tilePos);
+        slideColGroup(nb, ntp, grp, dir, layout);
+        const key = _encodeState(ntp);
+        if (visited.has(key)) continue;
+        visited.add(key);
+        const nh = _heuristic(ntp, goalPos, rows, cols, layout);
+        open.push({ board: nb, tilePos: ntp, f: -(nh + Math.random() * NOISE_K), depth: node.depth + 1, parent: node, move: {slide: true, axis: 'col', indices: grp, dir} });
+      }
+    }
   }
 
   console.log(`[shuffle] phase1 done — expanded=${expanded} bestH=${bestH} phase1Moves=${bestNode.depth}`);
@@ -396,6 +571,41 @@ function shuffleBoard(board, tiles, layout) {
           p15Open.push({ board: nb, tilePos: ntp, f: -(nh + Math.random() * NOISE_K), depth: node.depth + 1, parent: node, move: {slide: true, axis: 'col', index: c, dir} });
         }
       }
+      const p15SeenRowG = new Set(), p15SeenColG = new Set();
+      for (let r = 0; r < rows; r++) {
+        if (canSlideRow(node.board, node.tilePos, r, layout)) continue;
+        const grp = getRowGroup(node.board, node.tilePos, r, layout);
+        const gk = grp.join(',');
+        if (p15SeenRowG.has(gk)) continue;
+        p15SeenRowG.add(gk);
+        if (!canSlideRowGroup(node.board, node.tilePos, grp, layout)) continue;
+        for (const dir of [1, -1]) {
+          const nb = [...node.board], ntp = _copyTilePos(node.tilePos);
+          slideRowGroup(nb, ntp, grp, dir, layout);
+          const key = _encodeState(ntp);
+          if (p15Visited.has(key)) continue;
+          p15Visited.add(key);
+          const nh = largeTileH(ntp);
+          p15Open.push({ board: nb, tilePos: ntp, f: -(nh + Math.random() * NOISE_K), depth: node.depth + 1, parent: node, move: {slide: true, axis: 'row', indices: grp, dir} });
+        }
+      }
+      for (let c = 0; c < cols; c++) {
+        if (canSlideCol(node.board, node.tilePos, c, layout)) continue;
+        const grp = getColGroup(node.board, node.tilePos, c, layout);
+        const gk = grp.join(',');
+        if (p15SeenColG.has(gk)) continue;
+        p15SeenColG.add(gk);
+        if (!canSlideColGroup(node.board, node.tilePos, grp, layout)) continue;
+        for (const dir of [1, -1]) {
+          const nb = [...node.board], ntp = _copyTilePos(node.tilePos);
+          slideColGroup(nb, ntp, grp, dir, layout);
+          const key = _encodeState(ntp);
+          if (p15Visited.has(key)) continue;
+          p15Visited.add(key);
+          const nh = largeTileH(ntp);
+          p15Open.push({ board: nb, tilePos: ntp, f: -(nh + Math.random() * NOISE_K), depth: node.depth + 1, parent: node, move: {slide: true, axis: 'col', indices: grp, dir} });
+        }
+      }
     }
 
     console.log(`[shuffle] phase1.5 done — expanded=${p15Expanded} largeTileH: ${p15StartH} → ${p15BestH}`);
@@ -436,6 +646,32 @@ function shuffleBoard(board, tiles, layout) {
         cands.push({slide: true, axis: 'col', index: c, dir});
       }
     }
+    // Group slide candidates
+    const p2SeenRowG = new Set(), p2SeenColG = new Set();
+    for (let r = 0; r < rows; r++) {
+      if (canSlideRow(b, tp, r, layout)) continue;
+      const grp = getRowGroup(b, tp, r, layout);
+      const gk = grp.join(',');
+      if (p2SeenRowG.has(gk)) continue;
+      p2SeenRowG.add(gk);
+      if (!canSlideRowGroup(b, tp, grp, layout)) continue;
+      for (const dir of [1, -1]) {
+        if (lastMove && lastMove.slide && lastMove.axis === 'row' && lastMove.indices && lastMove.indices.join(',') === gk && lastMove.dir === -dir) continue;
+        cands.push({slide: true, axis: 'row', indices: grp, dir});
+      }
+    }
+    for (let c = 0; c < cols; c++) {
+      if (canSlideCol(b, tp, c, layout)) continue;
+      const grp = getColGroup(b, tp, c, layout);
+      const gk = grp.join(',');
+      if (p2SeenColG.has(gk)) continue;
+      p2SeenColG.add(gk);
+      if (!canSlideColGroup(b, tp, grp, layout)) continue;
+      for (const dir of [1, -1]) {
+        if (lastMove && lastMove.slide && lastMove.axis === 'col' && lastMove.indices && lastMove.indices.join(',') === gk && lastMove.dir === -dir) continue;
+        cands.push({slide: true, axis: 'col', indices: grp, dir});
+      }
+    }
     // If reversal-avoidance left no candidates, allow all moves (including reversal)
     if (!cands.length) {
       for (const [id] of tp) {
@@ -451,12 +687,30 @@ function shuffleBoard(board, tiles, layout) {
         if (!canSlideCol(b, tp, c, layout)) continue;
         for (const dir of [1, -1]) cands.push({slide: true, axis: 'col', index: c, dir});
       }
+      const p2FbSeenRowG = new Set(), p2FbSeenColG = new Set();
+      for (let r = 0; r < rows; r++) {
+        if (canSlideRow(b, tp, r, layout)) continue;
+        const grp = getRowGroup(b, tp, r, layout);
+        const gk = grp.join(',');
+        if (p2FbSeenRowG.has(gk)) continue;
+        p2FbSeenRowG.add(gk);
+        if (!canSlideRowGroup(b, tp, grp, layout)) continue;
+        for (const dir of [1, -1]) cands.push({slide: true, axis: 'row', indices: grp, dir});
+      }
+      for (let c = 0; c < cols; c++) {
+        if (canSlideCol(b, tp, c, layout)) continue;
+        const grp = getColGroup(b, tp, c, layout);
+        const gk = grp.join(',');
+        if (p2FbSeenColG.has(gk)) continue;
+        p2FbSeenColG.add(gk);
+        if (!canSlideColGroup(b, tp, grp, layout)) continue;
+        for (const dir of [1, -1]) cands.push({slide: true, axis: 'col', indices: grp, dir});
+      }
     }
     if (!cands.length) break; // truly no moves possible (e.g. no hole, no wrapping)
     const pick = cands[Math.floor(Math.random() * cands.length)];
     if (pick.slide) {
-      if (pick.axis === 'row') slideRow(b, tp, pick.index, pick.dir, layout);
-      else                     slideCol(b, tp, pick.index, pick.dir, layout);
+      applySlideMove(b, tp, pick, layout);
     } else {
       applyMove(b, tp, pick.id, pick.dr, pick.dc, layout);
     }

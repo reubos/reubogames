@@ -7,6 +7,9 @@
 }
 html,body{height:100%;overflow:hidden}
 body{background:var(--bg);color:var(--txt);font-family:'IBM Plex Mono',monospace;display:flex;flex-direction:column}
+body.is-shuffling,body.is-shuffling *{cursor:wait!important}
+#helpDialog::backdrop,#creditsDialog::backdrop{background:rgba(0,0,0,.7)}
+#creditsDialog{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);margin:0}
 
 /* ── Header ── */
 .hdr{display:flex;align-items:center;padding:0 16px;height:44px;border-bottom:1px solid var(--bdr);flex-shrink:0;position:relative}
@@ -21,7 +24,7 @@ body{background:var(--bg);color:var(--txt);font-family:'IBM Plex Mono',monospace
 .screen.active{display:flex}
 
 /* ── Three-column layout ── */
-.col-side{width:220px;flex-shrink:0;overflow-y:auto;padding:10px;display:flex;flex-direction:column;gap:8px;border-right:1px solid var(--bdr)}
+.col-side{width:260px;flex-shrink:0;overflow-y:auto;padding:10px;display:flex;flex-direction:column;gap:8px;border-right:1px solid var(--bdr)}
 .col-side.right{border-right:none;border-left:1px solid var(--bdr)}
 .col-main{flex:1;overflow:auto;display:flex;align-items:flex-start;justify-content:center;padding:14px}
 

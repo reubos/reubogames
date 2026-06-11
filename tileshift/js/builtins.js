@@ -2,32 +2,39 @@
 // ---------------------------------------------------------------------------
 
 const BUILTIN_ORDER = [
-  // Page 1
+  // Page 1 — pure grid progression
   'builtin_2x2',
   'builtin_3x3',
   'builtin_4x4',
   'builtin_5x5',
-  'builtin_cylinder',
-  // Page 2
-  'builtin_staircase',
   'builtin_4x4_barriers',
-  'builtin_traffic_jam',
-  'builtin_loopover',
+  // Page 2 — wrapping intro → full loopover
+  'builtin_cylinder',
+  'builtin_staircase',
   'builtin_loopover_mini',
-  // Page 3
-  'builtin_domino_slide',
-  'builtin_exploration',
-  'builtin_islands',
-  'builtin_tidying_up',
+  'builtin_2x5_loopover',
+  'builtin_loopover',
+  // Page 3 — restricted wrap + multi-cell tiles
   'builtin_restricted_loopover',
-  // Page 4
+  'builtin_x_loopover',
+  'builtin_double_cross_loopover',
+  'builtin_traffic_jam',
+  'builtin_domino_slide',
+  // Page 4 — group slide / bandaged
+  'builtin_tidying_up',
+  'builtin_bandaged_loopover',
+  'builtin_bandaged_loopover_2',
+  'builtin_bandaged_loopover_3',
+  'builtin_exploration',
+  // Page 5 — structural / barriers
+  'builtin_islands',
   'builtin_around_the_bend',
-  'builtin_siamese',
-  'builtin_big_tile',
   'builtin_bridge_crossings',
-  'builtin_chaos',
-  // Page 5
+  'builtin_siamese',
   'builtin_ouroboros',
+  // Page 6 — hard
+  'builtin_big_tile',
+  'builtin_chaos',
   'builtin_sausage'
 ];
 
@@ -345,6 +352,97 @@ const BUILTIN_LAYOUTS = {
     ],
     rowWrap: [false,false,false,false,false,false,false],
     colWrap: [false,false,false,false,false],
+    barriers: []
+  },
+
+  'builtin_2x5_loopover': {
+    // 5×2, all single-cell tiles, fully wrapping in both axes.
+    name: '2×5 loopover', builtin: true, difficulty: 1, cols: 5, rows: 2,
+    cells: [
+      [{type:'active',group:1}, {type:'active',group:2}, {type:'active',group:3}, {type:'active',group:4}, {type:'active',group:5}],
+      [{type:'active',group:6}, {type:'active',group:7}, {type:'active',group:8}, {type:'active',group:9}, {type:'active',group:10}]
+    ],
+    rowWrap: [true, true],
+    colWrap: [true, true, true, true, true],
+    barriers: []
+  },
+
+  'builtin_x_loopover': {
+    // 5×5 cross shape — only row 2 and col 2 active, both wrap.
+    name: 'X-loopover', builtin: true, difficulty: 1, cols: 5, rows: 5,
+    cells: [
+      [{type:'blocked'},{type:'blocked'},{type:'active',group:1},{type:'blocked'},{type:'blocked'}],
+      [{type:'blocked'},{type:'blocked'},{type:'active',group:2},{type:'blocked'},{type:'blocked'}],
+      [{type:'active',group:3},{type:'active',group:4},{type:'active',group:5},{type:'active',group:6},{type:'active',group:7}],
+      [{type:'blocked'},{type:'blocked'},{type:'active',group:8},{type:'blocked'},{type:'blocked'}],
+      [{type:'blocked'},{type:'blocked'},{type:'active',group:9},{type:'blocked'},{type:'blocked'}]
+    ],
+    rowWrap: [false,false,true,false,false],
+    colWrap: [false,false,true,false,false],
+    barriers: []
+  },
+
+  'builtin_double_cross_loopover': {
+    // 5×5 double-cross shape — two intersecting plus signs, rows 1&3 and cols 1&3 wrap.
+    name: 'double cross loopover', builtin: true, difficulty: 2, cols: 5, rows: 5,
+    cells: [
+      [{type:'blocked'},         {type:'active',group:1}, {type:'blocked'},         {type:'active',group:2}, {type:'blocked'}        ],
+      [{type:'active',group:3},  {type:'active',group:4}, {type:'active',group:5},  {type:'active',group:6}, {type:'active',group:7} ],
+      [{type:'blocked'},         {type:'active',group:8}, {type:'blocked'},         {type:'active',group:9}, {type:'blocked'}        ],
+      [{type:'active',group:10}, {type:'active',group:11},{type:'active',group:12}, {type:'active',group:13},{type:'active',group:14}],
+      [{type:'blocked'},         {type:'active',group:15},{type:'blocked'},         {type:'active',group:16},{type:'blocked'}        ]
+    ],
+    rowWrap: [false,true,false,true,false],
+    colWrap: [false,true,false,true,false],
+    barriers: []
+  },
+
+  'builtin_bandaged_loopover': {
+    // 6×6 cross shape, rows 2-3 and cols 2-3 wrap. Asymmetric domino tiles at some arms.
+    // Dominos: (0,2)+(1,2), (2,4)+(2,5), (3,0)+(3,1), (4,3)+(5,3).
+    name: 'bandaged loopover', builtin: true, difficulty: 2, cols: 6, rows: 6,
+    cells: [
+      [{type:'blocked'},{type:'blocked'},{type:'active',group:1},{type:'active',group:2},{type:'blocked'},{type:'blocked'}],
+      [{type:'blocked'},{type:'blocked'},{type:'active',group:1},{type:'active',group:3},{type:'blocked'},{type:'blocked'}],
+      [{type:'active',group:4},{type:'active',group:5},{type:'active',group:6},{type:'active',group:7},{type:'active',group:8},{type:'active',group:8}],
+      [{type:'active',group:9},{type:'active',group:9},{type:'active',group:10},{type:'active',group:11},{type:'active',group:12},{type:'active',group:13}],
+      [{type:'blocked'},{type:'blocked'},{type:'active',group:14},{type:'active',group:15},{type:'blocked'},{type:'blocked'}],
+      [{type:'blocked'},{type:'blocked'},{type:'active',group:16},{type:'active',group:15},{type:'blocked'},{type:'blocked'}]
+    ],
+    rowWrap: [false,false,true,true,false,false],
+    colWrap: [false,false,true,true,false,false],
+    barriers: []
+  },
+
+  'builtin_bandaged_loopover_2': {
+    // 6×6 cross shape, rows 2-3 and cols 2-3 wrap. 2×2 bandaged tile at center.
+    name: 'bandaged loopover 2', builtin: true, difficulty: 2, cols: 6, rows: 6,
+    cells: [
+      [{type:'blocked'},{type:'blocked'},{type:'active',group:2}, {type:'active',group:3}, {type:'blocked'},{type:'blocked'}],
+      [{type:'blocked'},{type:'blocked'},{type:'active',group:4}, {type:'active',group:5}, {type:'blocked'},{type:'blocked'}],
+      [{type:'active',group:6},{type:'active',group:7},{type:'active',group:1},{type:'active',group:1},{type:'active',group:8},{type:'active',group:9}],
+      [{type:'active',group:10},{type:'active',group:11},{type:'active',group:1},{type:'active',group:1},{type:'active',group:12},{type:'active',group:13}],
+      [{type:'blocked'},{type:'blocked'},{type:'active',group:14},{type:'active',group:15},{type:'blocked'},{type:'blocked'}],
+      [{type:'blocked'},{type:'blocked'},{type:'active',group:16},{type:'active',group:17},{type:'blocked'},{type:'blocked'}]
+    ],
+    rowWrap: [false,false,true,true,false,false],
+    colWrap: [false,false,true,true,false,false],
+    barriers: []
+  },
+
+  'builtin_bandaged_loopover_3': {
+    // 5×5, fully wrapping, scattered domino tiles.
+    // Dominos: (0,0)+(0,1), (0,4)+(1,4), (1,0)+(2,0), (2,3)+(2,4), (3,0)+(3,1), (3,4)+(4,4).
+    name: 'bandaged loopover 3', builtin: true, difficulty: 2, cols: 5, rows: 5,
+    cells: [
+      [{type:'active',group:1}, {type:'active',group:1}, {type:'active',group:2}, {type:'active',group:3}, {type:'active',group:4}],
+      [{type:'active',group:5}, {type:'active',group:6}, {type:'active',group:7}, {type:'active',group:8}, {type:'active',group:4}],
+      [{type:'active',group:5}, {type:'active',group:9}, {type:'active',group:10},{type:'active',group:11},{type:'active',group:11}],
+      [{type:'active',group:12},{type:'active',group:12},{type:'active',group:13},{type:'active',group:14},{type:'active',group:15}],
+      [{type:'active',group:16},{type:'active',group:17},{type:'active',group:18},{type:'active',group:19},{type:'active',group:15}]
+    ],
+    rowWrap: [true,true,true,true,true],
+    colWrap: [true,true,true,true,true],
     barriers: []
   },
 

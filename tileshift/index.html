@@ -11,9 +11,11 @@
 <!-- ── Header ── -->
 <div class="hdr">
   <h1>TILE SHIFT</h1>
-  <span style="font-size:9px;color:var(--mut);white-space:nowrap">v1.0.1</span>
+  <span style="font-size:9px;color:var(--mut);white-space:nowrap">v1.1.0</span>
   <span style="font-size:9px;color:var(--mut);white-space:nowrap;margin-left:16px">By Reuben Malcolm (reubogames)</span>
   <a href="../index.html" style="margin-left:auto;margin-right:12px;padding:5px 12px;background:#e8ff47;color:#0d0d0d;border:1px solid #e8ff47;font-family:'Space Mono',monospace;font-size:10px;font-weight:700;text-decoration:none;white-space:nowrap;">&#8592; Back to reubogames</a>
+  <button onclick="document.getElementById('creditsDialog').showModal()" style="margin-right:6px;padding:0 10px;height:26px;border:1px solid var(--bdr);background:var(--surf2);color:var(--mut);font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:1px;text-transform:uppercase;cursor:pointer;flex-shrink:0" title="credits">credits</button>
+  <button onclick="document.getElementById('helpDialog').showModal()" style="margin-right:10px;width:26px;height:26px;border-radius:50%;border:1px solid var(--bdr);background:var(--surf2);color:var(--mut);font-family:'Syne',sans-serif;font-size:13px;font-weight:700;cursor:pointer;flex-shrink:0" title="how to play">?</button>
   <div class="tabs">
     <button class="tab on" data-screen="editor" onclick="showScreen('editor')">editor</button>
     <button class="tab" data-screen="play" onclick="showScreen('play')">play</button>
@@ -106,7 +108,7 @@
     </div>
 
     <div style="padding:10px;border-top:1px solid var(--bdr)">
-      <button class="big-btn" onclick="startGame();showScreen('play')">play ▶</button>
+      <button id="playBtn" class="big-btn" onclick="startGameAndPlay()">play ▶</button>
     </div>
   </div>
 </div>
@@ -196,7 +198,7 @@
       </div>
     </div>
     <div style="display:flex;flex-direction:column;gap:5px;margin-top:4px">
-      <button class="big-btn" onclick="reshuffleGame()">↺ reshuffle</button>
+      <button id="reshuffleBtn" class="big-btn" onclick="reshuffleWithFeedback(this)">↺ reshuffle</button>
       <button class="sec-btn" id="solveBtn" onclick="showSolution()" style="height:auto;padding:6px 8px;line-height:1.3">
         🔍 autosolve<br>
         <span style="font-size:9px;color:var(--mut);font-weight:normal">(takes a long time on hard puzzles)</span>
@@ -213,8 +215,7 @@
     <div class="win-overlay" id="winOverlay">
       <div class="win-t">SOLVED!</div>
       <div class="win-s" id="winStats"></div>
-      <button class="big-btn"
-              onclick="reshuffleGame();document.getElementById('winOverlay').classList.remove('show')">
+      <button class="big-btn" onclick="reshuffleWithFeedback(this, () => document.getElementById('winOverlay').classList.remove('show'))">
         play again
       </button>
     </div>
@@ -223,6 +224,54 @@
 
 <!-- ── Scripts (load order matters — dependencies first) ── -->
 <script src="js/constants.js"></script>
+<!-- ── Credits dialog ── -->
+<dialog id="creditsDialog" onclick="if(event.target===this)this.close()" style="background:var(--surf);border:1px solid var(--bdr);color:var(--txt);font-family:'IBM Plex Mono',monospace;font-size:11px;max-width:420px;width:90%;padding:0;border-radius:2px">
+  <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--bdr)">
+    <span style="font-family:'Syne',sans-serif;font-size:14px;font-weight:800;color:var(--acc)">CREDITS</span>
+    <button onclick="document.getElementById('creditsDialog').close()" style="background:none;border:none;color:var(--mut);font-size:18px;cursor:pointer;line-height:1">×</button>
+  </div>
+  <div style="padding:16px;display:flex;flex-direction:column;gap:12px;line-height:1.7">
+    <div>Game by Reuben Malcolm (<a href="https://reubogames.com" style="color:var(--cyan);text-decoration:none">reubogames</a>)</div>
+    <div>Puzzle mechanics inspired by the <a href="https://en.wikipedia.org/wiki/15_puzzle" target="_blank" style="color:var(--cyan);text-decoration:none">15 puzzle</a>, invented by Noyes Chapman, and the <a href="https://loopover.xyz/" target="_blank" style="color:var(--cyan);text-decoration:none">Loopover game</a>, invented by Cary Huang</div>
+  </div>
+</dialog>
+
+<!-- ── Help dialog ── -->
+<dialog id="helpDialog" onclick="if(event.target===this)this.close()" style="background:var(--surf);border:1px solid var(--bdr);color:var(--txt);font-family:'IBM Plex Mono',monospace;font-size:11px;max-width:420px;width:90%;padding:0;border-radius:2px">
+  <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--bdr)">
+    <span style="font-family:'Syne',sans-serif;font-size:14px;font-weight:800;color:var(--acc)">HOW TO PLAY</span>
+    <button onclick="document.getElementById('helpDialog').close()" style="background:none;border:none;color:var(--mut);font-size:18px;cursor:pointer;line-height:1">×</button>
+  </div>
+  <div style="padding:16px;display:flex;flex-direction:column;gap:14px;line-height:1.6;max-height:70vh;overflow-y:auto">
+
+    <div>
+      <div style="color:var(--acc);font-size:9px;letter-spacing:2px;text-transform:uppercase;margin-bottom:6px">Goal</div>
+      Arrange all tiles back into their goal positions. Each tile has a target cell shown by its label (A1, B2, etc.).
+    </div>
+
+    <div>
+      <div style="color:var(--acc);font-size:9px;letter-spacing:2px;text-transform:uppercase;margin-bottom:6px">Moving tiles</div>
+      Click and drag a tile to slide it into an adjacent empty cell. Tiles cannot pass through barriers or blocked cells.
+    </div>
+
+    <div>
+      <div style="color:var(--acc);font-size:9px;letter-spacing:2px;text-transform:uppercase;margin-bottom:6px">Row & column slides</div>
+      When a row or column is completely full and has wrapping enabled, the <span style="color:var(--cyan)">◀ ▶</span> or <span style="color:var(--cyan)">▲ ▼</span> arrow buttons appear — click them to shift the entire row or column, wrapping tiles around to the other side.
+    </div>
+
+    <div>
+      <div style="color:var(--acc);font-size:9px;letter-spacing:2px;text-transform:uppercase;margin-bottom:6px">Bandaged tiles</div>
+      Tiles that span multiple rows or columns are bandaged together and always move as one piece. When a group of bandaged rows or columns can all slide together, a <span style="color:var(--cyan)">cyan line</span> appears along the arrow area connecting them.
+    </div>
+
+    <div>
+      <div style="color:var(--acc);font-size:9px;letter-spacing:2px;text-transform:uppercase;margin-bottom:6px">Editor</div>
+      Click and drag across cells to draw a tile shape — all cells in one stroke form one tile. Toggle <span style="color:var(--cyan)">↔</span> on a row for horizontal wrap, <span style="color:var(--cyan)">↕</span> on a column for vertical wrap. Click the edge between two cells to place a barrier.
+    </div>
+
+  </div>
+</dialog>
+
 <script src="js/builtins.js"></script>
 <script src="js/solver.js"></script>
 <script src="js/utils.js"></script>

@@ -263,6 +263,51 @@ function _solveWeightedAsync(layout, initBoard, initTilePos, goalPos, weight, ma
                         move: {slide: true, axis: 'col', index: c, dir} });
           }
         }
+        // Group slide moves (rows/cols linked by spanning tiles)
+        const seenRowGroups = new Set();
+        for (let r = 0; r < rows; r++) {
+          if (canSlideRow(node.board, node.tilePos, r, layout)) continue;
+          const group = getRowGroup(node.board, node.tilePos, r, layout);
+          const gkey = group.join(',');
+          if (seenRowGroups.has(gkey)) continue;
+          seenRowGroups.add(gkey);
+          if (!canSlideRowGroup(node.board, node.tilePos, group, layout)) continue;
+          for (const dir of [1, -1]) {
+            const newBoard   = [...node.board];
+            const newTilePos = _copyTilePos(node.tilePos);
+            slideRowGroup(newBoard, newTilePos, group, dir, layout);
+            const key = _encodeState(newTilePos);
+            if (visited.has(key)) continue;
+            visited.add(key);
+            const g  = node.g + 1;
+            const wh = _heuristic(newTilePos, goalPos, rows, cols, layout);
+            const f  = weight === Infinity ? wh : g + weight * wh;
+            open.push({ board: newBoard, tilePos: newTilePos, g, f, parent: node,
+                        move: {slide: true, axis: 'row', indices: group, dir} });
+          }
+        }
+        const seenColGroups = new Set();
+        for (let c = 0; c < cols; c++) {
+          if (canSlideCol(node.board, node.tilePos, c, layout)) continue;
+          const group = getColGroup(node.board, node.tilePos, c, layout);
+          const gkey = group.join(',');
+          if (seenColGroups.has(gkey)) continue;
+          seenColGroups.add(gkey);
+          if (!canSlideColGroup(node.board, node.tilePos, group, layout)) continue;
+          for (const dir of [1, -1]) {
+            const newBoard   = [...node.board];
+            const newTilePos = _copyTilePos(node.tilePos);
+            slideColGroup(newBoard, newTilePos, group, dir, layout);
+            const key = _encodeState(newTilePos);
+            if (visited.has(key)) continue;
+            visited.add(key);
+            const g  = node.g + 1;
+            const wh = _heuristic(newTilePos, goalPos, rows, cols, layout);
+            const f  = weight === Infinity ? wh : g + weight * wh;
+            open.push({ board: newBoard, tilePos: newTilePos, g, f, parent: node,
+                        move: {slide: true, axis: 'col', indices: group, dir} });
+          }
+        }
       }
 
       if (open.size > maxOpen) {
@@ -356,8 +401,7 @@ async function shortenSolution(layout, initBoard, initTilePos, goalPos, moves, s
       for (let k = 0; k < i; k++) {
         const m = moves[k];
         if (m.slide) {
-          if (m.axis === 'row') slideRow(board, tilePos, m.index, m.dir, layout);
-          else                  slideCol(board, tilePos, m.index, m.dir, layout);
+          applySlideMove(board, tilePos, m, layout);
         } else {
           applyMove(board, tilePos, m.id, m.dr, m.dc, layout);
         }
