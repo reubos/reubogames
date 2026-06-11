@@ -171,6 +171,7 @@
       .cv-hidden { stroke: #4ade80; opacity: 0.3; }
       .cv-label  { fill: #d4e8d4; }
       .cv-dim    { stroke: #86a886; }
+      .cv-grid   { stroke: #4ade80; opacity: 0.25; }
     }
     @media (prefers-color-scheme: light), (prefers-color-scheme: no-preference) {
       .cv-front { fill: #ddeedd; }
@@ -180,6 +181,7 @@
       .cv-hidden { stroke: #3a6a3a; opacity: 0.25; }
       .cv-label  { fill: #2a2a28; }
       .cv-dim    { stroke: #5a8a5a; }
+      .cv-grid   { stroke: #3a6a3a; opacity: 0.25; }
     }
 
     @media (prefers-color-scheme: dark) {
@@ -268,6 +270,27 @@
       svg += `<polygon points="${ps(['fbr','bbr','btr','ftr'])}" class="cv-right cv-stroke" stroke-width="1.5"/>`;
       svg += `<polygon points="${ps(['ftl','ftr','btr','btl'])}" class="cv-top cv-stroke" stroke-width="1.5"/>`;
       svg += `<polygon points="${ps(['fbl','fbr','ftr','ftl'])}" class="cv-front cv-stroke" stroke-width="1.5"/>`;
+
+      // Interior grid lines
+      function lerp2(a, b, t) { return [a[0] + (b[0]-a[0])*t, a[1] + (b[1]-a[1])*t]; }
+      function faceGrid(tl, tr, br, bl, cols, rows, cls) {
+        for (let i = 1; i < cols; i++) {
+          const t = i / cols;
+          const p1 = lerp2(tl, tr, t), p2 = lerp2(bl, br, t);
+          svg += `<line x1="${v(p1[0])}" y1="${v(p1[1])}" x2="${v(p2[0])}" y2="${v(p2[1])}" class="${cls}" stroke-width="0.8" fill="none"/>`;
+        }
+        for (let i = 1; i < rows; i++) {
+          const t = i / rows;
+          const p1 = lerp2(tl, bl, t), p2 = lerp2(tr, br, t);
+          svg += `<line x1="${v(p1[0])}" y1="${v(p1[1])}" x2="${v(p2[0])}" y2="${v(p2[1])}" class="${cls}" stroke-width="0.8" fill="none"/>`;
+        }
+      }
+      // Front face: W columns, H rows; corners tl,tr,br,bl
+      faceGrid(C.ftl, C.ftr, C.fbr, C.fbl, W, H, 'cv-grid');
+      // Top face: W columns, D rows
+      faceGrid(C.btl, C.btr, C.ftr, C.ftl, W, D, 'cv-grid');
+      // Right face: D columns, H rows
+      faceGrid(C.ftr, C.btr, C.bbr, C.fbr, D, H, 'cv-grid');
 
       const lf = `font-size="11" font-family="Segoe UI, sans-serif"`;
 
