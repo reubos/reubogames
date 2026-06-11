@@ -171,7 +171,8 @@
       .cv-hidden { stroke: #4ade80; opacity: 0.3; }
       .cv-label  { fill: #d4e8d4; }
       .cv-dim    { stroke: #86a886; }
-      .cv-grid   { stroke: #4ade80; opacity: 0.25; }
+      .cv-grid      { stroke: #4ade80; opacity: 0.25; }
+      .cv-highlight { fill: rgba(251,191,36,0.45); stroke: #f59e0b; }
     }
     @media (prefers-color-scheme: light), (prefers-color-scheme: no-preference) {
       .cv-front { fill: #ddeedd; }
@@ -181,7 +182,18 @@
       .cv-hidden { stroke: #3a6a3a; opacity: 0.25; }
       .cv-label  { fill: #2a2a28; }
       .cv-dim    { stroke: #5a8a5a; }
-      .cv-grid   { stroke: #3a6a3a; opacity: 0.25; }
+      .cv-grid      { stroke: #3a6a3a; opacity: 0.25; }
+      .cv-highlight { fill: rgba(251,191,36,0.45); stroke: #d97706; }
+    }
+
+    #move-tooltip {
+      position: fixed; display: none; z-index: 1000; pointer-events: none;
+      border-radius: 8px; padding: 6px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+      background: #f5f5f0; border: 1px solid #ccc;
+    }
+    @media (prefers-color-scheme: dark) {
+      #move-tooltip { background: #2a2a28; border-color: #444; }
     }
 
     @media (prefers-color-scheme: dark) {
@@ -231,6 +243,7 @@
 
     <div id="out"></div>
   </div>
+  <div id="move-tooltip"><div id="move-tooltip-inner"></div></div>
 
   <script>
     function drawCuboid() {
@@ -397,6 +410,66 @@
       const pre = t.layer > 1 ? String(t.layer) : '';
       return pre + t.face + ["", "'"][Math.floor(Math.random() * 2)];
     }
+    function parseMove(m) {
+      const x = m.match(/^(\d+)?([RLUDFB])(2|')?$/);
+      return x ? { layer: x[1] ? parseInt(x[1]) : 1, face: x[2] } : null;
+    }
+    function cuboidSVG(W, H, D, face, layer) {
+      const VW=160,VH=100,PL=28,PR=14,PT=10,PB=18;
+      const dw=VW-PL-PR,dh=VH-PT-PB,AX=0.48,AY=0.28;
+      let s=Math.min(dw/(W+D*AX),dh/(H+D*AY),16);
+      const cw=W*s,ch=H*s,ddx=D*s*AX,ddy=D*s*AY;
+      const ox=PL+(dw-cw-ddx)/2, oy=PT+ddy+(dh-ch-ddy)/2+ch;
+      const C={
+        fbl:[ox,oy],fbr:[ox+cw,oy],ftr:[ox+cw,oy-ch],ftl:[ox,oy-ch],
+        bbl:[ox+ddx,oy-ddy],bbr:[ox+cw+ddx,oy-ddy],
+        btr:[ox+cw+ddx,oy-ch-ddy],btl:[ox+ddx,oy-ch-ddy]
+      };
+      const v=n=>n.toFixed(1);
+      const L=(a,b,t)=>[a[0]+(b[0]-a[0])*t,a[1]+(b[1]-a[1])*t];
+      const ps=ks=>ks.map(k=>C[k].map(v).join(',')).join(' ');
+      const pstr=pts=>pts.map(p=>p.map(v).join(',')).join(' ');
+      function grid(tl,tr,br,bl,cols,rows){
+        let g='';
+        for(let i=1;i<cols;i++){const t=i/cols,p1=L(tl,tr,t),p2=L(bl,br,t);g+=`<line x1="${v(p1[0])}" y1="${v(p1[1])}" x2="${v(p2[0])}" y2="${v(p2[1])}" class="cv-grid" stroke-width="0.6" fill="none"/>`;}
+        for(let i=1;i<rows;i++){const t=i/rows,p1=L(tl,bl,t),p2=L(tr,br,t);g+=`<line x1="${v(p1[0])}" y1="${v(p1[1])}" x2="${v(p2[0])}" y2="${v(p2[1])}" class="cv-grid" stroke-width="0.6" fill="none"/>`;}
+        return g;
+      }
+      const hp=[];
+      if(face==='R'||face==='L'){
+        const j=face==='R'?W-layer:layer-1,t0=j/W,t1=(j+1)/W;
+        hp.push([L(C.ftl,C.ftr,t0),L(C.ftl,C.ftr,t1),L(C.fbl,C.fbr,t1),L(C.fbl,C.fbr,t0)]);
+        hp.push([L(C.btl,C.btr,t0),L(C.btl,C.btr,t1),L(C.ftl,C.ftr,t1),L(C.ftl,C.ftr,t0)]);
+        if(face==='R'&&layer===1)hp.push([C.ftr,C.btr,C.bbr,C.fbr]);
+      }else if(face==='U'||face==='D'){
+        const j=face==='U'?layer-1:H-layer,t0=j/H,t1=(j+1)/H;
+        hp.push([L(C.ftl,C.fbl,t0),L(C.ftr,C.fbr,t0),L(C.ftr,C.fbr,t1),L(C.ftl,C.fbl,t1)]);
+        hp.push([L(C.ftr,C.fbr,t0),L(C.btr,C.bbr,t0),L(C.btr,C.bbr,t1),L(C.ftr,C.fbr,t1)]);
+        if(face==='U'&&layer===1)hp.push([C.btl,C.btr,C.ftr,C.ftl]);
+      }else if(face==='F'||face==='B'){
+        const rj=face==='F'?D-layer:layer-1,rt0=rj/D,rt1=(rj+1)/D;
+        hp.push([L(C.btl,C.ftl,rt0),L(C.btr,C.ftr,rt0),L(C.btr,C.ftr,rt1),L(C.btl,C.ftl,rt1)]);
+        const cj=face==='F'?layer-1:D-layer,ct0=cj/D,ct1=(cj+1)/D;
+        hp.push([L(C.ftr,C.btr,ct0),L(C.ftr,C.btr,ct1),L(C.fbr,C.bbr,ct1),L(C.fbr,C.bbr,ct0)]);
+        if(face==='F'&&layer===1)hp.push([C.ftl,C.ftr,C.fbr,C.fbl]);
+      }
+      let svg=`<svg width="${VW}" height="${VH}" viewBox="0 0 ${VW} ${VH}" xmlns="http://www.w3.org/2000/svg">`;
+      svg+=`<line x1="${v(C.fbl[0])}" y1="${v(C.fbl[1])}" x2="${v(C.bbl[0])}" y2="${v(C.bbl[1])}" class="cv-hidden cv-dim" stroke-width="0.8" fill="none"/>`;
+      svg+=`<line x1="${v(C.bbl[0])}" y1="${v(C.bbl[1])}" x2="${v(C.bbr[0])}" y2="${v(C.bbr[1])}" class="cv-hidden cv-dim" stroke-width="0.8" fill="none"/>`;
+      svg+=`<line x1="${v(C.bbl[0])}" y1="${v(C.bbl[1])}" x2="${v(C.btl[0])}" y2="${v(C.btl[1])}" class="cv-hidden cv-dim" stroke-width="0.8" fill="none"/>`;
+      svg+=`<polygon points="${ps(['fbr','bbr','btr','ftr'])}" class="cv-right" stroke="none"/>`;
+      svg+=`<polygon points="${ps(['ftl','ftr','btr','btl'])}" class="cv-top" stroke="none"/>`;
+      svg+=`<polygon points="${ps(['fbl','fbr','ftr','ftl'])}" class="cv-front" stroke="none"/>`;
+      svg+=grid(C.ftl,C.ftr,C.fbr,C.fbl,W,H);
+      svg+=grid(C.btl,C.btr,C.ftr,C.ftl,W,D);
+      svg+=grid(C.ftr,C.btr,C.bbr,C.fbr,D,H);
+      hp.forEach(pts=>{svg+=`<polygon points="${pstr(pts)}" class="cv-highlight" stroke-width="1"/>`;});
+      svg+=`<polygon points="${ps(['fbr','bbr','btr','ftr'])}" fill="none" class="cv-stroke" stroke-width="1"/>`;
+      svg+=`<polygon points="${ps(['ftl','ftr','btr','btl'])}" fill="none" class="cv-stroke" stroke-width="1"/>`;
+      svg+=`<polygon points="${ps(['fbl','fbr','ftr','ftl'])}" fill="none" class="cv-stroke" stroke-width="1"/>`;
+      svg+='</svg>';
+      return svg;
+    }
     const OPP = {R:'L',L:'R',U:'D',D:'U',F:'B',B:'F'};
     function conflicts(t, lastRef, dims) {
       if (lastRef.face === null) return false;
@@ -469,7 +542,11 @@
       phasesData.forEach(p => {
         const [w, h, d] = p.dims;
         html += `<div class="phase-label"><strong>${w}×${h}×${d}</strong> — ${phaseDesc(p.dims, p.qt)}</div><div>`;
-        p.moves.forEach(m => { html += `<span class="move${!m.endsWith('2') ? ' qt' : ''}">${m}</span>`; });
+        p.moves.forEach(m => {
+          const pm = parseMove(m);
+          const da = pm ? ` data-face="${pm.face}" data-layer="${pm.layer}" data-w="${w}" data-h="${h}" data-d="${d}"` : '';
+          html += `<span class="move${!m.endsWith('2') ? ' qt' : ''}"${da}>${m}</span>`;
+        });
         html += `</div>`;
       });
       html += `<div style="margin-top:1.25rem;">
@@ -489,6 +566,26 @@
     }
 
     doGenerate();
+
+    (function(){
+      const tt = document.getElementById('move-tooltip');
+      const tti = document.getElementById('move-tooltip-inner');
+      document.getElementById('out').addEventListener('mouseover', function(e) {
+        const span = e.target.closest('.move[data-face]');
+        if (!span) return;
+        const {face, layer, w, h, d} = span.dataset;
+        tti.innerHTML = cuboidSVG(+w, +h, +d, face, +layer);
+        tt.style.display = 'block';
+      });
+      document.getElementById('out').addEventListener('mouseout', function(e) {
+        if (e.target.closest('.move[data-face]')) tt.style.display = 'none';
+      });
+      document.addEventListener('mousemove', function(e) {
+        if (tt.style.display === 'none') return;
+        tt.style.left = (e.clientX + 14) + 'px';
+        tt.style.top = (e.clientY - 10) + 'px';
+      });
+    })();
   </script>
 </body>
 </html>
