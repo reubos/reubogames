@@ -473,37 +473,35 @@
         function ah(x2,y2,dx,dy){const l=Math.sqrt(dx*dx+dy*dy);if(!l)return '';const ux=dx/l,uy=dy/l,s=5,bx=x2-ux*s,by=y2-uy*s;return `<polygon points="${v(x2)},${v(y2)} ${v(bx-uy*s*.5)},${v(by+ux*s*.5)} ${v(bx+uy*s*.5)},${v(by-ux*s*.5)}" fill="${ac}" stroke="none"/>`;}
         function seg(x1,y1,x2,y2){return `<line x1="${v(x1)}" y1="${v(y1)}" x2="${v(x2)}" y2="${v(y2)}" stroke="${ac}" stroke-width="1.8" fill="none"/>`;}
         function arr(x1,y1,x2,y2){return seg(x1,y1,x2,y2)+ah(x2,y2,x2-x1,y2-y1);}
-        function arr2(x1,y1,x2,y2){return seg(x1,y1,x2,y2)+ah(x2,y2,x2-x1,y2-y1)+ah(x1,y1,x1-x2,y1-y2);}
-        function draw(x1,y1,x2,y2,fwd){return mod==='2'?arr2(x1,y1,x2,y2):fwd?arr(x1,y1,x2,y2):arr(x2,y2,x1,y1);}
-        // CW from outside: R=front up, L=front down, U=front right, D=front left
+        // draw(x1,y1,x2,y2, cwFwd): cwFwd=true means x1→x2 is the CW direction.
+        // mod='': draw CW; mod="'": draw CCW; mod='2': two arrows both CW.
+        function draw(x1,y1,x2,y2,cwFwd){
+          const [sx,sy,ex,ey]=cwFwd?[x1,y1,x2,y2]:[x2,y2,x1,y1];
+          if(mod==='2'){
+            const dx=ex-sx,dy=ey-sy,l=Math.sqrt(dx*dx+dy*dy)||1,p=4;
+            const px=-dy/l*p,py=dx/l*p;
+            return arr(sx+px,sy+py,ex+px,ey+py)+arr(sx-px,sy-py,ex-px,ey-py);
+          }
+          return mod===''?arr(sx,sy,ex,ey):arr(ex,ey,sx,sy);
+        }
         if(face==='R'){
-          // Right of front face right edge; R cw → front goes UP → fwd=bottom→top
-          const x=C.ftr[0]+off, y1=C.fbr[1]-2, y2=C.ftr[1]+2;
-          svg+=draw(x,y1,x,y2,mod==='');
+          // Right of front-face right edge; R cw=front up → cwFwd: bottom→top
+          svg+=draw(C.ftr[0]+off,C.fbr[1]-2,C.ftr[0]+off,C.ftr[1]+2,true);
         } else if(face==='L'){
-          // Left of front face left edge; L cw → front goes DOWN → fwd=top→bottom
-          const x=C.ftl[0]-off, y1=C.ftl[1]+2, y2=C.fbl[1]-2;
-          svg+=draw(x,y1,x,y2,mod==='');
+          // Left of front-face left edge; L cw=front down → cwFwd: top→bottom
+          svg+=draw(C.ftl[0]-off,C.ftl[1]+2,C.ftl[0]-off,C.fbl[1]-2,true);
         } else if(face==='U'){
-          // Above front face top edge; U cw → front goes LEFT → fwd=right→left
-          const y=C.ftl[1]-off, x1=C.ftl[0]+2, x2=C.ftr[0]-2;
-          svg+=draw(x1,y,x2,y,mod==="'");
+          // Above front-face top edge; U cw=front left → cwFwd: right→left (x2→x1)
+          svg+=draw(C.ftl[0]+2,C.ftl[1]-off,C.ftr[0]-2,C.ftr[1]-off,false);
         } else if(face==='D'){
-          // Below front face bottom edge; D cw → front goes RIGHT → fwd=left→right
-          const y=C.fbl[1]+off, x1=C.fbr[0]-2, x2=C.fbl[0]+2;
-          svg+=draw(x1,y,x2,y,mod==="'");
+          // Below front-face bottom edge; D cw=front right → cwFwd: left→right (x1→x2)
+          svg+=draw(C.fbl[0]+2,C.fbl[1]+off,C.fbr[0]-2,C.fbr[1]+off,true);
         } else if(face==='F'){
-          // Circular arc just outside the front face; F cw → clockwise arc
-          const fcx=(C.ftl[0]+C.fbr[0])/2, fcy=(C.ftl[1]+C.fbr[1])/2;
-          const r=Math.min(C.ftr[0]-C.ftl[0],C.fbl[1]-C.ftl[1])*0.5+off*0.6;
-          const cw=mod!=="'", sx=fcx, sy=fcy-r;
-          if(mod==='2'){svg+=`<path d="M${v(sx)},${v(sy)} A${v(r)},${v(r)} 0 1 1 ${v(fcx)},${v(fcy+r)}" stroke="${ac}" stroke-width="1.8" fill="none"/>`;svg+=ah(fcx,fcy+r,1,0);}
-          else if(cw){const ex=fcx-r,ey=fcy;svg+=`<path d="M${v(sx)},${v(sy)} A${v(r)},${v(r)} 0 1 1 ${v(ex)},${v(ey)}" stroke="${ac}" stroke-width="1.8" fill="none"/>`;svg+=ah(ex,ey,0,1);}
-          else{const ex=fcx+r,ey=fcy;svg+=`<path d="M${v(sx)},${v(sy)} A${v(r)},${v(r)} 0 1 0 ${v(ex)},${v(ey)}" stroke="${ac}" stroke-width="1.8" fill="none"/>`;svg+=ah(ex,ey,0,-1);}
+          // Above front-face top edge; F cw=top right → cwFwd: left→right
+          svg+=draw(C.ftl[0]+2,C.ftl[1]-off,C.ftr[0]-2,C.ftr[1]-off,true);
         } else if(face==='B'){
-          // Above top face back edge; B cw → top-back row goes RIGHT→LEFT
-          const y=C.btl[1]-off, x1=C.btl[0]+2, x2=C.btr[0]-2;
-          svg+=draw(x1,y,x2,y,mod==="'"); // B' (ccw from back) → left→right = fwd
+          // Above top-face back edge; B cw=top left → cwFwd: right→left (x2→x1)
+          svg+=draw(C.btl[0]+2,C.btl[1]-off,C.btr[0]-2,C.btr[1]-off,false);
         }
       }
       svg+='</svg>';
