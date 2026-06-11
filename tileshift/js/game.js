@@ -207,6 +207,7 @@ async function showSolution() {
 
   if (btn) { btn.disabled = true; btn.textContent = '⏳ solving...'; }
   if (status) status.style.display = 'block';
+  _setShuffling(true);
 
   // Snapshot the current board state — used consistently for solving and shortcutting
   const snapBoard   = [...gameState.board];
@@ -299,6 +300,8 @@ async function showSolution() {
   }
 
   const { moves, suboptimal, partial, bestH } = result;
+
+  _setShuffling(false);
 
   if (moves.length === 0 && !partial) {
     if (btn)    { btn.disabled = false; btn.innerHTML = '🔍 autosolve<br><span style="font-size:9px;color:var(--mut);font-weight:normal">(takes a long time on hard puzzles)</span>'; }
