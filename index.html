@@ -9,9 +9,19 @@
       background-color: #1a3a1a;
       color: #d4e8d4;
       font-family: 'Segoe UI', sans-serif;
-      max-width: 700px;
-      margin: 60px auto;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0;
       padding: 0 20px;
+      box-sizing: border-box;
+    }
+
+    .content {
+      max-width: 700px;
+      width: 100%;
+      padding: 40px 0;
     }
 
     h1 {
@@ -55,12 +65,17 @@
   </style>
 </head>
 <body>
+  <div class="content">
   <h1>reubo's website of games and random things</h1>
 
   <ul class="game-list">
     <li>
       <a href="tileshift/">Tileshift</a>
       <div class="desc">A sliding puzzle game.</div>
+    </li>
+    <li>
+      <a href="untangle_2017/">Untangle</a>
+      <div class="desc">A node untangling puzzle game.</div>
     </li>
   </ul>
 
@@ -70,5 +85,6 @@
   <p class="footer">More to come! (maybe)</p>
 
   <p class="footer">Contact: <a href="mailto:reubogames@gmail.com" style="color: #4ade80;">reubogames@gmail.com</a></p>
+  </div>
 </body>
 </html>
