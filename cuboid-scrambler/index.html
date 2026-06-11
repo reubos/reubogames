@@ -281,19 +281,29 @@
       const mod = t.qt ? ["", "'", "2"][Math.floor(Math.random() * 3)] : '2';
       return pre + t.face + mod;
     }
-    function scramblePhase(templates, n, lastAxisRef) {
+    const OPP = {R:'L',L:'R',U:'D',D:'U',F:'B',B:'F'};
+    function conflicts(t, lastRef, dims) {
+      if (lastRef.face === null) return false;
+      const {face: lf, layer: ll} = lastRef;
+      // Same face, same layer — always block
+      if (t.face === lf && t.layer === ll) return true;
+      // Opposite face, same layer — block only when N is even and layer == N/2
+      if (t.face === OPP[lf] && t.layer === ll) {
+        const ax = faceAxis(lf);
+        const N = ax === 'x' ? dims[0] : ax === 'y' ? dims[1] : dims[2];
+        if (N % 2 === 0 && ll === N / 2) return true;
+      }
+      return false;
+    }
+    function scramblePhase(templates, n, lastRef, dims) {
       const moves = [];
-      let lastFace = null, lastLayer = null;
       for (let j = 0; j < n; j++) {
-        let avail = templates.filter(t => faceAxis(t.face) !== lastAxisRef.v);
-        if (!avail.length) {
-          avail = templates.filter(t => !(t.face === lastFace && t.layer === lastLayer));
-        }
+        let avail = templates.filter(t => !conflicts(t, lastRef, dims));
         if (!avail.length) avail = templates;
         if (!avail.length) break;
         const t = avail[Math.floor(Math.random() * avail.length)];
-        lastAxisRef.v = faceAxis(t.face);
-        lastFace = t.face; lastLayer = t.layer;
+        lastRef.face = t.face;
+        lastRef.layer = t.layer;
         moves.push(makeMove(t));
       }
       return moves;
@@ -317,13 +327,13 @@
       const D = Math.max(1, parseInt(document.getElementById('id').value) || 1);
       const { n1, nk } = getN();
       const stages = getPath(W, H, D);
-      const lastAxis = { v: null };
+      const lastRef = { face: null, layer: null };
       const phasesData = [];
       for (let i = 0; i < stages.length; i++) {
         const [w, h, d] = stages[i].dims;
         const tmpl = getTemplates(w, h, d);
         if (!tmpl.length) continue;
-        const moves = scramblePhase(tmpl, i === 0 ? n1 : nk, lastAxis);
+        const moves = scramblePhase(tmpl, i === 0 ? n1 : nk, lastRef, stages[i].dims);
         if (moves.length) phasesData.push({ dims: stages[i].dims, qt: stages[i].qt, moves });
       }
       const out = document.getElementById('out');
