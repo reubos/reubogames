@@ -1,7 +1,10 @@
 let gameId = 0;
 
 // Init Fairy Stockfish — falls back to built-in AI if it fails
-stockfish.init().catch(() => {});
+stockfish.init().then(() => {
+  const el = document.getElementById('engineLabel');
+  if (el) { el.textContent = 'Engine: Stockfish'; el.style.color = 'var(--accent2)'; }
+}).catch(() => {});
 
 function newGame(rand960=true) {
   gameId++;
