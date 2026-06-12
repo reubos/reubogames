@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Crazyhouse Chess 960</title>
+<link href="https://fonts.googleapis.com/css2?family=Crimson+Pro:wght@400;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<h1>Crazyhouse</h1>
+<div class="subtitle">Chess 960 · Drop Captures · Self-Capture</div>
+
+<div class="btn-row" style="margin-bottom:16px">
+  <select id="modeSelect" style="width:auto">
+    <option value="pvp">Player vs Player</option>
+    <option value="pve" selected>Player vs AI</option>
+    <option value="eve">AI vs AI</option>
+  </select>
+  <select id="aiDepth" style="width:auto">
+    <option value="1">AI: Easy</option>
+    <option value="2" selected>AI: Medium</option>
+    <option value="3">AI: Hard</option>
+  </select>
+  <button class="primary" onclick="newGame()">New Game (960)</button>
+  <button onclick="newGame(false)">Classic Start</button>
+  <button id="btnUndo" onclick="undoMove()" disabled>Undo</button>
+</div>
+
+<div class="game-wrap">
+  <div class="sidebar" id="sidebarBlack">
+    <div class="panel">
+      <div class="panel-title">Black's Pool</div>
+      <div class="pool" id="poolBlack"></div>
+      <div class="self-cap-hint">Capture own pieces → opponent gains them</div>
+    </div>
+    <div class="status-box">
+      <div class="status-turn" id="turnLabel">White's Turn</div>
+      <div class="status-msg" id="statusMsg">—</div>
+    </div>
+  </div>
+
+  <div class="board-wrap">
+    <div class="eval-bar-wrap">
+      <div class="eval-bar-track">
+        <div class="eval-bar-black"></div>
+        <div class="eval-bar-fill" id="evalBarFill"></div>
+      </div>
+      <div class="eval-label" id="evalLabel">0.0</div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:6px;align-items:center">
+      <div class="board" id="board"></div>
+      <div style="display:flex;gap:8px">
+        <button id="btnCastleQ" onclick="tryCastle('Q')" disabled style="font-size:0.7rem;padding:5px 12px">O-O-O Queenside</button>
+        <button id="btnCastleK" onclick="tryCastle('K')" disabled style="font-size:0.7rem;padding:5px 12px">O-O Kingside</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="sidebar" id="sidebarWhite">
+    <div class="panel">
+      <div class="panel-title">White's Pool</div>
+      <div class="pool" id="poolWhite"></div>
+    </div>
+    <div class="panel">
+      <div class="panel-title">Options</div>
+      <div class="legend">
+        <b style="color:var(--text)">Crazyhouse rules:</b><br>
+        • Captured pieces go to your pool<br>
+        • Drop pieces on empty squares<br>
+        • Pawns can't drop on rank 1/8<br>
+        • Self-capture sends piece to opponent pool<br>
+        <br><b style="color:var(--text)">Chess 960:</b><br>
+        • Random back rank<br>
+        • Castling still works
+      </div>
+    </div>
+    <div style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;overflow:hidden">
+      <div style="display:flex;align-items:center;padding:8px 10px;border-bottom:1px solid var(--border);gap:6px">
+        <span style="font-size:0.6rem;letter-spacing:0.15em;text-transform:uppercase;color:var(--text3);flex:1;min-width:0">Moves</span>
+        <span id="browsingBadge" style="display:none;font-size:0.55rem;letter-spacing:0.1em;text-transform:uppercase;background:var(--bg4);border:1px solid var(--accent);color:var(--accent);padding:2px 6px;border-radius:4px;white-space:nowrap;flex-shrink:0">browsing</span>
+        <div style="display:flex;gap:2px;flex-shrink:0">
+          <button id="btnNavFirst" onclick="jumpTo(0)" style="padding:3px 7px;font-size:0.8rem" disabled>⏮</button>
+          <button id="btnNavPrev" onclick="navHistory(-1)" style="padding:3px 7px;font-size:0.8rem" disabled>◀</button>
+          <button id="btnNavNext" onclick="navHistory(1)" style="padding:3px 7px;font-size:0.8rem" disabled>▶</button>
+          <button id="btnNavLast" onclick="returnToLive()" style="padding:3px 7px;font-size:0.8rem" disabled>⏭</button>
+        </div>
+      </div>
+      <div class="move-log" id="moveLog"><span style="color:var(--text3);font-size:0.65rem">No moves yet</span></div>
+    </div>
+  </div>
+</div>
+
+<div id="promoOverlay" class="promo-overlay" style="display:none">
+  <div class="promo-box">
+    <div class="promo-title">Promote Pawn</div>
+    <div class="promo-pieces" id="promoPieces"></div>
+  </div>
+</div>
+
+<div id="disambigOverlay" style="display:none;position:fixed;inset:0;z-index:200" onclick="closeDisambig()">
+  <div id="disambigBox" style="position:absolute;background:var(--bg2);border:1px solid var(--border2);border-radius:10px;padding:12px 14px;min-width:160px" onclick="event.stopPropagation()">
+    <div style="font-size:0.6rem;letter-spacing:0.12em;text-transform:uppercase;color:var(--text3);margin-bottom:10px">Choose action</div>
+    <div id="disambigOptions" style="display:flex;flex-direction:column;gap:6px"></div>
+  </div>
+</div>
+
+<script src="chess.js"></script>
+<script src="stockfish-interface.js"></script>
+<script src="ai.js"></script>
+<script src="ui.js"></script>
+</body>
+</html>
