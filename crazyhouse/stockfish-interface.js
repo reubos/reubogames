@@ -26,6 +26,10 @@ class StockfishInterface {
     if (this.worker) this.worker.postMessage(command);
   }
 
+  setSkillLevel(level) {
+    this._cmd(`setoption name Skill Level value ${level}`);
+  }
+
   stop() {
     this._cmd('stop');
     // Drain the bestmove response then clear the handler

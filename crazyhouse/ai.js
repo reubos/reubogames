@@ -386,8 +386,11 @@ async function aiMove() {
     return;
   }
 
-  const timeBudgets = [0, 800, 1800, 3500];
-  const budget = timeBudgets[aiDepth] || 1800;
+  const sfSkill   = [0, 3, 10, 20];
+  const timeBudgets = [0, 500, 1200, 2500];
+  const budget = timeBudgets[aiDepth] || 1200;
+
+  stockfish.setSkillLevel(sfSkill[aiDepth] ?? 10);
 
   const fen = boardToFen();
   const sfResult = await stockfish.getBestMove(fen, budget);
