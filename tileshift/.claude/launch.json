@@ -2,9 +2,9 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "sliding-puzzle",
-      "runtimeExecutable": "npx",
-      "runtimeArgs": ["serve", "-p", "3456", "-s", "."],
+      "name": "tileshift",
+      "runtimeExecutable": "powershell.exe",
+      "runtimeArgs": ["-ExecutionPolicy", "Bypass", "-File", "serve.ps1", "-Port", "3456"],
       "port": 3456
     }
   ]

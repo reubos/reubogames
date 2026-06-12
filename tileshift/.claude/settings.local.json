@@ -1,7 +1,32 @@
 {
   "permissions": {
     "allow": [
-      "mcp__Claude_Preview__preview_start"
+      "mcp__Claude_Preview__preview_start",
+      "PowerShell(Get-Command node, npx, serve -ErrorAction SilentlyContinue)",
+      "PowerShell(try { \\(Get-Command node -ErrorAction Stop\\).Source } catch { \"not found\" }; try { \\(Get-Command npx -ErrorAction Stop\\).Source } catch { \"not found\" })",
+      "PowerShell(Get-ChildItem \"C:\\\\Program Files\\\\nodejs\" -ErrorAction SilentlyContinue | Select-Object Name; Get-ChildItem \"$env:APPDATA\\\\npm\" -ErrorAction SilentlyContinue | Select-Object Name | Select-Object -First 10)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git push *)",
+      "Bash(python3 -m http.server 3456 --directory \"C:/Users/reubm/Documents/Claude Projects/reubogames/tileshift\")",
+      "Bash(ls /c/Python*)",
+      "Read(//c/Users/reubm/AppData/Local/Programs/**)",
+      "Read(//usr/**)",
+      "Read(//mingw64/**)",
+      "PowerShell(Get-Command node, npx, python3, python -ErrorAction SilentlyContinue)",
+      "PowerShell($env:Path.Split\\(';'\\) | ForEach-Object { if \\(Test-Path \"$_\\\\node.exe\"\\) { Write-Output \"$_\\\\node.exe\" } })",
+      "Bash(ls \"/c/Users/reubm/AppData/Roaming/Claude/local-agent-mode-sessions/skills-plugin/42cbadb2-e4ae-4097-b6ac-b4350bcb3702/4914c204-42d5-4a59-932a-2c43dfbaa4ee/bin/\")",
+      "PowerShell(Get-Command npx.cmd -ErrorAction SilentlyContinue; \\(Get-Command node -ErrorAction SilentlyContinue\\).Source)",
+      "Bash(grep -o '\"2x5 loopover\".\\\\{0,500\\\\}' \"C:/Users/reubm/.claude/projects/C--Users-reubm-Documents-Claude-Projects-reubogames-tileshift/3452f0fa-166d-48ba-952c-8221d88a5c01.jsonl\")",
+      "Bash(grep -o '\"2x5 loopover.\\\\{0,1000\\\\}' \"C:/Users/reubm/.claude/projects/C--Users-reubm-Documents-Claude-Projects-reubogames-tileshift/3452f0fa-166d-48ba-952c-8221d88a5c01.jsonl\")",
+      "Bash(grep -o '\"X-loopover.\\\\{0,1500\\\\}' \"C:/Users/reubm/.claude/projects/C--Users-reubm-Documents-Claude-Projects-reubogames-tileshift/3452f0fa-166d-48ba-952c-8221d88a5c01.jsonl\")",
+      "Bash(grep -o '\"Z slide.\\\\{0,1000\\\\}' \"C:/Users/reubm/.claude/projects/C--Users-reubm-Documents-Claude-Projects-reubogames-tileshift/3452f0fa-166d-48ba-952c-8221d88a5c01.jsonl\")",
+      "Bash(grep -o '\"bandaged loopover.\\\\{0,2500\\\\}' \"C:/Users/reubm/.claude/projects/C--Users-reubm-Documents-Claude-Projects-reubogames-tileshift/3452f0fa-166d-48ba-952c-8221d88a5c01.jsonl\")",
+      "Bash(grep -o '\"bandaged loopover 2.\\\\{0,500\\\\}' \"C:/Users/reubm/.claude/projects/C--Users-reubm-Documents-Claude-Projects-reubogames-tileshift/3452f0fa-166d-48ba-952c-8221d88a5c01.jsonl\")",
+      "Bash(grep -o 'colWrap.\\\\{0,100\\\\}')",
+      "Bash(grep -o '\"bandaged loopover 3.\\\\{0,3000\\\\}' \"C:/Users/reubm/.claude/projects/C--Users-reubm-Documents-Claude-Projects-reubogames-tileshift/3452f0fa-166d-48ba-952c-8221d88a5c01.jsonl\")",
+      "Bash(xargs wc -l)",
+      "Bash(git commit *)"
     ]
   }
 }

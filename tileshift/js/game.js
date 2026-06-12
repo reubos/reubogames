@@ -190,7 +190,18 @@ function getRndOpts() {
 // Auto-solve
 // ---------------------------------------------------------------------------
 
-let _solveTimer = null;
+let _solveTimer   = null;
+let _solverWorker = null;
+let _solveAbort   = false; // cancellation flag for legacy async path
+
+// Serialise a layout for postMessage (converts Sets to Arrays)
+function _serializeLayout(layout) {
+  return {
+    ...layout,
+    barriers: layout.barriers instanceof Set ? [...layout.barriers] : (layout.barriers || []),
+    blocked:  layout.blocked  instanceof Set ? [...layout.blocked]  : (layout.blocked  || []),
+  };
+}
 
 // Invert a single move (reverses tile move direction, or flips slide direction)
 function _invertMove(m) {
@@ -198,7 +209,7 @@ function _invertMove(m) {
   return {...m, dr: -m.dr, dc: -m.dc};
 }
 
-async function showSolution() {
+function showSolution() {
   if (!gameState || gameState.won) return;
   stopAutoSolve();
 
@@ -208,100 +219,142 @@ async function showSolution() {
   if (btn) { btn.disabled = true; btn.textContent = '⏳ solving...'; }
   if (status) status.style.display = 'block';
   _setShuffling(true);
+  _solveAbort = false;
 
-  // Snapshot the current board state — used consistently for solving and shortcutting
+  // Web Workers are blocked on file:// origins (SecurityError). Fall back to
+  // the legacy main-thread async solver when not served over HTTP.
+  if (window.location.protocol === 'file:') {
+    _showSolutionAsync();
+    return;
+  }
+
+  // Snapshot state before handing off to the worker
   const snapBoard   = [...gameState.board];
   const snapTilePos = _copyTilePos(gameState.tilePos);
-  const layout      = gameState.layout;
-  const goalPos     = gameState.goalPos;
 
-  // Updates the status line with label + percentage
+  _solverWorker = new Worker('js/solver-worker.js');
+
+  _solverWorker.onmessage = function(e) {
+    const { type } = e.data;
+    if (type === 'progress') {
+      if (status) {
+        const pctStr = e.data.pct != null ? ` ${Math.round(e.data.pct * 100)}%` : '';
+        status.textContent = e.data.label + pctStr;
+      }
+    } else if (type === 'result') {
+      _solverWorker = null;
+      _setShuffling(false);
+      _handleSolveResult(e.data, snapBoard, snapTilePos);
+    }
+  };
+
+  _solverWorker.onerror = function(err) {
+    console.error('[solver worker]', err);
+    _solverWorker = null;
+    _setShuffling(false);
+    stopAutoSolve();
+  };
+
+  _solverWorker.postMessage({
+    type:         'solve',
+    board:        snapBoard,
+    tilePos:      [...snapTilePos.entries()],
+    goalPos:      [...gameState.goalPos.entries()],
+    scrambleMoves: gameState.scrambleMoves || [],
+    moveHistory:   gameState.moveHistory   || [],
+    layout:       _serializeLayout(gameState.layout),
+  });
+}
+
+// Legacy main-thread async solver — used when running from file:// (no worker).
+// Uses solvePuzzle / solvePuzzleWeighted / solvePuzzleGreedy / shortenSolution
+// from solver.js, which yield via setTimeout so the UI stays responsive.
+async function _showSolutionAsync() {
+  if (!gameState) return;
+
+  const status = document.getElementById('solveStatus');
+
   const setStatus = (label, pct) => {
     if (!status) return;
     const pctStr = pct != null ? ` ${Math.round(pct * 100)}%` : '';
     status.textContent = label + pctStr;
   };
 
-  // Stage 1: optimal A*
-  setStatus('trying to solve... (first attempt)', 0);
-  let result    = await solvePuzzle(layout, snapBoard, snapTilePos, goalPos,
-    pct => setStatus('trying to solve... (first attempt)', pct)
-  );
+  const board   = [...gameState.board];
+  const tilePos = _copyTilePos(gameState.tilePos);
+  const goalPos = gameState.goalPos;
+  const layout  = gameState.layout;
+  const scrambleMoves = gameState.scrambleMoves || [];
+  const moveHistory   = gameState.moveHistory   || [];
+
+  let result = null;
   let solveStage = 1;
 
-  // Stage 2: weighted A* W=10
-  if (result === null) {
+  // Stage 1: optimal A*
+  setStatus('trying to solve... (first attempt)', 0);
+  const r1 = await solvePuzzle(layout, board, tilePos, goalPos,
+    pct => setStatus('trying to solve... (first attempt)', pct));
+  if (_solveAbort || !gameState) return;
+  if (r1) { result = r1; solveStage = 1; }
+
+  // Stage 2: weighted A*
+  if (!result) {
     setStatus('trying to solve... (second attempt)', 0);
-    result     = await solvePuzzleWeighted(layout, snapBoard, snapTilePos, goalPos,
-      pct => setStatus('trying to solve... (second attempt)', pct)
-    );
-    solveStage = 2;
+    const r2 = await solvePuzzleWeighted(layout, board, tilePos, goalPos,
+      pct => setStatus('trying to solve... (second attempt)', pct));
+    if (_solveAbort || !gameState) return;
+    if (r2) { result = r2; solveStage = 2; }
   }
 
-  // Stage 3: pure greedy (always returns something — worst case a partial)
-  if (result === null) {
+  // Stage 3: pure greedy
+  if (!result) {
     setStatus('trying to solve... (third attempt)', 0);
-    result     = await solvePuzzleGreedy(layout, snapBoard, snapTilePos, goalPos,
-      pct => setStatus('trying to solve... (third attempt)', pct)
-    );
+    result = await solvePuzzleGreedy(layout, board, tilePos, goalPos,
+      pct => setStatus('trying to solve... (third attempt)', pct));
+    if (_solveAbort || !gameState) return;
     solveStage = 3;
   }
 
-  // Backup solution: if stage 3 was partial, reconstruct from inverted scramble + inverted player moves
-  if (result.partial && gameState.scrambleMoves && gameState.scrambleMoves.length > 0) {
-    const invertedScramble  = [...gameState.scrambleMoves].reverse().map(_invertMove);
-    const invertedHistory   = [...gameState.moveHistory].reverse().map(_invertMove);
-    const backupMoves       = [...invertedHistory, ...invertedScramble];
+  // Backup: invert scramble + history
+  if (result.partial && scrambleMoves.length > 0) {
+    const inv = m => m.slide ? {...m, dir: -m.dir} : {...m, dr: -m.dr, dc: -m.dc};
+    const backupMoves = [...[...moveHistory].reverse().map(inv), ...[...scrambleMoves].reverse().map(inv)];
     if (backupMoves.length > 0) {
-      console.log(`[backup] using inverted scramble (${invertedScramble.length} moves) + inverted player history (${invertedHistory.length} moves) = ${backupMoves.length} total`);
-      result     = { moves: backupMoves, suboptimal: true, partial: false, bestH: 0, backup: true };
-      solveStage = 3; // use Stage 3 shortcut params for backup
+      result = { moves: backupMoves, suboptimal: true, partial: false, bestH: 0, backup: true };
     }
   }
 
-  // Shortcutting — only for suboptimal complete solutions
-  // Stage 2:          shortenSolution only (start 0%, w=5/2, 10K each)
-  // Stage 3/backup:   up to 5 segment passes (w=10, 10K) until no progress,
-  //                   then shortenSolution (start 80%, w=5, 10K — single pass)
-  if (result.suboptimal && !result.partial) {
+  // Shortcutting (only for complete suboptimal solutions)
+  if (result.suboptimal && !result.partial && !result.backup) {
     if (solveStage === 3) {
       const MAX_SEG_PASSES = 6;
       for (let segPass = 1; segPass <= MAX_SEG_PASSES; segPass++) {
-        const segments  = [50, 20, 10, 6, 4, 3][segPass - 1]; // 2% / 5% / 10% / ~17% / 25% / ~33% chunks
+        if (_solveAbort || !gameState) return;
+        const segments = [50, 20, 10, 6, 4, 3][segPass - 1];
         const beforeSeg = result.moves.length;
         setStatus(`shortcutting (segments ${segPass}/${MAX_SEG_PASSES})...`, 0);
-        const segResult = await shortenBySegments(layout, snapBoard, snapTilePos,
-          result.moves, 10, 10000, segments,
-          pct => setStatus(`shortcutting (segments ${segPass}/${MAX_SEG_PASSES})...`, pct)
-        );
-        if (segResult.length < beforeSeg) {
-          console.log(`[segment] pass ${segPass}: ${beforeSeg} → ${segResult.length} moves`);
-        } else {
-          console.log(`[segment] pass ${segPass}: no improvement`);
-        }
-        result = { ...result, moves: segResult };
+        result.moves = await shortenBySegments(layout, board, tilePos, result.moves, 10, 10000, segments,
+          pct => setStatus(`shortcutting (segments ${segPass}/${MAX_SEG_PASSES})...`, pct));
+        if (result.moves.length >= beforeSeg) break;
       }
     }
-
-    // shortenSolution for Stage 2 and Stage 3 only (not Backup)
-    if (!result.backup) {
-      const before    = result.moves.length;
-      const startFrac = solveStage === 2 ? 0.0 : 0.8;
-      const weights   = [5, 2];
-      const budgets   = [10000, 10000];
-      setStatus('shortcutting...', 0);
-      const shortened = await shortenSolution(layout, snapBoard, snapTilePos, goalPos,
-        result.moves, startFrac, weights, budgets,
-        pct => setStatus('shortcutting...', pct)
-      );
-      if (shortened.length < before) console.log(`[shorten] total: ${before} → ${shortened.length} moves`);
-      result = { ...result, moves: shortened };
-    }
+    if (_solveAbort || !gameState) return;
+    const startFrac = solveStage === 2 ? 0.0 : 0.8;
+    setStatus('shortcutting...', 0);
+    result.moves = await shortenSolution(layout, board, tilePos, goalPos, result.moves, startFrac, [5, 2], [10000, 10000],
+      pct => setStatus('shortcutting...', pct));
   }
 
-  const { moves, suboptimal, partial, bestH } = result;
+  if (_solveAbort || !gameState) return;
 
   _setShuffling(false);
+  _handleSolveResult(result, board, tilePos);
+}
+
+function _handleSolveResult(data, snapBoard, snapTilePos) {
+  const { moves, suboptimal, partial, bestH, backup } = data;
+  const btn    = document.getElementById('solveBtn');
+  const status = document.getElementById('solveStatus');
 
   if (moves.length === 0 && !partial) {
     if (btn)    { btn.disabled = false; btn.innerHTML = '🔍 autosolve<br><span style="font-size:9px;color:var(--mut);font-weight:normal">(takes a long time on hard puzzles)</span>'; }
@@ -312,7 +365,7 @@ async function showSolution() {
   let label;
   if (partial) {
     label = `couldn't fully solve — playing closest attempt (${bestH} step${bestH !== 1 ? 's' : ''} away)`;
-  } else if (result.backup) {
+  } else if (backup) {
     label = `playing backup solution — ${moves.length} moves`;
   } else if (suboptimal) {
     label = `playing suboptimal solution — ${moves.length} moves`;
@@ -341,8 +394,11 @@ async function showSolution() {
 }
 
 function stopAutoSolve() {
-  if (_solveTimer) { clearTimeout(_solveTimer); _solveTimer = null; }
+  _solveAbort = true; // signal legacy async path to stop
+  if (_solverWorker) { _solverWorker.terminate(); _solverWorker = null; }
+  if (_solveTimer)   { clearTimeout(_solveTimer); _solveTimer = null; }
   if (gameState) gameState.autoSolving = false;
+  _setShuffling(false);
   const btn    = document.getElementById('solveBtn');
   const status = document.getElementById('solveStatus');
   if (btn)    { btn.disabled = false; btn.innerHTML = '🔍 autosolve<br><span style="font-size:9px;color:var(--mut);font-weight:normal">(takes a long time on hard puzzles)</span>'; }
