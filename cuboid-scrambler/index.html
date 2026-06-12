@@ -1,0 +1,662 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cuboid Scramble Generator</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/tabler-icons.min.css">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #f5f5f0;
+      color: #1a1a18;
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      padding: 2rem 1rem;
+    }
+
+    .container {
+      width: 100%;
+      max-width: 680px;
+    }
+
+    h1 {
+      font-size: 22px;
+      font-weight: 500;
+      margin-bottom: 1.5rem;
+    }
+
+    label {
+      font-size: 13px;
+      color: #666;
+      display: block;
+      margin-bottom: 6px;
+    }
+
+    .inputs {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 16px;
+      margin-bottom: 1.25rem;
+    }
+
+    input[type="number"] {
+      width: 100%;
+      text-align: center;
+      font-size: 18px;
+      font-weight: 500;
+      padding: 8px;
+      border: 0.5px solid #ccc;
+      border-radius: 8px;
+      background: #fff;
+      color: #1a1a18;
+      outline: none;
+    }
+
+    input[type="number"]:focus {
+      box-shadow: 0 0 0 3px rgba(0,0,0,0.1);
+    }
+
+    .slider-row {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      margin-bottom: 1.25rem;
+    }
+
+    input.slider-num {
+      width: 48px;
+      text-align: center;
+      font-size: 14px;
+      font-weight: 500;
+      padding: 4px 6px;
+      border: 0.5px solid #ccc;
+      border-radius: 6px;
+      background: #fff;
+      color: #1a1a18;
+    }
+
+    .slider-row span {
+      font-size: 13px;
+      color: #666;
+      white-space: nowrap;
+    }
+
+
+    input[type="range"] {
+      flex: 1;
+      accent-color: #1a1a18;
+    }
+
+    button {
+      font-size: 14px;
+      padding: 8px 20px;
+      border: 0.5px solid #ccc;
+      border-radius: 8px;
+      background: #fff;
+      color: #1a1a18;
+      cursor: pointer;
+    }
+
+    button:hover { background: #f0f0ec; }
+    button:active { transform: scale(0.98); }
+
+    .phase-label {
+      font-size: 12px;
+      color: #666;
+      margin: 14px 0 6px;
+    }
+
+    .phase-label strong {
+      color: #1a1a18;
+      font-weight: 500;
+    }
+
+    .move {
+      display: inline-block;
+      font-family: 'Courier New', monospace;
+      font-size: 15px;
+      padding: 3px 6px;
+      margin: 2px;
+      border-radius: 6px;
+      background: #ebebeb;
+      border: 0.5px solid #d0d0d0;
+      color: #1a1a18;
+    }
+
+    .move.qt {
+      background: #e6f1fb;
+      border-color: #a0c4ed;
+      color: #185fa5;
+    }
+
+    .full-scramble {
+      font-family: 'Courier New', monospace;
+      font-size: 14px;
+      line-height: 1.8;
+      word-break: break-all;
+      padding: 12px 14px;
+      background: #ebebeb;
+      border: 0.5px solid #d0d0d0;
+      border-radius: 8px;
+      color: #1a1a18;
+      margin-top: 8px;
+    }
+
+    .scramble-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 4px;
+    }
+
+    .scramble-header span {
+      font-size: 12px;
+      color: #666;
+    }
+
+    .scramble-header button {
+      font-size: 12px;
+      padding: 3px 10px;
+    }
+
+    #out { margin-top: 1.25rem; }
+
+    #cuboid-vis { margin: 1.25rem 0; display: flex; justify-content: center; }
+    #cuboid-vis svg { overflow: visible; }
+
+    @media (prefers-color-scheme: dark) {
+      .cv-front { fill: #1e3d1e; }
+      .cv-top   { fill: #274927; }
+      .cv-right { fill: #162816; }
+      .cv-stroke { stroke: #4ade80; }
+      .cv-hidden { stroke: #4ade80; opacity: 0.3; }
+      .cv-label  { fill: #d4e8d4; }
+      .cv-dim    { stroke: #86a886; }
+      .cv-grid      { stroke: #4ade80; opacity: 0.25; }
+      .cv-highlight { fill: rgba(251,191,36,0.45); stroke: #f59e0b; }
+    }
+    @media (prefers-color-scheme: light), (prefers-color-scheme: no-preference) {
+      .cv-front { fill: #ddeedd; }
+      .cv-top   { fill: #cce0cc; }
+      .cv-right { fill: #b8cfb8; }
+      .cv-stroke { stroke: #3a6a3a; }
+      .cv-hidden { stroke: #3a6a3a; opacity: 0.25; }
+      .cv-label  { fill: #2a2a28; }
+      .cv-dim    { stroke: #5a8a5a; }
+      .cv-grid      { stroke: #3a6a3a; opacity: 0.25; }
+      .cv-highlight { fill: rgba(251,191,36,0.45); stroke: #d97706; }
+    }
+
+    #move-tooltip {
+      position: fixed; display: none; z-index: 1000; pointer-events: none;
+      border-radius: 8px; padding: 6px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+      background: #f5f5f0; border: 1px solid #ccc;
+    }
+    @media (prefers-color-scheme: dark) {
+      #move-tooltip { background: #2a2a28; border-color: #444; }
+    }
+
+    @media (prefers-color-scheme: dark) {
+      body { background: #1a1a18; color: #e8e8e4; }
+      input[type="number"], .slider-num { background: #2a2a28; border-color: #444; color: #e8e8e4; }
+      button { background: #2a2a28; border-color: #444; color: #e8e8e4; }
+      button:hover { background: #333330; }
+      label, .phase-label, .scramble-header span, .slider-row span { color: #999; }
+      .phase-label strong { color: #e8e8e4; }
+      .move { background: #2a2a28; border-color: #444; color: #e8e8e4; }
+      .move.qt { background: #0c2a44; border-color: #185fa5; color: #78b4e8; }
+      .full-scramble { background: #2a2a28; border-color: #444; color: #e8e8e4; }
+      h1 { color: #e8e8e4; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <a href="../" style="font-size:13px;color:#666;text-decoration:none;display:inline-block;margin-bottom:1.25rem;">← reubo's website</a>
+    <h1>Cuboid scramble generator</h1>
+
+    <div class="inputs">
+      <div>
+        <label for="iw">Width (L–R)</label>
+        <input type="number" id="iw" min="1" max="20" value="3">
+      </div>
+      <div>
+        <label for="ih">Height (U–D)</label>
+        <input type="number" id="ih" min="1" max="20" value="5">
+      </div>
+      <div>
+        <label for="id">Depth (F–B)</label>
+        <input type="number" id="id" min="1" max="20" value="7">
+      </div>
+    </div>
+
+    <div id="cuboid-vis"></div>
+
+    <div id="sliders-container"></div>
+
+    <button onclick="doGenerate()">Generate scramble</button>
+
+    <div id="out"></div>
+  </div>
+  <div id="move-tooltip"><div id="move-tooltip-inner"></div></div>
+
+  <script>
+    function drawCuboid() {
+      const W = Math.max(1, parseInt(document.getElementById('iw').value) || 1);
+      const H = Math.max(1, parseInt(document.getElementById('ih').value) || 1);
+      const D = Math.max(1, parseInt(document.getElementById('id').value) || 1);
+
+      const VW = 320, VH = 180;
+      const PL = 52, PR = 24, PT = 18, PB = 36;
+      const dw = VW - PL - PR, dh = VH - PT - PB;
+      const AX = 0.48, AY = 0.28;
+
+      let s = Math.min(dw / (W + D * AX), dh / (H + D * AY));
+      s = Math.min(s, 28);
+
+      const cw = W * s, ch = H * s, ddx = D * s * AX, ddy = D * s * AY;
+      const ox = PL + (dw - cw - ddx) / 2;
+      const oy = PT + ddy + (dh - ch - ddy) / 2 + ch;
+
+      const C = {
+        fbl:[ox,oy], fbr:[ox+cw,oy], ftr:[ox+cw,oy-ch], ftl:[ox,oy-ch],
+        bbl:[ox+ddx,oy-ddy], bbr:[ox+cw+ddx,oy-ddy],
+        btr:[ox+cw+ddx,oy-ch-ddy], btl:[ox+ddx,oy-ch-ddy]
+      };
+      const v = n => n.toFixed(1);
+      const ps = ks => ks.map(k => C[k].map(v).join(',')).join(' ');
+      const ln = (a,b,cls) => `<line x1="${v(a[0])}" y1="${v(a[1])}" x2="${v(b[0])}" y2="${v(b[1])}" class="${cls}" stroke-width="1" fill="none"/>`;
+
+      let svg = `<svg width="100%" viewBox="0 0 ${VW} ${VH}" xmlns="http://www.w3.org/2000/svg">`;
+
+      // Hidden back edges
+      svg += ln(C.fbl, C.bbl, 'cv-hidden cv-dim');
+      svg += ln(C.bbl, C.bbr, 'cv-hidden cv-dim');
+      svg += ln(C.bbl, C.btl, 'cv-hidden cv-dim');
+
+      // Three visible faces
+      svg += `<polygon points="${ps(['fbr','bbr','btr','ftr'])}" class="cv-right cv-stroke" stroke-width="1.5"/>`;
+      svg += `<polygon points="${ps(['ftl','ftr','btr','btl'])}" class="cv-top cv-stroke" stroke-width="1.5"/>`;
+      svg += `<polygon points="${ps(['fbl','fbr','ftr','ftl'])}" class="cv-front cv-stroke" stroke-width="1.5"/>`;
+
+      // Interior grid lines
+      function lerp2(a, b, t) { return [a[0] + (b[0]-a[0])*t, a[1] + (b[1]-a[1])*t]; }
+      function faceGrid(tl, tr, br, bl, cols, rows, cls) {
+        for (let i = 1; i < cols; i++) {
+          const t = i / cols;
+          const p1 = lerp2(tl, tr, t), p2 = lerp2(bl, br, t);
+          svg += `<line x1="${v(p1[0])}" y1="${v(p1[1])}" x2="${v(p2[0])}" y2="${v(p2[1])}" class="${cls}" stroke-width="0.8" fill="none"/>`;
+        }
+        for (let i = 1; i < rows; i++) {
+          const t = i / rows;
+          const p1 = lerp2(tl, bl, t), p2 = lerp2(tr, br, t);
+          svg += `<line x1="${v(p1[0])}" y1="${v(p1[1])}" x2="${v(p2[0])}" y2="${v(p2[1])}" class="${cls}" stroke-width="0.8" fill="none"/>`;
+        }
+      }
+      // Front face: W columns, H rows; corners tl,tr,br,bl
+      faceGrid(C.ftl, C.ftr, C.fbr, C.fbl, W, H, 'cv-grid');
+      // Top face: W columns, D rows
+      faceGrid(C.btl, C.btr, C.ftr, C.ftl, W, D, 'cv-grid');
+      // Right face: D columns, H rows
+      faceGrid(C.ftr, C.btr, C.bbr, C.fbr, D, H, 'cv-grid');
+
+      const lf = `font-size="11" font-family="Segoe UI, sans-serif"`;
+
+      // Width: arrow + label below front-bottom edge
+      const wMx = v(ox + cw / 2), wAy = v(oy + 7), wLy = v(oy + 19);
+      svg += `<line x1="${v(ox+2)}" y1="${wAy}" x2="${v(ox+cw-2)}" y2="${wAy}" class="cv-dim" stroke-width="1" fill="none"/>`;
+      svg += `<text x="${wMx}" y="${wLy}" text-anchor="middle" ${lf} class="cv-label">width ${W}</text>`;
+
+      // Height: arrow + label left of front-left edge
+      const hMy = v(oy - ch / 2), hAx = v(ox - 8), hLx = v(ox - 20);
+      svg += `<line x1="${hAx}" y1="${v(oy-2)}" x2="${hAx}" y2="${v(oy-ch+2)}" class="cv-dim" stroke-width="1" fill="none"/>`;
+      svg += `<text x="${hLx}" y="${hMy}" text-anchor="middle" ${lf} class="cv-label" transform="rotate(-90,${hLx},${hMy})">height ${H}</text>`;
+
+      // Depth: label along the bottom-right depth edge
+      const dMx = v((C.fbr[0] + C.bbr[0]) / 2 + 6);
+      const dMy = v((C.fbr[1] + C.bbr[1]) / 2 + 12);
+      svg += `<line x1="${v(C.fbr[0]+1)}" y1="${v(C.fbr[1]-1)}" x2="${v(C.bbr[0]-1)}" y2="${v(C.bbr[1]+1)}" class="cv-dim" stroke-width="1" fill="none"/>`;
+      svg += `<text x="${dMx}" y="${dMy}" text-anchor="start" ${lf} class="cv-label">depth ${D}</text>`;
+
+      svg += '</svg>';
+      document.getElementById('cuboid-vis').innerHTML = svg;
+      renderSliders(W, H, D);
+    }
+
+    function getN() {
+      return Array.from(document.querySelectorAll('.phase-slider')).map(s => parseInt(s.value));
+    }
+
+    function countPhases(w, h, d) {
+      let dims = [w, h, d], count = 0;
+      for (let iter = 0; iter < 20; iter++) {
+        const inc = canInc(...dims);
+        count++;
+        if (!inc.length) break;
+        const maxHi = Math.max(...inc.map(o => o.hi));
+        const topHi = inc.filter(o => o.hi === maxHi);
+        const best = topHi.filter(o => o.lo === Math.max(...topHi.map(o => o.lo)))[0];
+        dims = applyRed(dims, best);
+      }
+      return count;
+    }
+
+    function renderSliders(w, h, d) {
+      const count = countPhases(w, h, d);
+      const container = document.getElementById('sliders-container');
+      const prev = Array.from(container.querySelectorAll('.phase-slider')).map(s => parseInt(s.value));
+      let html = '';
+      for (let i = 0; i < count; i++) {
+        const val = prev[i] ?? 20;
+        const label = count === 1 ? 'Moves' : `Phase ${i + 1}`;
+        html += `<div class="slider-row">
+          <span>${label}</span>
+          <input type="range" class="phase-slider" min="5" max="50" step="1" value="${val}" data-idx="${i}">
+          <input type="number" class="slider-num phase-num" min="5" max="50" step="1" value="${val}" data-idx="${i}">
+        </div>`;
+      }
+      container.innerHTML = html;
+      container.querySelectorAll('.phase-slider').forEach(slider => {
+        const num = container.querySelector(`.phase-num[data-idx="${slider.dataset.idx}"]`);
+        slider.addEventListener('input', () => { num.value = slider.value; });
+        num.addEventListener('input', () => {
+          const v = Math.min(50, Math.max(5, parseInt(num.value) || 5));
+          slider.value = v; num.value = v;
+        });
+      });
+    }
+
+    ['iw', 'ih', 'id'].forEach(id => {
+      document.getElementById(id).addEventListener('input', drawCuboid);
+    });
+    drawCuboid();
+
+    function faceAxis(f) { return f === 'R' || f === 'L' ? 'x' : f === 'U' || f === 'D' ? 'y' : 'z'; }
+    function faceAvail(f, w, h, d) { return f === 'R' || f === 'L' ? w >= 2 : f === 'U' || f === 'D' ? h >= 2 : d >= 2; }
+    function faceQT(f, w, h, d) {
+      if (f === 'R' || f === 'L') return h === d;
+      if (f === 'U' || f === 'D') return w === d;
+      return w === h;
+    }
+    function maxLayers(f, w, h, d) {
+      if (f === 'R' || f === 'L') return Math.floor(w / 2);
+      if (f === 'U' || f === 'D') return Math.floor(h / 2);
+      return Math.floor(d / 2);
+    }
+    function getTemplates(w, h, d) {
+      const out = [];
+      for (const f of ['R', 'L', 'U', 'D', 'F', 'B']) {
+        if (!faceAvail(f, w, h, d)) continue;
+        const qt = faceQT(f, w, h, d);
+        const ml = maxLayers(f, w, h, d);
+        for (let l = 1; l <= ml; l++) out.push({ face: f, layer: l, qt });
+      }
+      return out;
+    }
+    function facesQT(w, h, d) {
+      const a = [];
+      if (w >= 2 && h === d) a.push('R/L');
+      if (h >= 2 && w === d) a.push('U/D');
+      if (d >= 2 && w === h) a.push('F/B');
+      return a;
+    }
+    function canInc(w, h, d) {
+      const opts = [];
+      if (w >= 2 && h > 1 && d > 1 && h !== d && h % 2 === d % 2) opts.push({ label: 'R/L', hi: Math.max(h, d), lo: Math.min(h, d), idx: [1, 2] });
+      if (h >= 2 && w > 1 && d > 1 && w !== d && w % 2 === d % 2) opts.push({ label: 'U/D', hi: Math.max(w, d), lo: Math.min(w, d), idx: [0, 2] });
+      if (d >= 2 && w > 1 && h > 1 && w !== h && w % 2 === h % 2) opts.push({ label: 'F/B', hi: Math.max(w, h), lo: Math.min(w, h), idx: [0, 1] });
+      return opts;
+    }
+    function applyRed(dims, opt) {
+      const nd = [...dims];
+      const [i, j] = opt.idx;
+      if (nd[i] > nd[j]) nd[i] = opt.lo; else nd[j] = opt.lo;
+      return nd;
+    }
+    function getPath(w, h, d) {
+      const stages = [];
+      let dims = [w, h, d];
+      for (let iter = 0; iter < 20; iter++) {
+        const qt = facesQT(...dims);
+        const inc = canInc(...dims);
+        stages.push({ dims: [...dims], qt, inc });
+        if (!inc.length) break;
+        const maxHi = Math.max(...inc.map(o => o.hi));
+        const topHi = inc.filter(o => o.hi === maxHi);
+        const maxLo = Math.max(...topHi.map(o => o.lo));
+        const top = topHi.filter(o => o.lo === maxLo);
+        const best = top[Math.floor(Math.random() * top.length)];
+        dims = applyRed(dims, best);
+      }
+      return stages;
+    }
+    function makeMove(t) {
+      const pre = t.layer > 1 ? String(t.layer) : '';
+      const mod = t.qt ? ["", "'", "2"][Math.floor(Math.random() * 3)] : '2';
+      return pre + t.face + mod;
+    }
+    function makeQTMove(t) {
+      const pre = t.layer > 1 ? String(t.layer) : '';
+      return pre + t.face + ["", "'"][Math.floor(Math.random() * 2)];
+    }
+    function parseMove(m) {
+      const x = m.match(/^(\d+)?([RLUDFB])(2|')?$/);
+      return x ? { layer: x[1] ? parseInt(x[1]) : 1, face: x[2], mod: x[3] || '' } : null;
+    }
+    function cuboidSVG(W, H, D, face, layer, mod) {
+      const VW=190,VH=130,PL=32,PR=16,PT=22,PB=22;
+      const dw=VW-PL-PR,dh=VH-PT-PB,AX=0.48,AY=0.28;
+      let s=Math.min(dw/(W+D*AX),dh/(H+D*AY),16);
+      const cw=W*s,ch=H*s,ddx=D*s*AX,ddy=D*s*AY;
+      const ox=PL+(dw-cw-ddx)/2, oy=PT+ddy+(dh-ch-ddy)/2+ch;
+      const C={
+        fbl:[ox,oy],fbr:[ox+cw,oy],ftr:[ox+cw,oy-ch],ftl:[ox,oy-ch],
+        bbl:[ox+ddx,oy-ddy],bbr:[ox+cw+ddx,oy-ddy],
+        btr:[ox+cw+ddx,oy-ch-ddy],btl:[ox+ddx,oy-ch-ddy]
+      };
+      const v=n=>n.toFixed(1);
+      const L=(a,b,t)=>[a[0]+(b[0]-a[0])*t,a[1]+(b[1]-a[1])*t];
+      const ps=ks=>ks.map(k=>C[k].map(v).join(',')).join(' ');
+      const pstr=pts=>pts.map(p=>p.map(v).join(',')).join(' ');
+      function grid(tl,tr,br,bl,cols,rows){
+        let g='';
+        for(let i=1;i<cols;i++){const t=i/cols,p1=L(tl,tr,t),p2=L(bl,br,t);g+=`<line x1="${v(p1[0])}" y1="${v(p1[1])}" x2="${v(p2[0])}" y2="${v(p2[1])}" class="cv-grid" stroke-width="0.6" fill="none"/>`;}
+        for(let i=1;i<rows;i++){const t=i/rows,p1=L(tl,bl,t),p2=L(tr,br,t);g+=`<line x1="${v(p1[0])}" y1="${v(p1[1])}" x2="${v(p2[0])}" y2="${v(p2[1])}" class="cv-grid" stroke-width="0.6" fill="none"/>`;}
+        return g;
+      }
+      const hp=[];
+      if(face==='R'||face==='L'){
+        const t0=face==='R'?(W-layer)/W:0, t1=face==='R'?1:layer/W;
+        hp.push([L(C.ftl,C.ftr,t0),L(C.ftl,C.ftr,t1),L(C.fbl,C.fbr,t1),L(C.fbl,C.fbr,t0)]);
+        hp.push([L(C.btl,C.btr,t0),L(C.btl,C.btr,t1),L(C.ftl,C.ftr,t1),L(C.ftl,C.ftr,t0)]);
+        if(face==='R')hp.push([C.ftr,C.btr,C.bbr,C.fbr]);
+      }else if(face==='U'||face==='D'){
+        const t0=face==='U'?0:(H-layer)/H, t1=face==='U'?layer/H:1;
+        hp.push([L(C.ftl,C.fbl,t0),L(C.ftr,C.fbr,t0),L(C.ftr,C.fbr,t1),L(C.ftl,C.fbl,t1)]);
+        hp.push([L(C.ftr,C.fbr,t0),L(C.btr,C.bbr,t0),L(C.btr,C.bbr,t1),L(C.ftr,C.fbr,t1)]);
+        if(face==='U')hp.push([C.btl,C.btr,C.ftr,C.ftl]);
+      }else if(face==='F'||face==='B'){
+        const rt0=face==='F'?(D-layer)/D:0, rt1=face==='F'?1:layer/D;
+        hp.push([L(C.btl,C.ftl,rt0),L(C.btr,C.ftr,rt0),L(C.btr,C.ftr,rt1),L(C.btl,C.ftl,rt1)]);
+        const ct0=face==='F'?0:(D-layer)/D, ct1=face==='F'?layer/D:1;
+        hp.push([L(C.ftr,C.btr,ct0),L(C.ftr,C.btr,ct1),L(C.fbr,C.bbr,ct1),L(C.fbr,C.bbr,ct0)]);
+        if(face==='F')hp.push([C.ftl,C.ftr,C.fbr,C.fbl]);
+      }
+      let svg=`<svg width="${VW}" height="${VH}" viewBox="0 0 ${VW} ${VH}" xmlns="http://www.w3.org/2000/svg">`;
+      svg+=`<line x1="${v(C.fbl[0])}" y1="${v(C.fbl[1])}" x2="${v(C.bbl[0])}" y2="${v(C.bbl[1])}" class="cv-hidden cv-dim" stroke-width="0.8" fill="none"/>`;
+      svg+=`<line x1="${v(C.bbl[0])}" y1="${v(C.bbl[1])}" x2="${v(C.bbr[0])}" y2="${v(C.bbr[1])}" class="cv-hidden cv-dim" stroke-width="0.8" fill="none"/>`;
+      svg+=`<line x1="${v(C.bbl[0])}" y1="${v(C.bbl[1])}" x2="${v(C.btl[0])}" y2="${v(C.btl[1])}" class="cv-hidden cv-dim" stroke-width="0.8" fill="none"/>`;
+      svg+=`<polygon points="${ps(['fbr','bbr','btr','ftr'])}" class="cv-right" stroke="none"/>`;
+      svg+=`<polygon points="${ps(['ftl','ftr','btr','btl'])}" class="cv-top" stroke="none"/>`;
+      svg+=`<polygon points="${ps(['fbl','fbr','ftr','ftl'])}" class="cv-front" stroke="none"/>`;
+      svg+=grid(C.ftl,C.ftr,C.fbr,C.fbl,W,H);
+      svg+=grid(C.btl,C.btr,C.ftr,C.ftl,W,D);
+      svg+=grid(C.ftr,C.btr,C.bbr,C.fbr,D,H);
+      hp.forEach(pts=>{svg+=`<polygon points="${pstr(pts)}" class="cv-highlight" stroke-width="1"/>`;});
+      svg+=`<polygon points="${ps(['fbr','bbr','btr','ftr'])}" fill="none" class="cv-stroke" stroke-width="1"/>`;
+      svg+=`<polygon points="${ps(['ftl','ftr','btr','btl'])}" fill="none" class="cv-stroke" stroke-width="1"/>`;
+      svg+=`<polygon points="${ps(['fbl','fbr','ftr','ftl'])}" fill="none" class="cv-stroke" stroke-width="1"/>`;
+      // Arrow outside cuboid indicating direction of rotation
+      if (mod !== undefined) {
+        const ac='#ff4500', off=8;
+        function ah(x2,y2,dx,dy){const l=Math.sqrt(dx*dx+dy*dy);if(!l)return '';const ux=dx/l,uy=dy/l,s=5,bx=x2-ux*s,by=y2-uy*s;return `<polygon points="${v(x2)},${v(y2)} ${v(bx-uy*s*.5)},${v(by+ux*s*.5)} ${v(bx+uy*s*.5)},${v(by-ux*s*.5)}" fill="${ac}" stroke="none"/>`;}
+        function seg(x1,y1,x2,y2){return `<line x1="${v(x1)}" y1="${v(y1)}" x2="${v(x2)}" y2="${v(y2)}" stroke="${ac}" stroke-width="1.8" fill="none"/>`;}
+        function arr(x1,y1,x2,y2){return seg(x1,y1,x2,y2)+ah(x2,y2,x2-x1,y2-y1);}
+        // draw(x1,y1,x2,y2, cwFwd): cwFwd=true means x1→x2 is the CW direction.
+        // mod='': draw CW; mod="'": draw CCW; mod='2': two arrows both CW.
+        function draw(x1,y1,x2,y2,cwFwd){
+          const [sx,sy,ex,ey]=cwFwd?[x1,y1,x2,y2]:[x2,y2,x1,y1];
+          if(mod==='2'){
+            const dx=ex-sx,dy=ey-sy,l=Math.sqrt(dx*dx+dy*dy)||1,p=4;
+            const px=-dy/l*p,py=dx/l*p;
+            return arr(sx+px,sy+py,ex+px,ey+py)+arr(sx-px,sy-py,ex-px,ey-py);
+          }
+          return mod===''?arr(sx,sy,ex,ey):arr(ex,ey,sx,sy);
+        }
+        if(face==='R'){
+          // Right of front-face right edge; R cw=front up → cwFwd: bottom→top
+          svg+=draw(C.ftr[0]+off,C.fbr[1]-2,C.ftr[0]+off,C.ftr[1]+2,true);
+        } else if(face==='L'){
+          // Left of front-face left edge; L cw=front down → cwFwd: top→bottom
+          svg+=draw(C.ftl[0]-off,C.ftl[1]+2,C.ftl[0]-off,C.fbl[1]-2,true);
+        } else if(face==='U'){
+          // Above front-face top edge; U cw=front left → cwFwd: right→left (x2→x1)
+          svg+=draw(C.ftl[0]+2,C.ftl[1]-off,C.ftr[0]-2,C.ftr[1]-off,false);
+        } else if(face==='D'){
+          // Below front-face bottom edge; D cw=front right → cwFwd: left→right (x1→x2)
+          svg+=draw(C.fbl[0]+2,C.fbl[1]+off,C.fbr[0]-2,C.fbr[1]+off,true);
+        } else if(face==='F'){
+          // Above front-face top edge; F cw=top right → cwFwd: left→right
+          svg+=draw(C.ftl[0]+2,C.ftl[1]-off,C.ftr[0]-2,C.ftr[1]-off,true);
+        } else if(face==='B'){
+          // Above top-face back edge; B cw=top left → cwFwd: right→left (x2→x1)
+          svg+=draw(C.btl[0]+2,C.btl[1]-off,C.btr[0]-2,C.btr[1]-off,false);
+        }
+      }
+      svg+='</svg>';
+      return svg;
+    }
+    const OPP = {R:'L',L:'R',U:'D',D:'U',F:'B',B:'F'};
+    function conflicts(t, lastRef, dims) {
+      if (lastRef.face === null) return false;
+      const {face: lf, layer: ll} = lastRef;
+      // Same face, same layer — always block
+      if (t.face === lf && t.layer === ll) return true;
+      // Opposite face, same layer — block only when N is even and layer == N/2
+      if (t.face === OPP[lf] && t.layer === ll) {
+        const ax = faceAxis(lf);
+        const N = ax === 'x' ? dims[0] : ax === 'y' ? dims[1] : dims[2];
+        if (N % 2 === 0 && ll === N / 2) return true;
+      }
+      return false;
+    }
+    function scramblePhase(templates, n, lastRef, dims, forcedFirst) {
+      const moves = [];
+      for (let j = 0; j < n; j++) {
+        const pool = (j === 0 && forcedFirst && forcedFirst.length) ? forcedFirst : templates;
+        let avail = pool.filter(t => !conflicts(t, lastRef, dims));
+        if (!avail.length) avail = pool;
+        if (!avail.length) break;
+        const t = avail[Math.floor(Math.random() * avail.length)];
+        lastRef.face = t.face;
+        lastRef.layer = t.layer;
+        const isForced = j === 0 && forcedFirst && forcedFirst.length;
+        moves.push(isForced ? makeQTMove(t) : makeMove(t));
+      }
+      return moves;
+    }
+    function phaseDesc(dims, qt) {
+      const [w, h, d] = dims;
+      const avail = [];
+      if (w >= 2) avail.push('R/L');
+      if (h >= 2) avail.push('U/D');
+      if (d >= 2) avail.push('F/B');
+      if (!avail.length) return 'no moves available';
+      const half = avail.filter(f => !qt.includes(f));
+      const parts = [];
+      if (qt.length) parts.push(qt.join(', ') + ' quarter turns');
+      if (half.length) parts.push(half.join(', ') + ' half turns only');
+      return parts.join(' · ');
+    }
+    function doGenerate() {
+      const W = Math.max(1, parseInt(document.getElementById('iw').value) || 1);
+      const H = Math.max(1, parseInt(document.getElementById('ih').value) || 1);
+      const D = Math.max(1, parseInt(document.getElementById('id').value) || 1);
+      const ns = getN();
+      const stages = getPath(W, H, D);
+      const lastRef = { face: null, layer: null };
+      const phasesData = [];
+      let prevQTFaces = new Set();
+      for (let i = 0; i < stages.length; i++) {
+        const [w, h, d] = stages[i].dims;
+        const tmpl = getTemplates(w, h, d);
+        if (!tmpl.length) continue;
+        const curQTFaces = new Set(tmpl.filter(t => t.qt).map(t => t.face));
+        // Forced first move: outer (layer 1) quarter turn on faces that newly gained qt this phase
+        const forcedFirst = i === 0 ? null : tmpl.filter(t => t.qt && t.layer === 1 && !prevQTFaces.has(t.face));
+        prevQTFaces = curQTFaces;
+        const moves = scramblePhase(tmpl, ns[i] ?? ns[ns.length - 1], lastRef, stages[i].dims, forcedFirst);
+        if (moves.length) phasesData.push({ dims: stages[i].dims, qt: stages[i].qt, moves });
+      }
+      const out = document.getElementById('out');
+      if (!phasesData.length) {
+        out.innerHTML = '<p style="color:#666;font-size:14px;margin-top:1rem;">No moves possible for this puzzle.</p>';
+        return;
+      }
+      const allMoves = phasesData.flatMap(p => p.moves);
+      let html = '';
+      phasesData.forEach(p => {
+        const [w, h, d] = p.dims;
+        html += `<div class="phase-label"><strong>${w}×${h}×${d}</strong> — ${phaseDesc(p.dims, p.qt)}</div><div>`;
+        p.moves.forEach(m => {
+          const pm = parseMove(m);
+          const da = pm ? ` data-face="${pm.face}" data-layer="${pm.layer}" data-mod="${pm.mod}" data-w="${w}" data-h="${h}" data-d="${d}"` : '';
+          html += `<span class="move${!m.endsWith('2') ? ' qt' : ''}"${da}>${m}</span>`;
+        });
+        html += `</div>`;
+      });
+      html += `<div style="margin-top:1.25rem;">
+        <div class="scramble-header">
+          <span>Full scramble (${allMoves.length} moves)</span>
+          <button onclick="copyScramble(this)"><i class="ti ti-copy" style="font-size:13px;margin-right:4px;vertical-align:-1px;"></i>Copy</button>
+        </div>
+        <div class="full-scramble" id="full-scr">${allMoves.join(' ')}</div>
+      </div>`;
+      out.innerHTML = html;
+    }
+    function copyScramble(btn) {
+      navigator.clipboard.writeText(document.getElementById('full-scr').textContent).then(() => {
+        btn.textContent = 'Copied!';
+        setTimeout(() => { btn.innerHTML = '<i class="ti ti-copy" style="font-size:13px;margin-right:4px;vertical-align:-1px;"></i>Copy'; }, 1500);
+      });
+    }
+
+    doGenerate();
+
+    (function(){
+      const tt = document.getElementById('move-tooltip');
+      const tti = document.getElementById('move-tooltip-inner');
+      document.getElementById('out').addEventListener('mouseover', function(e) {
+        const span = e.target.closest('.move[data-face]');
+        if (!span) return;
+        const {face, layer, mod, w, h, d} = span.dataset;
+        tti.innerHTML = cuboidSVG(+w, +h, +d, face, +layer, mod);
+        tt.style.display = 'block';
+      });
+      document.getElementById('out').addEventListener('mouseout', function(e) {
+        if (e.target.closest('.move[data-face]')) tt.style.display = 'none';
+      });
+      document.addEventListener('mousemove', function(e) {
+        if (tt.style.display === 'none') return;
+        tt.style.left = (e.clientX + 14) + 'px';
+        tt.style.top = (e.clientY - 10) + 'px';
+      });
+    })();
+  </script>
+</body>
+</html>
