@@ -570,11 +570,11 @@
         const played = moveStr(playedFace, t.layer, playedMod);
         const canonical = moveStr(t.face, t.layer, t.mod);
         const blockedMods = t.qt ? ['', "'", '2'] : ['2'];
-        const newAxis = faceAxis(t.face);
         if (singleAxis) {
           lastRef.lastFace = t.face;
           lastRef.lastLayer = t.layer;
         } else {
+          const newAxis = faceAxis(t.face);
           if (newAxis !== lastRef.axis) lastRef.blocked = new Set();
           lastRef.blocked.add(`${t.face}:${t.layer}`);
           lastRef.axis = newAxis;
@@ -611,7 +611,7 @@
       const D = Math.max(1, parseInt(document.getElementById('id').value) || 1);
       const ns = getN();
       const stages = getPath(W, H, D);
-      const lastRef = { axis: null, blocked: new Set() };
+      const lastRef = { axis: null, blocked: new Set(), lastFace: null, lastLayer: null };
       const phasesData = [];
       let prevQTFaces = new Set();
       for (let i = 0; i < stages.length; i++) {
@@ -619,7 +619,7 @@
         const canonPool = getCanonicalPool(w, h, d);
         if (!canonPool.length) continue;
         const curQTFaces = new Set(canonPool.filter(t => t.qt).map(t => t.face));
-        const forcedFirstPool = i > 0 ? canonPool.filter(t => t.qt && t.layer === 1 && !prevQTFaces.has(t.face) && t.mod !== '2') : null;
+        const forcedFirstPool = i > 0 ? canonPool.filter(t => t.qt && !prevQTFaces.has(t.face) && t.mod !== '2') : null;
         prevQTFaces = curQTFaces;
         const phaseLabel = `Phase ${i + 1} · ${w}×${h}×${d}`;
         const moves = scramblePhase(canonPool, ns[i] ?? ns[ns.length - 1], lastRef, phaseLabel, forcedFirstPool && forcedFirstPool.length ? forcedFirstPool : null);
