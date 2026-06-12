@@ -73,7 +73,7 @@
       white-space: nowrap;
     }
 
-    .slider-row #depth-label {
+    .slider-row .slider-val {
       font-size: 13px;
       font-weight: 500;
       min-width: 72px;
@@ -202,7 +202,7 @@
       button { background: #2a2a28; border-color: #444; color: #e8e8e4; }
       button:hover { background: #333330; }
       label, .phase-label, .scramble-header span, .slider-row span { color: #999; }
-      .phase-label strong, .slider-row #depth-label { color: #e8e8e4; }
+      .phase-label strong, .slider-row .slider-val { color: #e8e8e4; }
       .move { background: #2a2a28; border-color: #444; color: #e8e8e4; }
       .move.qt { background: #0c2a44; border-color: #185fa5; color: #78b4e8; }
       .full-scramble { background: #2a2a28; border-color: #444; color: #e8e8e4; }
@@ -233,10 +233,14 @@
     <div id="cuboid-vis"></div>
 
     <div class="slider-row">
-      <span>Quick</span>
-      <input type="range" id="depth-slider" min="0" max="20" step="1" value="7">
-      <span>Thorough</span>
-      <span id="depth-label">24 / 12</span>
+      <span>Phase 1</span>
+      <input type="range" id="slider-n1" min="0" max="20" step="1" value="7">
+      <span class="slider-val" id="label-n1">24 moves</span>
+    </div>
+    <div class="slider-row" id="slider-nk-row">
+      <span>Phase 2+</span>
+      <input type="range" id="slider-nk" min="0" max="20" step="1" value="7">
+      <span class="slider-val" id="label-nk">12 moves</span>
     </div>
 
     <button onclick="doGenerate()">Generate scramble</button>
@@ -325,16 +329,20 @@
 
       svg += '</svg>';
       document.getElementById('cuboid-vis').innerHTML = svg;
+      document.getElementById('slider-nk-row').style.display = canInc(W, H, D).length > 0 ? '' : 'none';
     }
 
     function getN() {
-      const s = parseInt(document.getElementById('depth-slider').value);
-      return { n1: 10 + s * 2, nk: 5 + s };
+      const s1 = parseInt(document.getElementById('slider-n1').value);
+      const sk = parseInt(document.getElementById('slider-nk').value);
+      return { n1: 10 + s1 * 2, nk: 5 + sk };
     }
 
-    document.getElementById('depth-slider').addEventListener('input', function () {
-      const { n1, nk } = getN();
-      document.getElementById('depth-label').textContent = n1 + ' / ' + nk;
+    document.getElementById('slider-n1').addEventListener('input', function () {
+      document.getElementById('label-n1').textContent = (10 + parseInt(this.value) * 2) + ' moves';
+    });
+    document.getElementById('slider-nk').addEventListener('input', function () {
+      document.getElementById('label-nk').textContent = (5 + parseInt(this.value)) + ' moves';
     });
 
     ['iw', 'ih', 'id'].forEach(id => {
