@@ -6,6 +6,11 @@ stockfish.init().then(() => {
   if (el) { el.textContent = 'Engine: Stockfish'; el.style.color = 'var(--accent2)'; }
 }).catch(() => {});
 
+function onModeChange() {
+  const m = document.getElementById('modeSelect').value;
+  document.getElementById('playerColor').style.display = m === 'pve' ? '' : 'none';
+}
+
 function newGame(rand960=true) {
   gameId++;
   stockfish.stop();
@@ -32,6 +37,14 @@ function newGame(rand960=true) {
   mode = document.getElementById('modeSelect').value;
   aiDepth = parseInt(document.getElementById('aiDepth').value);
 
+  if (mode === 'pve') {
+    const sel = document.getElementById('playerColor').value;
+    const chosen = sel === 'r' ? (Math.random() < 0.5 ? 'w' : 'b') : sel;
+    aiColor = chosen === 'w' ? 'b' : 'w';
+  } else {
+    aiColor = 'b';
+  }
+
   renderAll(true);
   updateStatus();
   updateNavButtons();
@@ -39,12 +52,12 @@ function newGame(rand960=true) {
   renderMoveLog();
 
   if(mode==='eve') setTimeout(aiMove,400);
-  else if(mode==='pve' && turn==='b') setTimeout(aiMove,400);
+  else if(mode==='pve' && turn===aiColor) setTimeout(aiMove,400);
 }
 
 function tryCastle(side){
   if(gameOver||aiThinking||historyIndex!==-1)return;
-  if(mode==='pve'&&turn==='b')return;
+  if(mode==='pve'&&turn===aiColor)return;
   const cm=castleMoves(turn);
   const m=cm.find(m=>m.flags.castle===side);
   if(m&&applyMove(m))endTurn();
@@ -226,7 +239,7 @@ function updateEvalBarAsync() {
   // Only run on human turns — AI turns use the engine for move search instead
   if (aiThinking) return;
   if (mode === 'eve') return;
-  if (mode === 'pve' && turn === 'b') return;
+  if (mode === 'pve' && turn === aiColor) return;
 
   const mySeq = ++evalSeq;
   const fen = boardToFen();
@@ -248,7 +261,7 @@ function updateCastleButtons(){
   const btnQ=document.getElementById('btnCastleQ');
   if(!btnK||!btnQ)return;
   const humanTurn = !gameOver && !aiThinking && historyIndex===-1
-    && mode!=='eve' && !(mode==='pve'&&turn==='b');
+    && mode!=='eve' && !(mode==='pve'&&turn===aiColor);
   if(!humanTurn){btnK.disabled=true;btnQ.disabled=true;return;}
   const cm=castleMoves(turn);
   btnK.disabled=!cm.some(m=>m.flags.castle==='K');
@@ -320,7 +333,7 @@ function updateStatus(){
   tl.textContent=(turn==='w'?'White':'Black')+"'s Turn";
   sm.className='status-msg'+(inCheck(turn)?' check':'');
   sm.textContent=inCheck(turn)?'Check!':'';
-  if(mode==='pve'&&turn==='b')sm.textContent='AI thinking...';
+  if(mode==='pve'&&turn===aiColor)sm.textContent='AI thinking...';
 }
 
 function setGameOver(msg){
@@ -343,7 +356,7 @@ function endTurn(){
       else{setGameOver('Draw by stalemate');}
       return;
     }
-    if(mode==='eve'||(mode==='pve'&&turn==='b')){
+    if(mode==='eve'||(mode==='pve'&&turn===aiColor)){
       document.getElementById('statusMsg').innerHTML='<span class="thinking">AI thinking...</span>';
       setTimeout(aiMove,50);
     } else {
@@ -367,7 +380,7 @@ function updateUndoButton(){
   const btn=document.getElementById('btnUndo');
   if(!btn)return;
   const canUndo = !gameOver && !aiThinking && historyIndex===-1 && mode!=='eve' && snapshots.length>0
-    && !(mode==='pve' && snapshots.length===1);
+    && !(mode==='pve' && aiColor==='w' && snapshots.length===1);
   btn.disabled = !canUndo;
 }
 
@@ -449,7 +462,7 @@ function undoMove(){
 
 function handlePoolClick(piece, poolColor){
   if(gameOver||poolColor!==turn)return;
-  if(mode==='pve'&&turn==='b')return;
+  if(mode==='pve'&&turn===aiColor)return;
   if(selectedPoolPiece===piece){selectedPoolPiece=null;legalMoves=[];}
   else{
     selectedPoolPiece=piece;selectedSq=null;
@@ -461,7 +474,7 @@ function handlePoolClick(piece, poolColor){
 function handleSquareClick(i){
   if(gameOver||aiThinking)return;
   if(historyIndex!==-1)return;
-  if(mode==='pve'&&turn==='b')return;
+  if(mode==='pve'&&turn===aiColor)return;
   if(mode==='eve')return;
 
   if(selectedPoolPiece){

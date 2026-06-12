@@ -9,7 +9,7 @@ let board, turn, pools, gameOver, selectedSq, selectedPoolPiece, legalMoves, las
 let snapshots=[], historyIndex=-1;
 let liveState=null;
 let initialBoard=[], initialCR={};
-let mode = 'pve', aiDepth = 2, aiThinking = false;
+let mode = 'pve', aiDepth = 2, aiThinking = false, aiColor = 'b';
 
 function setupClassic(){
   const bk = ['bR','bN','bB','bQ','bK','bB','bN','bR'];

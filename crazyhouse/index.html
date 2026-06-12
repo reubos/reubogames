@@ -12,10 +12,15 @@
 <div class="subtitle">Chess 960 · Drop Captures · Self-Capture</div>
 
 <div class="btn-row" style="margin-bottom:16px">
-  <select id="modeSelect" style="width:auto">
+  <select id="modeSelect" style="width:auto" onchange="onModeChange()">
     <option value="pvp">Player vs Player</option>
     <option value="pve" selected>Player vs AI</option>
     <option value="eve">AI vs AI</option>
+  </select>
+  <select id="playerColor" style="width:auto">
+    <option value="w">Play as White</option>
+    <option value="b">Play as Black</option>
+    <option value="r">Random</option>
   </select>
   <select id="aiDepth" style="width:auto">
     <option value="1">AI: Easy (Skill 3)</option>
