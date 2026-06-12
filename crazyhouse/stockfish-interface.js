@@ -75,6 +75,40 @@ class StockfishInterface {
       this._cmd('go depth 1');
     });
   }
+
+  // Evaluates a position and resolves with score from white's perspective (centipawns).
+  // Returns null immediately if the engine is busy.
+  evalPosition(fen, toMove) {
+    if (this._onLine) return Promise.resolve(null);
+
+    return new Promise(resolve => {
+      let score = 0;
+      let isMate = false;
+      let mateIn = 0;
+
+      this._onLine = line => {
+        const cpMatch = line.match(/\bscore cp (-?\d+)/);
+        if (cpMatch) { score = parseInt(cpMatch[1]); isMate = false; }
+        const mateMatch = line.match(/\bscore mate (-?\d+)/);
+        if (mateMatch) { isMate = true; mateIn = parseInt(mateMatch[1]); }
+
+        if (line.startsWith('bestmove')) {
+          this._onLine = null;
+          let whiteScore;
+          if (isMate) {
+            const whiteWins = toMove === 'w' ? mateIn > 0 : mateIn < 0;
+            whiteScore = whiteWins ? 99000 : -99000;
+          } else {
+            whiteScore = toMove === 'w' ? score : -score;
+          }
+          resolve(whiteScore);
+        }
+      };
+
+      this._cmd(`position fen ${fen}`);
+      this._cmd('go movetime 200');
+    });
+  }
 }
 
 const stockfish = new StockfishInterface();

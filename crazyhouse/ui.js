@@ -175,21 +175,10 @@ function renderMoveLog(){
   if(historyIndex===-1) el.scrollTop=el.scrollHeight;
 }
 
-function updateEvalBar(){
+function renderEvalBar(raw) {
   const fill=document.getElementById('evalBarFill');
   const label=document.getElementById('evalLabel');
   if(!fill||!label)return;
-
-  if(gameOver){
-    const whiteWon = document.getElementById('statusMsg').textContent.startsWith('w')||
-                     document.getElementById('statusMsg').textContent.includes('White');
-    fill.style.height = whiteWon?'100%':'0%';
-    label.textContent = whiteWon?'M':'M';
-    label.style.color = whiteWon?'#e8e6e0':'var(--text3)';
-    return;
-  }
-
-  const raw = evaluate(board, pools, castlingRights, promotedSquares);
 
   const mateW = raw > 90000, mateB = raw < -90000;
   if(mateW||mateB){
@@ -207,6 +196,42 @@ function updateEvalBar(){
     : (cp > 0 ? '+' : '') + cp.toFixed(1);
   label.textContent = display;
   label.style.color = cp > 0.2 ? '#e8e6e0' : cp < -0.2 ? 'var(--text3)' : 'var(--text2)';
+}
+
+function updateEvalBar(){
+  const fill=document.getElementById('evalBarFill');
+  const label=document.getElementById('evalLabel');
+  if(!fill||!label)return;
+
+  if(gameOver){
+    const whiteWon = document.getElementById('statusMsg').textContent.startsWith('w')||
+                     document.getElementById('statusMsg').textContent.includes('White');
+    fill.style.height = whiteWon?'100%':'0%';
+    label.textContent = whiteWon?'M':'M';
+    label.style.color = whiteWon?'#e8e6e0':'var(--text3)';
+    return;
+  }
+
+  // Show static eval immediately; Stockfish result will overwrite asynchronously
+  renderEvalBar(evaluate(board, pools, castlingRights, promotedSquares));
+}
+
+let evalSeq = 0;
+function updateEvalBarAsync() {
+  if (!stockfish.ready || gameOver) return;
+  // Only run on human turns — AI turns use the engine for move search instead
+  if (aiThinking) return;
+  if (mode === 'eve') return;
+  if (mode === 'pve' && turn === 'b') return;
+
+  const mySeq = ++evalSeq;
+  const fen = boardToFen();
+  const toMove = turn;
+
+  stockfish.evalPosition(fen, toMove).then(score => {
+    if (score === null || mySeq !== evalSeq || gameOver) return;
+    renderEvalBar(score);
+  });
 }
 
 function renderAll(){
@@ -316,6 +341,8 @@ function endTurn(){
     if(mode==='eve'||(mode==='pve'&&turn==='b')){
       document.getElementById('statusMsg').innerHTML='<span class="thinking">AI thinking...</span>';
       setTimeout(aiMove,50);
+    } else {
+      updateEvalBarAsync();
     }
   }
 }
@@ -352,6 +379,7 @@ function jumpTo(snapIdx){
   renderAll();
   updateNavButtons();
   renderMoveLog();
+  updateEvalBarAsync();
 }
 
 function navHistory(delta){
@@ -376,6 +404,7 @@ function returnToLive(){
   liveState=null;
   selectedSq=null;selectedPoolPiece=null;legalMoves=[];
   renderAll();updateNavButtons();renderMoveLog();
+  updateEvalBarAsync();
 }
 
 function undoMove(){
@@ -410,6 +439,7 @@ function undoMove(){
   gameOver=false;
   selectedSq=null;selectedPoolPiece=null;legalMoves=[];
   renderAll();updateStatus();updateNavButtons();updateUndoButton();renderMoveLog();
+  updateEvalBarAsync();
 }
 
 function handlePoolClick(piece, poolColor){
