@@ -372,7 +372,7 @@
     }
 
     ['iw', 'ih', 'id'].forEach(id => {
-      document.getElementById(id).addEventListener('input', drawCuboid);
+      document.getElementById(id).addEventListener('input', () => { drawCuboid(); doGenerate(); });
     });
     drawCuboid();
 
@@ -388,15 +388,33 @@
       if (f === 'U' || f === 'D') return Math.floor(h / 2);
       return Math.floor(d / 2);
     }
-    function getTemplates(w, h, d) {
-      const out = [];
-      for (const f of ['R', 'L', 'U', 'D', 'F', 'B']) {
-        if (!faceAvail(f, w, h, d)) continue;
-        const qt = faceQT(f, w, h, d);
-        const ml = maxLayers(f, w, h, d);
-        for (let l = 1; l <= ml; l++) out.push({ face: f, layer: l, qt });
+    function getAxisDim(face, w, h, d) {
+      return face === 'R' || face === 'L' ? w : face === 'U' || face === 'D' ? h : d;
+    }
+    function getCanonicalPool(w, h, d) {
+      const pool = [];
+      for (const face of ['R', 'L', 'U', 'D', 'F', 'B']) {
+        if (!faceAvail(face, w, h, d)) continue;
+        const qt = faceQT(face, w, h, d);
+        const ml = maxLayers(face, w, h, d);
+        const N = getAxisDim(face, w, h, d);
+        const secondary = face === 'L' || face === 'D' || face === 'B';
+        for (let l = 1; l <= ml; l++) {
+          const hasEquiv = N % 2 === 0 && l * 2 === N;
+          if (secondary && hasEquiv) continue;
+          for (const mod of (qt ? ['', "'", '2'] : ['2'])) {
+            pool.push({ face, layer: l, mod, qt, hasEquiv });
+          }
+        }
       }
-      return out;
+      return pool;
+    }
+    function moveStr(face, layer, mod) {
+      return (layer > 1 ? String(layer) : '') + face + mod;
+    }
+    function applyEquiv(face, mod) {
+      const opp = { R:'L', L:'R', U:'D', D:'U', F:'B', B:'F' }[face];
+      return { face: opp, mod: mod === '' ? "'" : mod === "'" ? '' : '2' };
     }
     function facesQT(w, h, d) {
       const a = [];
@@ -434,15 +452,6 @@
         dims = applyRed(dims, best);
       }
       return stages;
-    }
-    function makeMove(t) {
-      const pre = t.layer > 1 ? String(t.layer) : '';
-      const mod = t.qt ? ["", "'", "2"][Math.floor(Math.random() * 3)] : '2';
-      return pre + t.face + mod;
-    }
-    function makeQTMove(t) {
-      const pre = t.layer > 1 ? String(t.layer) : '';
-      return pre + t.face + ["", "'"][Math.floor(Math.random() * 2)];
     }
     function parseMove(m) {
       const x = m.match(/^(\d+)?([RLUDFB])(2|')?$/);
@@ -541,32 +550,45 @@
       svg+='</svg>';
       return svg;
     }
-    const OPP = {R:'L',L:'R',U:'D',D:'U',F:'B',B:'F'};
-    function conflicts(t, lastRef, dims) {
-      if (lastRef.face === null) return false;
-      const {face: lf, layer: ll} = lastRef;
-      // Same face, same layer — always block
-      if (t.face === lf && t.layer === ll) return true;
-      // Opposite face, same layer — block only when N is even and layer == N/2
-      if (t.face === OPP[lf] && t.layer === ll) {
-        const ax = faceAxis(lf);
-        const N = ax === 'x' ? dims[0] : ax === 'y' ? dims[1] : dims[2];
-        if (N % 2 === 0 && ll === N / 2) return true;
-      }
-      return false;
-    }
-    function scramblePhase(templates, n, lastRef, dims, forcedFirst) {
+    function scramblePhase(canonPool, n, lastRef, phaseLabel, forcedFirstPool) {
       const moves = [];
+      const singleAxis = new Set(canonPool.map(t => faceAxis(t.face))).size === 1;
       for (let j = 0; j < n; j++) {
-        const pool = (j === 0 && forcedFirst && forcedFirst.length) ? forcedFirst : templates;
-        let avail = pool.filter(t => !conflicts(t, lastRef, dims));
-        if (!avail.length) avail = pool;
+        const isForced = j === 0 && forcedFirstPool && forcedFirstPool.length;
+        const basePool = isForced ? forcedFirstPool : canonPool;
+        let avail = singleAxis
+          ? basePool.filter(t => !(t.face === lastRef.lastFace && t.layer === lastRef.lastLayer))
+          : basePool.filter(t => !lastRef.blocked.has(`${t.face}:${t.layer}`));
+        if (!avail.length) avail = [...basePool];
         if (!avail.length) break;
         const t = avail[Math.floor(Math.random() * avail.length)];
-        lastRef.face = t.face;
-        lastRef.layer = t.layer;
-        const isForced = j === 0 && forcedFirst && forcedFirst.length;
-        moves.push(isForced ? makeQTMove(t) : makeMove(t));
+        let playedFace = t.face, playedMod = t.mod;
+        if (t.hasEquiv && Math.random() < 0.5) {
+          const eq = applyEquiv(t.face, t.mod);
+          playedFace = eq.face; playedMod = eq.mod;
+        }
+        const played = moveStr(playedFace, t.layer, playedMod);
+        const canonical = moveStr(t.face, t.layer, t.mod);
+        const blockedMods = t.qt ? ['', "'", '2'] : ['2'];
+        const newAxis = faceAxis(t.face);
+        if (singleAxis) {
+          lastRef.lastFace = t.face;
+          lastRef.lastLayer = t.layer;
+        } else {
+          if (newAxis !== lastRef.axis) lastRef.blocked = new Set();
+          lastRef.blocked.add(`${t.face}:${t.layer}`);
+          lastRef.axis = newAxis;
+        }
+        const blockLog = singleAxis
+          ? blockedMods.map(m => moveStr(t.face, t.layer, m)).join('  ')
+          : [...lastRef.blocked].join('  ');
+        console.log(
+          `[${phaseLabel}]${isForced ? ' (forced)' : ''} Move ${j + 1}/${n}\n` +
+          `  Pool [${avail.length}]: ${avail.map(e => moveStr(e.face, e.layer, e.mod)).join('  ')}\n` +
+          `  Selected: ${canonical}${t.hasEquiv ? `  →  coin flip  →  ${played}` : ''}\n` +
+          `  Blocks ${singleAxis ? '(next only)' : '(this run)'}: ${blockLog}`
+        );
+        moves.push(played);
       }
       return moves;
     }
@@ -589,18 +611,18 @@
       const D = Math.max(1, parseInt(document.getElementById('id').value) || 1);
       const ns = getN();
       const stages = getPath(W, H, D);
-      const lastRef = { face: null, layer: null };
+      const lastRef = { axis: null, blocked: new Set() };
       const phasesData = [];
       let prevQTFaces = new Set();
       for (let i = 0; i < stages.length; i++) {
         const [w, h, d] = stages[i].dims;
-        const tmpl = getTemplates(w, h, d);
-        if (!tmpl.length) continue;
-        const curQTFaces = new Set(tmpl.filter(t => t.qt).map(t => t.face));
-        // Forced first move: outer (layer 1) quarter turn on faces that newly gained qt this phase
-        const forcedFirst = i === 0 ? null : tmpl.filter(t => t.qt && t.layer === 1 && !prevQTFaces.has(t.face));
+        const canonPool = getCanonicalPool(w, h, d);
+        if (!canonPool.length) continue;
+        const curQTFaces = new Set(canonPool.filter(t => t.qt).map(t => t.face));
+        const forcedFirstPool = i > 0 ? canonPool.filter(t => t.qt && t.layer === 1 && !prevQTFaces.has(t.face) && t.mod !== '2') : null;
         prevQTFaces = curQTFaces;
-        const moves = scramblePhase(tmpl, ns[i] ?? ns[ns.length - 1], lastRef, stages[i].dims, forcedFirst);
+        const phaseLabel = `Phase ${i + 1} · ${w}×${h}×${d}`;
+        const moves = scramblePhase(canonPool, ns[i] ?? ns[ns.length - 1], lastRef, phaseLabel, forcedFirstPool && forcedFirstPool.length ? forcedFirstPool : null);
         if (moves.length) phasesData.push({ dims: stages[i].dims, qt: stages[i].qt, moves });
       }
       const out = document.getElementById('out');
@@ -609,7 +631,7 @@
         return;
       }
       const allMoves = phasesData.flatMap(p => p.moves);
-      let html = '';
+      let html = '<p style="font-size:12px;color:#999;margin-bottom:10px;">Hover or tap on each move for a diagram</p>';
       phasesData.forEach(p => {
         const [w, h, d] = p.dims;
         html += `<div class="phase-label"><strong>${w}×${h}×${d}</strong> — ${phaseDesc(p.dims, p.qt)}</div><div>`;
@@ -655,6 +677,20 @@
         if (tt.style.display === 'none') return;
         tt.style.left = (e.clientX + 14) + 'px';
         tt.style.top = (e.clientY - 10) + 'px';
+      });
+      document.getElementById('out').addEventListener('touchstart', function(e) {
+        const span = e.target.closest('.move[data-face]');
+        if (!span) { tt.style.display = 'none'; return; }
+        e.preventDefault();
+        const {face, layer, mod, w, h, d} = span.dataset;
+        tti.innerHTML = cuboidSVG(+w, +h, +d, face, +layer, mod);
+        tt.style.display = 'block';
+        const r = span.getBoundingClientRect();
+        tt.style.left = Math.min(r.left, window.innerWidth - 210) + 'px';
+        tt.style.top = (r.top - tt.offsetHeight - 8) + 'px';
+      }, { passive: false });
+      document.addEventListener('touchstart', function(e) {
+        if (!e.target.closest('#out') && !e.target.closest('#move-tooltip')) tt.style.display = 'none';
       });
     })();
   </script>
