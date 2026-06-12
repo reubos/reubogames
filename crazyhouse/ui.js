@@ -215,7 +215,8 @@ function updateEvalBar(){
     return;
   }
 
-  // Show static eval immediately; Stockfish result will overwrite asynchronously
+  // If Stockfish is ready, leave the bar as-is — updateEvalBarAsync will overwrite with the correct value
+  if(stockfish.ready) return;
   renderEvalBar(evaluate(board, pools, castlingRights, promotedSquares));
 }
 
