@@ -1,7 +1,6 @@
-const CDN = 'https://cdn.jsdelivr.net/npm/fairy-stockfish-nnue.wasm/';
-importScripts(CDN + 'stockfish.js');
+importScripts('stockfish.js');
 
-Stockfish({ locateFile: file => CDN + file }).then(sf => {
+Stockfish().then(sf => {
   sf.addMessageListener(line => {
     postMessage(line);
   });
