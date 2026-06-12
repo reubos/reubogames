@@ -32,7 +32,7 @@ function newGame(rand960=true) {
   mode = document.getElementById('modeSelect').value;
   aiDepth = parseInt(document.getElementById('aiDepth').value);
 
-  renderAll();
+  renderAll(true);
   updateStatus();
   updateNavButtons();
   updateUndoButton();
@@ -237,8 +237,9 @@ function updateEvalBarAsync() {
   });
 }
 
-function renderAll(){
-  renderBoard();renderPools();updateEvalBar();updateCastleButtons();
+function renderAll(withEval=false){
+  renderBoard();renderPools();updateCastleButtons();
+  if(withEval) updateEvalBar();
 }
 
 function updateCastleButtons(){
@@ -332,7 +333,7 @@ function setGameOver(msg){
 function endTurn(){
   turn=oppColor(turn);
   selectedSq=null;selectedPoolPiece=null;legalMoves=[];
-  renderAll();updateStatus();updateNavButtons();updateUndoButton();
+  renderAll(true);updateStatus();updateNavButtons();updateUndoButton();
 
   if(!gameOver){
     const ml=legalMovesFor(turn);
@@ -379,7 +380,7 @@ function jumpTo(snapIdx){
   promotedSquares=new Set(s.promotedSquares);
   lastMove=s.lastMove?{...s.lastMove}:null;
   selectedSq=null;selectedPoolPiece=null;legalMoves=[];
-  renderAll();
+  renderAll(true);
   updateNavButtons();
   renderMoveLog();
   updateEvalBarAsync();
@@ -406,7 +407,7 @@ function returnToLive(){
   historyIndex=-1;
   liveState=null;
   selectedSq=null;selectedPoolPiece=null;legalMoves=[];
-  renderAll();updateNavButtons();renderMoveLog();
+  renderAll(true);updateNavButtons();renderMoveLog();
   updateEvalBarAsync();
 }
 
@@ -441,7 +442,7 @@ function undoMove(){
   historyIndex=-1;
   gameOver=false;
   selectedSq=null;selectedPoolPiece=null;legalMoves=[];
-  renderAll();updateStatus();updateNavButtons();updateUndoButton();renderMoveLog();
+  renderAll(true);updateStatus();updateNavButtons();updateUndoButton();renderMoveLog();
   updateEvalBarAsync();
 }
 
