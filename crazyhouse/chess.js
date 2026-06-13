@@ -10,6 +10,7 @@ let snapshots=[], historyIndex=-1;
 let liveState=null;
 let initialBoard=[], initialCR={};
 let mode = 'pve', aiDepth = 2, aiThinking = false, aiColor = 'b';
+let selfCaptureMode = 'opponent'; // 'opponent' | 'own' | 'remove'
 
 function setupClassic(){
   const bk = ['bR','bN','bB','bQ','bK','bB','bN','bR'];
@@ -238,8 +239,8 @@ function applyMoveToBoard(brd, m, newPools, newCR){
     if(captured&&newPools){
       const c=pieceColor(moving);
       const capType=pieceType(captured);
-      const gainedBy=m.flags.selfCapture?oppColor(c):c;
-      newPools[gainedBy]=[...newPools[gainedBy],gainedBy+'P'!==gainedBy+capType&&capType==='P'?'P':capType];
+      const gainedBy=m.flags.selfCapture?(selfCaptureMode==='opponent'?oppColor(c):selfCaptureMode==='own'?c:null):c;
+      if(gainedBy!==null)newPools[gainedBy]=[...newPools[gainedBy],gainedBy+'P'!==gainedBy+capType&&capType==='P'?'P':capType];
     }
     brd[m.to]=moving;brd[m.from]=null;
     if(m.flags.pawn&&m.promo){brd[m.to]=pieceColor(moving)+m.promo;}

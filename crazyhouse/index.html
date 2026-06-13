@@ -39,7 +39,7 @@
     <div class="panel">
       <div class="panel-title">Black's Pool</div>
       <div class="pool" id="poolBlack"></div>
-      <div class="self-cap-hint">Capture own pieces → opponent gains them</div>
+      <div class="self-cap-hint" id="selfCapHint">Capture own pieces → opponent gains them</div>
     </div>
     <div class="status-box">
       <div class="status-turn" id="turnLabel">White's Turn</div>
@@ -76,7 +76,14 @@
         • Captured pieces go to your pool<br>
         • Drop pieces on empty squares<br>
         • Pawns can't drop on rank 1/8<br>
-        • Self-capture sends piece to opponent pool<br>
+        <label style="display:flex;align-items:center;gap:6px;margin-top:4px;flex-wrap:wrap">
+          <span>Self-capture:</span>
+          <select id="selfCaptureModeSelect" style="width:auto;font-size:0.72rem" onchange="onSelfCaptureModeChange()">
+            <option value="opponent">→ Opponent's pool</option>
+            <option value="own">→ Own pool</option>
+            <option value="remove">→ Removed from game</option>
+          </select>
+        </label>
         <br><b style="color:var(--text)">Chess 960:</b><br>
         • Random back rank<br>
         • Castling still works

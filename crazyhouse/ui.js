@@ -11,6 +11,16 @@ function onModeChange() {
   document.getElementById('playerColor').style.display = m === 'pve' ? '' : 'none';
 }
 
+function onSelfCaptureModeChange() {
+  selfCaptureMode = document.getElementById('selfCaptureModeSelect').value;
+  const hints = {
+    opponent: 'Capture own pieces → opponent gains them',
+    own: 'Capture own pieces → you keep them',
+    remove: 'Capture own pieces → removed from game',
+  };
+  document.getElementById('selfCapHint').textContent = hints[selfCaptureMode];
+}
+
 function newGame(rand960=true) {
   gameId++;
   stockfish.stop();
@@ -86,8 +96,8 @@ function applyMove(m, promoType=null){
     const c=pieceColor(moving);
     const isPromoted = promotedSquares.has(m.to);
     const addType = isPromoted ? 'P' : pieceType(captured);
-    const gainedBy=m.flags&&m.flags.selfCapture?oppColor(c):c;
-    pools[gainedBy].push(gainedBy+addType);
+    const gainedBy=m.flags&&m.flags.selfCapture?(selfCaptureMode==='opponent'?oppColor(c):selfCaptureMode==='own'?c:null):c;
+    if(gainedBy!==null)pools[gainedBy].push(gainedBy+addType);
     promotedSquares.delete(m.to);
   }
 
@@ -532,7 +542,11 @@ function showPromo(m){
 
 function moveLabel(m){
   if(m.flags&&m.flags.castle) return m.flags.castle==='K' ? 'Castle kingside (O-O)' : 'Castle queenside (O-O-O)';
-  if(m.flags&&m.flags.selfCapture) return 'Self-capture (send to opponent pool)';
+  if(m.flags&&m.flags.selfCapture){
+    if(selfCaptureMode==='opponent') return 'Self-capture (send to opponent pool)';
+    if(selfCaptureMode==='own') return 'Self-capture (keep in own pool)';
+    return 'Self-capture (piece removed)';
+  }
   if(m.flags&&m.flags.capture) return 'Capture piece';
   return 'Move here';
 }
