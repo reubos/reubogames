@@ -374,7 +374,7 @@ function uciToMove(uciStr) {
 }
 
 async function aiMove() {
-  if (gameOver) return;
+  if (gameOver || historyIndex !== -1) return;
   aiThinking = true;
   const myGameId = gameId;
 
@@ -395,7 +395,7 @@ async function aiMove() {
   const fen = boardToFen();
   const sfResult = await stockfish.getBestMove(fen, budget);
 
-  if (gameId !== myGameId || gameOver) { aiThinking = false; return; }
+  if (gameId !== myGameId || gameOver || historyIndex !== -1) { aiThinking = false; return; }
 
   let bestMove = (sfResult && sfResult.move) ? uciToMove(sfResult.move) : null;
   let bestScore = sfResult ? sfResult.score : -Infinity;
@@ -412,7 +412,7 @@ async function aiMove() {
     const afterFen = boardToFen(nb, np, nc, oppColor(turn));
     const evalScore = await stockfish.quickEval(afterFen);
 
-    if (gameId !== myGameId || gameOver) { aiThinking = false; return; }
+    if (gameId !== myGameId || gameOver || historyIndex !== -1) { aiThinking = false; return; }
 
     // evalScore is from the opponent's perspective after our move — negate for ours
     const ourScore = -evalScore;

@@ -306,7 +306,6 @@ function saveSnapshot(){
     lastMove:lastMove?{...lastMove}:null,
     turn
   });
-  historyIndex=-1;
 }
 
 function saveLiveState(){

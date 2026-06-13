@@ -433,6 +433,7 @@ function returnToLive(){
   selectedSq=null;selectedPoolPiece=null;legalMoves=[];
   renderAll(true);updateNavButtons();renderMoveLog();
   updateEvalBarAsync();
+  if(mode==='eve'&&!gameOver&&!aiThinking) setTimeout(aiMove,400);
 }
 
 function undoMove(){
