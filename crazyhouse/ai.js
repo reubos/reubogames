@@ -217,8 +217,8 @@ function simMove(brd, pl, cr, m, color, simPromoSet){
     const cap=nb[m.to];
     if(cap){
       const addType=nps.has(m.to)?'P':pieceType(cap);
-      const gainedBy=m.flags&&m.flags.selfCapture?oppColor(color):color;
-      np[gainedBy].push(gainedBy+addType);
+      const gainedBy=m.flags&&m.flags.selfCapture?(selfCaptureMode==='opponent'?oppColor(color):selfCaptureMode==='own'?color:null):color;
+      if(gainedBy!==null)np[gainedBy].push(gainedBy+addType);
       nps.delete(m.to);
     }
     if(nps.has(m.from)){nps.delete(m.from);nps.add(m.to);}
