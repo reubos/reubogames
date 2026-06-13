@@ -13,25 +13,9 @@
 <div class="subtitle">Chess 960 · Crazyhouse piece-drops · Self-capture</div>
 
 <div class="btn-row" style="margin-bottom:16px">
-  <select id="modeSelect" style="width:auto" onchange="onModeChange()">
-    <option value="pvp">Player vs Player</option>
-    <option value="pve" selected>Player vs AI</option>
-    <option value="eve">AI vs AI</option>
-  </select>
-  <select id="playerColor" style="width:auto">
-    <option value="w">Play as White</option>
-    <option value="b">Play as Black</option>
-    <option value="r">Random</option>
-  </select>
-  <select id="aiDepth" style="width:auto">
-    <option value="1">AI: Easy (Skill 3)</option>
-    <option value="2" selected>AI: Medium (Skill 10)</option>
-    <option value="3">AI: Hard (Skill 20)</option>
-  </select>
-  <span id="engineLabel" style="font-size:0.62rem;letter-spacing:0.08em;color:var(--text3);align-self:center">Engine: Built-in</span>
-  <button class="primary" onclick="newGame()">New Game (960)</button>
-  <button onclick="newGame(false)">Classic Start</button>
+  <button class="primary" onclick="openNewGameDialog()">New Game</button>
   <button id="btnUndo" onclick="undoMove()" disabled>Undo</button>
+  <span id="engineLabel" style="font-size:0.62rem;letter-spacing:0.08em;color:var(--text3);align-self:center">Engine: Built-in</span>
 </div>
 
 <div class="game-wrap">
@@ -75,15 +59,7 @@
         <b style="color:var(--text)">Crazyhouse rules:</b><br>
         • Captured pieces go to your pool<br>
         • Drop pieces on empty squares<br>
-        • Pawns can't drop on rank 1/8<br>
-        <label style="display:flex;align-items:center;gap:6px;margin-top:4px;flex-wrap:wrap">
-          <span>Self-capture:</span>
-          <select id="selfCaptureModeSelect" style="width:auto;font-size:0.72rem" onchange="onSelfCaptureModeChange()">
-            <option value="opponent">→ Opponent's pool</option>
-            <option value="own">→ Own pool</option>
-            <option value="remove">→ Removed from game</option>
-          </select>
-        </label>
+        • Pawns can't drop on rank 1/8
         <br><b style="color:var(--text)">Chess 960:</b><br>
         • Random back rank<br>
         • Castling still works
@@ -109,6 +85,57 @@
   <div class="promo-box">
     <div class="promo-title">Promote Pawn</div>
     <div class="promo-pieces" id="promoPieces"></div>
+  </div>
+</div>
+
+<div id="newGameOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:300;align-items:center;justify-content:center" onclick="closeNewGameDialog()">
+  <div style="background:var(--bg2);border:1px solid var(--border2);border-radius:12px;padding:24px 28px;min-width:280px;width:320px" onclick="event.stopPropagation()">
+    <div class="panel-title" style="margin-bottom:18px">New Game</div>
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <div style="display:flex;align-items:center;gap:10px">
+        <label style="font-size:0.68rem;color:var(--text3);min-width:100px">Mode</label>
+        <select id="modeSelect" style="flex:1" onchange="onModeChange()">
+          <option value="pvp">Player vs Player</option>
+          <option value="pve" selected>Player vs AI</option>
+          <option value="eve">AI vs AI</option>
+        </select>
+      </div>
+      <div id="rowPlayerColor" style="display:flex;align-items:center;gap:10px">
+        <label style="font-size:0.68rem;color:var(--text3);min-width:100px">Play as</label>
+        <select id="playerColor" style="flex:1">
+          <option value="w">White</option>
+          <option value="b">Black</option>
+          <option value="r">Random</option>
+        </select>
+      </div>
+      <div id="rowAiDepth" style="display:flex;align-items:center;gap:10px">
+        <label style="font-size:0.68rem;color:var(--text3);min-width:100px">AI difficulty</label>
+        <select id="aiDepth" style="flex:1">
+          <option value="1">Easy</option>
+          <option value="2" selected>Medium</option>
+          <option value="3">Hard</option>
+        </select>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px">
+        <label style="font-size:0.68rem;color:var(--text3);min-width:100px">Self-capture</label>
+        <select id="selfCaptureModeSelect" style="flex:1">
+          <option value="opponent">→ Opponent's pool</option>
+          <option value="own">→ Own pool</option>
+          <option value="remove">→ Removed from game</option>
+        </select>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px">
+        <label style="font-size:0.68rem;color:var(--text3);min-width:100px">Position</label>
+        <select id="positionSelect" style="flex:1">
+          <option value="960">Chess 960 (random)</option>
+          <option value="classic">Classic</option>
+        </select>
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:20px">
+      <button class="primary" style="flex:1" onclick="startNewGame()">Start Game</button>
+      <button onclick="closeNewGameDialog()">Cancel</button>
+    </div>
   </div>
 </div>
 

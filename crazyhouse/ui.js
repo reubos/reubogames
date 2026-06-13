@@ -8,10 +8,22 @@ stockfish.init().then(() => {
 
 function onModeChange() {
   const m = document.getElementById('modeSelect').value;
-  document.getElementById('playerColor').style.display = m === 'pve' ? '' : 'none';
+  document.getElementById('rowPlayerColor').style.display = m === 'pve' ? '' : 'none';
+  document.getElementById('rowAiDepth').style.display = m === 'pvp' ? 'none' : '';
 }
 
-function onSelfCaptureModeChange() {
+function openNewGameDialog() {
+  onModeChange();
+  document.getElementById('newGameOverlay').style.display = 'flex';
+}
+
+function closeNewGameDialog() {
+  document.getElementById('newGameOverlay').style.display = 'none';
+}
+
+function startNewGame() {
+  closeNewGameDialog();
+  const rand960 = document.getElementById('positionSelect').value === '960';
   selfCaptureMode = document.getElementById('selfCaptureModeSelect').value;
   const hints = {
     opponent: 'Capture own pieces → opponent gains them',
@@ -19,6 +31,7 @@ function onSelfCaptureModeChange() {
     remove: 'Capture own pieces → removed from game',
   };
   document.getElementById('selfCapHint').textContent = hints[selfCaptureMode];
+  newGame(rand960);
 }
 
 function newGame(rand960=true) {
