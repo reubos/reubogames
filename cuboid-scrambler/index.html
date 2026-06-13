@@ -363,17 +363,17 @@
       container.innerHTML = html;
       container.querySelectorAll('.phase-slider').forEach(slider => {
         const num = container.querySelector(`.phase-num[data-idx="${slider.dataset.idx}"]`);
-        slider.addEventListener('input', () => { num.value = slider.value; renderScramble(); });
+        slider.addEventListener('input', () => { num.value = slider.value; clearScramble(); });
         num.addEventListener('input', () => {
           const v = Math.min(50, Math.max(5, parseInt(num.value) || 5));
           slider.value = v; num.value = v;
-          renderScramble();
+          clearScramble();
         });
       });
     }
 
     ['iw', 'ih', 'id'].forEach(id => {
-      document.getElementById(id).addEventListener('input', () => { drawCuboid(); doGenerate(); });
+      document.getElementById(id).addEventListener('input', () => { drawCuboid(); clearScramble(); });
     });
     drawCuboid();
 
@@ -606,14 +606,17 @@
       if (half.length) parts.push(half.join(', ') + ' half turns only');
       return parts.join(' · ');
     }
-    let phaseBuffers = [];
+    function clearScramble() {
+      document.getElementById('out').innerHTML = '';
+    }
     function doGenerate() {
       const W = Math.max(1, parseInt(document.getElementById('iw').value) || 1);
       const H = Math.max(1, parseInt(document.getElementById('ih').value) || 1);
       const D = Math.max(1, parseInt(document.getElementById('id').value) || 1);
       const stages = getPath(W, H, D);
+      const ns = getN();
       const lastRef = { axis: null, blocked: new Set(), lastFace: null, lastLayer: null };
-      phaseBuffers = [];
+      const phasesData = [];
       let prevQTFaces = new Set();
       for (let i = 0; i < stages.length; i++) {
         const [w, h, d] = stages[i].dims;
@@ -623,19 +626,15 @@
         const forcedFirstPool = i > 0 ? canonPool.filter(t => t.qt && !prevQTFaces.has(t.face) && t.mod !== '2') : null;
         prevQTFaces = curQTFaces;
         const phaseLabel = `Phase ${i + 1} · ${w}×${h}×${d}`;
-        const moves = scramblePhase(canonPool, 50, lastRef, phaseLabel, forcedFirstPool && forcedFirstPool.length ? forcedFirstPool : null);
-        if (moves.length) phaseBuffers.push({ dims: stages[i].dims, qt: stages[i].qt, moves });
+        const n = ns[i] ?? ns[ns.length - 1];
+        const moves = scramblePhase(canonPool, n, lastRef, phaseLabel, forcedFirstPool && forcedFirstPool.length ? forcedFirstPool : null);
+        if (moves.length) phasesData.push({ dims: stages[i].dims, qt: stages[i].qt, moves });
       }
-      renderScramble();
-    }
-    function renderScramble() {
-      const ns = getN();
       const out = document.getElementById('out');
-      if (!phaseBuffers.length) {
+      if (!phasesData.length) {
         out.innerHTML = '<p style="color:#666;font-size:14px;margin-top:1rem;">No moves possible for this puzzle.</p>';
         return;
       }
-      const phasesData = phaseBuffers.map((p, i) => ({ ...p, moves: p.moves.slice(0, ns[i] ?? ns[ns.length - 1]) }));
       const allMoves = phasesData.flatMap(p => p.moves);
       let html = '<p style="font-size:12px;color:#999;margin-bottom:10px;">Hover or tap on each move for a diagram</p>';
       phasesData.forEach(p => {
@@ -663,8 +662,6 @@
         setTimeout(() => { btn.innerHTML = '<i class="ti ti-copy" style="font-size:13px;margin-right:4px;vertical-align:-1px;"></i>Copy'; }, 1500);
       });
     }
-
-    doGenerate();
 
     (function(){
       const tt = document.getElementById('move-tooltip');
