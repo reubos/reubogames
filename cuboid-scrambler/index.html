@@ -348,20 +348,16 @@
     }
 
     let _sliderDims = null;
-    const _phaseDefaults = [70, 50, 50, 30];
     function renderSliders(w, h, d) {
       const stageDims = getStageDims(w, h, d);
-      const isFirstLoad = !_sliderDims;
-      const dimsChanged = !isFirstLoad && (_sliderDims[0] !== w || _sliderDims[1] !== h || _sliderDims[2] !== d);
+      const dimsChanged = !_sliderDims || _sliderDims[0] !== w || _sliderDims[1] !== h || _sliderDims[2] !== d;
       _sliderDims = [w, h, d];
       const container = document.getElementById('sliders-container');
-      const prev = (isFirstLoad || dimsChanged) ? [] : Array.from(container.querySelectorAll('.phase-slider')).map(s => parseInt(s.value));
+      const prev = dimsChanged ? [] : Array.from(container.querySelectorAll('.phase-slider')).map(s => parseInt(s.value));
       const count = stageDims.length;
       let html = '';
       for (let i = 0; i < count; i++) {
-        const dimDefault = isFirstLoad
-          ? (_phaseDefaults[i] ?? _phaseDefaults[_phaseDefaults.length - 1])
-          : Math.min(100, Math.max(5, 10 * Math.max(...stageDims[i])));
+        const dimDefault = Math.min(100, Math.max(5, 10 * Math.max(...stageDims[i])));
         const val = prev[i] ?? dimDefault;
         const label = count === 1 ? 'Moves' : `Phase ${i + 1}`;
         html += `<div class="slider-row">
