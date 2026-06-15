@@ -147,10 +147,23 @@
     <div style="position:relative">
       <div id="editorBoard" class="board"></div>
     </div>
+    <div style="display:flex;gap:12px;align-self:stretch">
+      <div style="flex:1;background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:8px">
+        <div class="panel-title" style="margin-bottom:6px">White's Pool</div>
+        <div id="editorPoolW" class="pool" style="min-height:28px"></div>
+        <button style="margin-top:6px;font-size:0.65rem;padding:4px 8px" onclick="addToEditorPool('w')">+ Add selected</button>
+      </div>
+      <div style="flex:1;background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:8px">
+        <div class="panel-title" style="margin-bottom:6px">Black's Pool</div>
+        <div id="editorPoolB" class="pool" style="min-height:28px"></div>
+        <button style="margin-top:6px;font-size:0.65rem;padding:4px 8px" onclick="addToEditorPool('b')">+ Add selected</button>
+      </div>
+    </div>
     <div id="editorError" style="font-size:0.68rem;color:var(--danger);min-height:1em"></div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:center">
-      <button onclick="clearEditorBoard()">Clear Board</button>
-      <button onclick="resetEditorToClassic()">Classic Start</button>
+      <button onclick="clearEditorBoard()">Clear</button>
+      <button onclick="resetEditorToClassic()">Classic</button>
+      <button onclick="reset960EditorBoard()">Chess 960</button>
       <button class="primary" onclick="startCustomGame()">Start Game</button>
       <button onclick="closeEditor()">Cancel</button>
     </div>

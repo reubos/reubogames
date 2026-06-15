@@ -42,6 +42,9 @@ function startNewGame() {
 // --- Position editor ---
 let editorBrd = Array(64).fill(null);
 let editorPiece = 'wP';
+let editorPools = {w:[], b:[]};
+let editorCR = {wK:false,wQ:false,bK:false,bQ:false};
+let editorRooks = {w:{a:-1,h:-1},b:{a:-1,h:-1}};
 
 const EDITOR_PALETTE = [
   ['wK','wQ','wR','wB','wN','wP'],
@@ -51,9 +54,13 @@ const EDITOR_PALETTE = [
 function openEditor() {
   editorBrd = Array(64).fill(null);
   editorPiece = 'wP';
+  editorPools = {w:[], b:[]};
+  editorCR = {wK:false,wQ:false,bK:false,bQ:false};
+  editorRooks = {w:{a:-1,h:-1},b:{a:-1,h:-1}};
   document.getElementById('editorError').textContent = '';
   renderEditorPalette();
   renderEditorBoard();
+  renderEditorPools();
   document.getElementById('editorOverlay').style.display = 'flex';
 }
 
@@ -106,18 +113,69 @@ function renderEditorBoard() {
   }
 }
 
+function renderEditorPools() {
+  for (const c of ['w','b']) {
+    const el = document.getElementById('editorPool' + (c==='w'?'W':'B'));
+    el.innerHTML = '';
+    const counts = {};
+    for (const p of editorPools[c]) counts[p] = (counts[p]||0)+1;
+    if (Object.keys(counts).length === 0) {
+      el.innerHTML = '<span style="font-size:0.65rem;color:var(--text3)">empty</span>';
+    } else {
+      for (const [p,n] of Object.entries(counts)) {
+        const sp = document.createElement('span');
+        sp.className = 'pool-piece ' + (p[0]==='w'?'wp':'bp');
+        sp.textContent = PIECES[p] + (n>1?'×'+n:'');
+        sp.title = 'Click to remove one';
+        sp.onclick = () => { const i = editorPools[c].lastIndexOf(p); if(i>-1) editorPools[c].splice(i,1); renderEditorPools(); };
+        el.appendChild(sp);
+      }
+    }
+  }
+}
+
+function addToEditorPool(c) {
+  if (pieceType(editorPiece) === 'K') return;
+  editorPools[c].push(c + pieceType(editorPiece));
+  renderEditorPools();
+}
+
 function clearEditorBoard() {
   editorBrd = Array(64).fill(null);
+  editorPools = {w:[], b:[]};
+  editorCR = {wK:false,wQ:false,bK:false,bQ:false};
+  editorRooks = {w:{a:-1,h:-1},b:{a:-1,h:-1}};
   document.getElementById('editorError').textContent = '';
   renderEditorBoard();
+  renderEditorPools();
 }
 
 function resetEditorToClassic() {
   editorBrd = Array(64).fill(null);
   const bk = ['bR','bN','bB','bQ','bK','bB','bN','bR'];
   for (let f = 0; f < 8; f++) { editorBrd[f] = bk[f]; editorBrd[8+f] = 'bP'; editorBrd[48+f] = 'wP'; editorBrd[56+f] = bk[f].replace('b','w'); }
+  editorPools = {w:[], b:[]};
+  editorCR = {wK:true,wQ:true,bK:true,bQ:true};
+  editorRooks = {w:{a:56,h:63},b:{a:0,h:7}};
   document.getElementById('editorError').textContent = '';
   renderEditorBoard();
+  renderEditorPools();
+}
+
+function reset960EditorBoard() {
+  const savedBoard=[...board],savedCR={...castlingRights},savedRooks={w:{...chess960Rooks.w},b:{...chess960Rooks.b}};
+  board=Array(64).fill(null);
+  castlingRights={wK:true,wQ:true,bK:true,bQ:true};
+  chess960Rooks={w:{a:-1,h:-1},b:{a:-1,h:-1}};
+  setup960();
+  editorBrd=[...board];
+  editorCR={...castlingRights};
+  editorRooks={w:{...chess960Rooks.w},b:{...chess960Rooks.b}};
+  board=savedBoard; castlingRights=savedCR; chess960Rooks=savedRooks;
+  editorPools={w:[],b:[]};
+  document.getElementById('editorError').textContent='';
+  renderEditorBoard();
+  renderEditorPools();
 }
 
 function startCustomGame() {
@@ -128,10 +186,10 @@ function startCustomGame() {
     return;
   }
   closeEditor();
-  newGame(false, editorBrd);
+  newGame(false, editorBrd, editorPools, editorCR, editorRooks);
 }
 
-function newGame(rand960=true, customBoard=null) {
+function newGame(rand960=true, customBoard=null, customPools=null, customCR=null, customRooks=null) {
   gameId++;
   stockfish.stop();
   turn = 'w';
@@ -151,7 +209,12 @@ function newGame(rand960=true, customBoard=null) {
   castlingRights = {wK:false,wQ:false,bK:false,bQ:false};
 
   board = Array(64).fill(null);
-  if(customBoard) { board = [...customBoard]; }
+  if(customBoard) {
+    board = [...customBoard];
+    if(customPools) pools = {w:[...customPools.w], b:[...customPools.b]};
+    if(customCR) castlingRights = {...customCR};
+    if(customRooks) chess960Rooks = {w:{...customRooks.w}, b:{...customRooks.b}};
+  }
   else { castlingRights = {wK:true,wQ:true,bK:true,bQ:true}; if(rand960) setup960(); else setupClassic(); }
   initialBoard = [...board];
   initialCR = {...castlingRights};
