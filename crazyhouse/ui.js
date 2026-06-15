@@ -1,4 +1,5 @@
 let gameId = 0;
+let boardFlipped = false;
 
 function setEngineLabel(useStockfish) {
   const el = document.getElementById('engineLabel');
@@ -239,6 +240,7 @@ function newGame(rand960=true, customBoard=null, customPools=null, customCR=null
   } else {
     aiColor = 'b';
   }
+  boardFlipped = mode === 'pve' && aiColor === 'w';
 
   renderAll(true);
   updateStatus();
@@ -468,8 +470,10 @@ function renderBoard(){
   const el=document.getElementById('board');
   el.innerHTML='';
   const lmSet=new Set(legalMoves.filter(m=>!m.drop).map(m=>m.to));
-  for(let r=0;r<8;r++){
-    for(let f=0;f<8;f++){
+  const rows=boardFlipped?[7,6,5,4,3,2,1,0]:[0,1,2,3,4,5,6,7];
+  const cols=boardFlipped?[7,6,5,4,3,2,1,0]:[0,1,2,3,4,5,6,7];
+  for(const r of rows){
+    for(const f of cols){
       const i=idx(r,f);
       const div=document.createElement('div');
       div.className='sq '+((r+f)%2===0?'light':'dark');
@@ -484,8 +488,10 @@ function renderBoard(){
       }
       if(selectedPoolPiece&&!board[i])div.classList.add('drop-target');
 
-      if(f===0){const c=document.createElement('span');c.className='coords coord-rank';c.textContent=8-r;div.appendChild(c);}
-      if(r===7){const c=document.createElement('span');c.className='coords coord-file';c.textContent=fileStr(f);div.appendChild(c);}
+      const isFirstCol=boardFlipped?f===7:f===0;
+      const isLastRow=boardFlipped?r===0:r===7;
+      if(isFirstCol){const c=document.createElement('span');c.className='coords coord-rank';c.textContent=8-r;div.appendChild(c);}
+      if(isLastRow){const c=document.createElement('span');c.className='coords coord-file';c.textContent=fileStr(f);div.appendChild(c);}
 
       if(board[i]){
         const p=document.createElement('span');
