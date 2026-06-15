@@ -89,7 +89,7 @@ class StockfishInterface {
 
       this._cmd(`setoption name UCI_Variant value ${variant}`);
       this._cmd(`position fen ${fen}`);
-      this._cmd('go depth 1');
+      this._cmd('go depth 5');
     });
   }
 
