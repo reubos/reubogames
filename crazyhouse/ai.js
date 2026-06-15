@@ -381,15 +381,17 @@ async function aiMove() {
   const ml = legalMovesFor(turn);
   if (ml.length === 0) { endTurn(); aiThinking = false; return; }
 
-  const hasWalls = board.some(p => p && pieceType(p) === 'W')
-    || pools.w.some(p => pieceType(p) === 'W')
-    || pools.b.some(p => pieceType(p) === 'W');
-  if (!stockfish.ready || hasWalls) {
+  if (!stockfish.ready) {
     setEngineLabel(false);
     aiMoveBuiltin(ml);
     return;
   }
   setEngineLabel(true);
+
+  const hasWalls = board.some(p => p && pieceType(p) === 'W')
+    || pools.w.some(p => pieceType(p) === 'W')
+    || pools.b.some(p => pieceType(p) === 'W');
+  const variant = hasWalls ? 'crazyhouse-wall' : 'crazyhouse';
 
   const sfSkill   = [0, 3, 10, 20];
   const timeBudgets = [0, 500, 1200, 2500];
@@ -398,7 +400,7 @@ async function aiMove() {
   stockfish.setSkillLevel(sfSkill[aiDepth] ?? 10);
 
   const fen = boardToFen();
-  const sfResult = await stockfish.getBestMove(fen, budget);
+  const sfResult = await stockfish.getBestMove(fen, budget, variant);
 
   if (gameId !== myGameId || gameOver || historyIndex !== -1) { aiThinking = false; return; }
 
@@ -415,7 +417,7 @@ async function aiMove() {
   for (const m of selfCaptures) {
     const { nb, np, nc } = simMove(board, pools, castlingRights, m, turn, promotedSquares);
     const afterFen = boardToFen(nb, np, nc, oppColor(turn));
-    const evalScore = await stockfish.quickEval(afterFen);
+    const evalScore = await stockfish.quickEval(afterFen, variant);
 
     if (gameId !== myGameId || gameOver || historyIndex !== -1) { aiThinking = false; return; }
 

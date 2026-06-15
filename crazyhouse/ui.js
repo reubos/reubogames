@@ -440,7 +440,8 @@ function updateEvalBarAsync() {
   const fen = boardToFen();
   const toMove = turn;
 
-  stockfish.evalPosition(fen, toMove).then(score => {
+  const hasWallsEval = board.some(p => p && pieceType(p) === 'W') || pools.w.some(p => pieceType(p) === 'W') || pools.b.some(p => pieceType(p) === 'W');
+  stockfish.evalPosition(fen, toMove, hasWallsEval ? 'crazyhouse-wall' : 'crazyhouse').then(score => {
     if (score === null || mySeq !== evalSeq || gameOver) return;
     renderEvalBar(score);
   });

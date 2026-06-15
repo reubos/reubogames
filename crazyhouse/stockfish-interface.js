@@ -20,6 +20,11 @@ class StockfishInterface {
             resolve();
           }
         });
+        try {
+          sf.FS.writeFile('/variants.ini',
+            '[crazyhouse-wall:crazyhouse]\ncustomPiece1 = w:\nimmobile = w\n');
+          sf.postCustomMessage('load /variants.ini');
+        } catch(e) {}
         sf.postCustomMessage('uci');
         sf.postCustomMessage('setoption name UCI_Variant value crazyhouse');
         sf.postCustomMessage('setoption name UCI_Chess960 value true');
@@ -45,7 +50,7 @@ class StockfishInterface {
     };
   }
 
-  getBestMove(fen, movetime) {
+  getBestMove(fen, movetime, variant = 'crazyhouse') {
     return new Promise(resolve => {
       let lastScore = 0;
 
@@ -62,12 +67,13 @@ class StockfishInterface {
         }
       };
 
+      this._cmd(`setoption name UCI_Variant value ${variant}`);
       this._cmd(`position fen ${fen}`);
       this._cmd(`go movetime ${movetime}`);
     });
   }
 
-  quickEval(fen) {
+  quickEval(fen, variant = 'crazyhouse') {
     return new Promise(resolve => {
       let score = 0;
 
@@ -81,6 +87,7 @@ class StockfishInterface {
         }
       };
 
+      this._cmd(`setoption name UCI_Variant value ${variant}`);
       this._cmd(`position fen ${fen}`);
       this._cmd('go depth 1');
     });
@@ -88,7 +95,7 @@ class StockfishInterface {
 
   // Evaluates a position and resolves with score from white's perspective (centipawns).
   // Returns null immediately if the engine is busy.
-  evalPosition(fen, toMove) {
+  evalPosition(fen, toMove, variant = 'crazyhouse') {
     if (this._onLine) return Promise.resolve(null);
 
     return new Promise(resolve => {
@@ -115,6 +122,7 @@ class StockfishInterface {
         }
       };
 
+      this._cmd(`setoption name UCI_Variant value ${variant}`);
       this._cmd(`position fen ${fen}`);
       this._cmd('go movetime 200');
     });
