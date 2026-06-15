@@ -1,9 +1,10 @@
 const PIECES = {
   wK:'♔',wQ:'♕',wR:'♖',wB:'♗',wN:'♘',wP:'♙',
-  bK:'♚',bQ:'♛',bR:'♜',bB:'♝',bN:'♞',bP:'♟'
+  bK:'♚',bQ:'♛',bR:'♜',bB:'♝',bN:'♞',bP:'♟',
+  wW:'⬜',bW:'⬛'
 };
-const TYPE_GLYPH = {K:'K',Q:'Q',R:'R',B:'B',N:'N',P:'P'};
-const PIECE_VALS = {P:100,N:320,B:330,R:500,Q:900,K:20000};
+const TYPE_GLYPH = {K:'K',Q:'Q',R:'R',B:'B',N:'N',P:'P',W:'W'};
+const PIECE_VALS = {P:100,N:320,B:330,R:500,Q:900,K:20000,W:75};
 
 let board, turn, pools, gameOver, selectedSq, selectedPoolPiece, legalMoves, lastMove, moveHistory, chess960Rooks, castlingRights, promotedSquares;
 let snapshots=[], historyIndex=-1;
@@ -86,7 +87,8 @@ function pseudoMoves(color, brd=board, cr=castlingRights){
   const opp=oppColor(color);
   for(let i=0;i<64;i++){
     const p=brd[i];if(!p||pieceColor(p)!==color)continue;
-    const pt=pieceType(p);const r=rowOf(i),f=colOf(i);
+    const pt=pieceType(p);if(pt==='W')continue;
+    const r=rowOf(i),f=colOf(i);
     const add=(to,flags={})=>{
       if(to===i)return;
       const target=brd[to];

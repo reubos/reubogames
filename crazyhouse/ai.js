@@ -381,7 +381,10 @@ async function aiMove() {
   const ml = legalMovesFor(turn);
   if (ml.length === 0) { endTurn(); aiThinking = false; return; }
 
-  if (!stockfish.ready) {
+  const hasWalls = board.some(p => p && pieceType(p) === 'W')
+    || pools.w.some(p => pieceType(p) === 'W')
+    || pools.b.some(p => pieceType(p) === 'W');
+  if (!stockfish.ready || hasWalls) {
     aiMoveBuiltin(ml);
     return;
   }

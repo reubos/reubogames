@@ -47,8 +47,8 @@ let editorCR = {wK:false,wQ:false,bK:false,bQ:false};
 let editorRooks = {w:{a:-1,h:-1},b:{a:-1,h:-1}};
 
 const EDITOR_PALETTE = [
-  ['wK','wQ','wR','wB','wN','wP'],
-  ['bK','bQ','bR','bB','bN','bP'],
+  ['wK','wQ','wR','wB','wN','wP','wW'],
+  ['bK','bQ','bR','bB','bN','bP','bW'],
 ];
 
 function openEditor() {
@@ -722,7 +722,11 @@ function moveLabel(m){
     if(selfCaptureMode==='own') return 'Self-capture (keep in own pool)';
     return 'Self-capture (piece removed)';
   }
-  if(m.flags&&m.flags.capture) return 'Capture piece';
+  if(m.flags&&m.flags.capture){
+    const target=board[m.to];
+    if(target&&pieceType(target)==='W') return 'Capture wall';
+    return 'Capture piece';
+  }
   return 'Move here';
 }
 
