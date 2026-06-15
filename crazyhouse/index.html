@@ -129,12 +129,30 @@
         <select id="positionSelect" style="flex:1">
           <option value="960">Chess 960 (random)</option>
           <option value="classic">Classic</option>
+          <option value="custom">Custom…</option>
         </select>
       </div>
     </div>
     <div style="display:flex;gap:8px;margin-top:20px">
       <button class="primary" style="flex:1" onclick="startNewGame()">Start Game</button>
       <button onclick="closeNewGameDialog()">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<div id="editorOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:300;align-items:center;justify-content:center;overflow:auto;padding:16px">
+  <div style="background:var(--bg2);border:1px solid var(--border2);border-radius:12px;padding:20px;display:flex;flex-direction:column;align-items:center;gap:14px">
+    <div class="panel-title" style="margin:0;align-self:flex-start">Set Up Position</div>
+    <div id="editorPalette" style="display:flex;flex-direction:column;gap:6px;align-self:stretch"></div>
+    <div style="position:relative">
+      <div id="editorBoard" class="board"></div>
+    </div>
+    <div id="editorError" style="font-size:0.68rem;color:var(--danger);min-height:1em"></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:center">
+      <button onclick="clearEditorBoard()">Clear Board</button>
+      <button onclick="resetEditorToClassic()">Classic Start</button>
+      <button class="primary" onclick="startCustomGame()">Start Game</button>
+      <button onclick="closeEditor()">Cancel</button>
     </div>
   </div>
 </div>

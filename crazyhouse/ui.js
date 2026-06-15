@@ -22,8 +22,7 @@ function closeNewGameDialog() {
 }
 
 function startNewGame() {
-  closeNewGameDialog();
-  const rand960 = document.getElementById('positionSelect').value === '960';
+  const pos = document.getElementById('positionSelect').value;
   selfCaptureMode = document.getElementById('selfCaptureModeSelect').value;
   const hints = {
     opponent: 'Capture own pieces → opponent gains them',
@@ -31,10 +30,108 @@ function startNewGame() {
     remove: 'Capture own pieces → removed from game',
   };
   document.getElementById('selfCapHint').textContent = hints[selfCaptureMode];
-  newGame(rand960);
+  if (pos === 'custom') {
+    closeNewGameDialog();
+    openEditor();
+    return;
+  }
+  closeNewGameDialog();
+  newGame(pos === '960');
 }
 
-function newGame(rand960=true) {
+// --- Position editor ---
+let editorBrd = Array(64).fill(null);
+let editorPiece = 'wP';
+
+const EDITOR_PALETTE = [
+  ['wK','wQ','wR','wB','wN','wP'],
+  ['bK','bQ','bR','bB','bN','bP'],
+];
+
+function openEditor() {
+  editorBrd = Array(64).fill(null);
+  editorPiece = 'wP';
+  document.getElementById('editorError').textContent = '';
+  renderEditorPalette();
+  renderEditorBoard();
+  document.getElementById('editorOverlay').style.display = 'flex';
+}
+
+function closeEditor() {
+  document.getElementById('editorOverlay').style.display = 'none';
+}
+
+function renderEditorPalette() {
+  const el = document.getElementById('editorPalette');
+  el.innerHTML = '';
+  for (const row of EDITOR_PALETTE) {
+    const rowEl = document.createElement('div');
+    rowEl.style.cssText = 'display:flex;gap:4px;justify-content:center';
+    for (const p of row) {
+      const btn = document.createElement('button');
+      btn.textContent = PIECES[p];
+      btn.title = p;
+      btn.style.cssText = `font-size:1.5rem;padding:4px 6px;line-height:1;${p[0]==='w'?'color:#fff;text-shadow:0 0 2px #000,0 1px 3px rgba(0,0,0,0.9)':'color:#111;text-shadow:0 0 2px rgba(255,255,255,0.4)'}`;
+      if (editorPiece === p) btn.style.borderColor = 'var(--accent)';
+      btn.onclick = () => { editorPiece = p; renderEditorPalette(); };
+      rowEl.appendChild(btn);
+    }
+    el.appendChild(rowEl);
+  }
+}
+
+function renderEditorBoard() {
+  const el = document.getElementById('editorBoard');
+  el.innerHTML = '';
+  for (let r = 0; r < 8; r++) {
+    for (let f = 0; f < 8; f++) {
+      const i = idx(r, f);
+      const sq = document.createElement('div');
+      sq.className = 'sq ' + ((r + f) % 2 === 0 ? 'light' : 'dark');
+      if (f === 0) { const c = document.createElement('span'); c.className = 'coords coord-rank'; c.textContent = 8 - r; sq.appendChild(c); }
+      if (r === 7) { const c = document.createElement('span'); c.className = 'coords coord-file'; c.textContent = fileStr(f); sq.appendChild(c); }
+      if (editorBrd[i]) {
+        const p = document.createElement('span');
+        p.className = 'piece ' + (editorBrd[i][0] === 'w' ? 'wp' : 'bp');
+        p.textContent = PIECES[editorBrd[i]];
+        sq.appendChild(p);
+      }
+      sq.onclick = () => {
+        editorBrd[i] = editorBrd[i] === editorPiece ? null : editorPiece;
+        document.getElementById('editorError').textContent = '';
+        renderEditorBoard();
+      };
+      el.appendChild(sq);
+    }
+  }
+}
+
+function clearEditorBoard() {
+  editorBrd = Array(64).fill(null);
+  document.getElementById('editorError').textContent = '';
+  renderEditorBoard();
+}
+
+function resetEditorToClassic() {
+  editorBrd = Array(64).fill(null);
+  const bk = ['bR','bN','bB','bQ','bK','bB','bN','bR'];
+  for (let f = 0; f < 8; f++) { editorBrd[f] = bk[f]; editorBrd[8+f] = 'bP'; editorBrd[48+f] = 'wP'; editorBrd[56+f] = bk[f].replace('b','w'); }
+  document.getElementById('editorError').textContent = '';
+  renderEditorBoard();
+}
+
+function startCustomGame() {
+  const wKings = editorBrd.filter(p => p === 'wK').length;
+  const bKings = editorBrd.filter(p => p === 'bK').length;
+  if (wKings !== 1 || bKings !== 1) {
+    document.getElementById('editorError').textContent = 'Each side must have exactly one king.';
+    return;
+  }
+  closeEditor();
+  newGame(false, editorBrd);
+}
+
+function newGame(rand960=true, customBoard=null) {
   gameId++;
   stockfish.stop();
   turn = 'w';
@@ -51,10 +148,11 @@ function newGame(rand960=true) {
   pools = {w:[],b:[]};
   promotedSquares = new Set();
   chess960Rooks = {w:{a:-1,h:-1},b:{a:-1,h:-1}};
-  castlingRights = {wK:true,wQ:true,bK:true,bQ:true};
+  castlingRights = {wK:false,wQ:false,bK:false,bQ:false};
 
   board = Array(64).fill(null);
-  if(rand960) setup960(); else setupClassic();
+  if(customBoard) { board = [...customBoard]; }
+  else { castlingRights = {wK:true,wQ:true,bK:true,bQ:true}; if(rand960) setup960(); else setupClassic(); }
   initialBoard = [...board];
   initialCR = {...castlingRights};
   mode = document.getElementById('modeSelect').value;
