@@ -1,9 +1,20 @@
 let gameId = 0;
 
+function setEngineLabel(useStockfish) {
+  const el = document.getElementById('engineLabel');
+  if (!el) return;
+  if (useStockfish) {
+    el.textContent = 'Engine: Stockfish';
+    el.style.color = 'var(--accent2)';
+  } else {
+    el.textContent = 'Engine: Built-in';
+    el.style.color = 'var(--text3)';
+  }
+}
+
 // Init Fairy Stockfish — falls back to built-in AI if it fails
 stockfish.init().then(() => {
-  const el = document.getElementById('engineLabel');
-  if (el) { el.textContent = 'Engine: Stockfish'; el.style.color = 'var(--accent2)'; }
+  setEngineLabel(true);
 }).catch(() => {});
 
 function onModeChange() {

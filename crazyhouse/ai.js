@@ -385,9 +385,11 @@ async function aiMove() {
     || pools.w.some(p => pieceType(p) === 'W')
     || pools.b.some(p => pieceType(p) === 'W');
   if (!stockfish.ready || hasWalls) {
+    setEngineLabel(false);
     aiMoveBuiltin(ml);
     return;
   }
+  setEngineLabel(true);
 
   const sfSkill   = [0, 3, 10, 20];
   const timeBudgets = [0, 500, 1200, 2500];
