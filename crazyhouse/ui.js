@@ -87,7 +87,7 @@ function renderEditorPalette() {
     rowEl.style.cssText = 'display:flex;gap:4px;justify-content:center';
     for (const p of row) {
       const btn = document.createElement('button');
-      if(pieceType(p)==='W'){btn.classList.add('wall-piece');}else{btn.textContent=PIECES[p];}
+      if(pieceType(p)==='W'){const sq=document.createElement('span');sq.className=(p[0]==='w'?'wp':'bp')+' wall-piece';btn.appendChild(sq);}else{btn.textContent=PIECES[p];}
       btn.title = p;
       btn.style.cssText = `font-size:1.5rem;padding:4px 6px;line-height:1;${p[0]==='w'?'color:#fff;text-shadow:0 0 2px #000,0 1px 3px rgba(0,0,0,0.9)':'color:#111;text-shadow:0 0 2px rgba(255,255,255,0.4)'}`;
       if (editorPiece === p) btn.style.borderColor = 'var(--accent)';
