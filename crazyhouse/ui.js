@@ -136,7 +136,7 @@ function renderEditorPools() {
       for (const [p,n] of Object.entries(counts)) {
         const sp = document.createElement('span');
         sp.className = 'pool-piece ' + (p[0]==='w'?'wp':'bp');
-        if(pieceType(p)==='W'){sp.classList.add('wall-piece');}else{sp.textContent=PIECES[p]+(n>1?'×'+n:'');}
+        if(pieceType(p)==='W'){const sq=document.createElement('span');sq.className=(p[0]==='w'?'wp':'bp')+' wall-piece';sp.appendChild(sq);if(n>1){sp.append('×'+n);}}else{sp.textContent=PIECES[p]+(n>1?'×'+n:'');}
         sp.title = 'Click to remove one';
         sp.onclick = () => { const i = editorPools[c].lastIndexOf(p); if(i>-1) editorPools[c].splice(i,1); renderEditorPools(); };
         el.appendChild(sp);
@@ -516,7 +516,7 @@ function renderPools(){
     for(const [p,n] of Object.entries(counts)){
       const sp=document.createElement('span');
       sp.className='pool-piece '+(p[0]==='w'?'wp':'bp')+(selectedPoolPiece===p?' selected':'');
-      if(pieceType(p)==='W'){sp.classList.add('wall-piece');}else{sp.textContent=PIECES[p]+(n>1?'×'+n:'');}
+      if(pieceType(p)==='W'){const sq=document.createElement('span');sq.className=(p[0]==='w'?'wp':'bp')+' wall-piece';sp.appendChild(sq);if(n>1){sp.append('×'+n);}}else{sp.textContent=PIECES[p]+(n>1?'×'+n:'');}
       sp.title='Drop '+p+(n>1?' ('+n+')':'');
       sp.addEventListener('click',()=>handlePoolClick(p,c));
       el.appendChild(sp);
