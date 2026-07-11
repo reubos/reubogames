@@ -42,8 +42,12 @@
   <label title="All-even or all-odd puzzles only: render as a fixed N=max(w,h,d) cube, with the shorter axes' outer layers drawn thicker instead of shapeshifting.">
     <input type="checkbox" id="constcube-toggle"> constant-cube view
   </label>
+  <label title="All-even or all-odd puzzles only: number layers by distance from the outside of the fixed N-cube (never renumbered per phase) instead of by the current reduction's movable layers.">
+    <input type="checkbox" id="outside-numbering-toggle"> outside-numbered layers
+  </label>
 </div>
 <div id="constcube-note" class="muted" style="display:none;"></div>
+<div id="numbering-note" class="muted" style="display:none;"></div>
 <div id="moveline"></div>
 <svg id="stage" width="100%" height="460" viewBox="0 0 400 300" preserveAspectRatio="xMidYMid meet"></svg>
 <p class="muted">Green front · White up · Yellow down · Red right · Orange left · Blue back · dark = internal body revealed by shapeshifting.</p>
@@ -445,7 +449,12 @@ function generateScrambleConstCube(w,h,d,perPhase,N){
 }
 
 /* ===================== UI ===================== */
-let phases=[], flat=[], W=3,H=5,D=7, constCubeInfo=null;
+// constCubeInfo drives RENDERING (draw as a fixed N-cube). notationInfo drives
+// MOVE NOTATION/SELECTION (layer numbers count from the outside of the fixed
+// N-cube). These are independent settings -- either can be on with the other
+// off, e.g. shapeshifting render with outside-numbered moves, or a
+// constant-cube render using ordinary reduced-layer notation.
+let phases=[], flat=[], W=3,H=5,D=7, constCubeInfo=null, notationInfo=null;
 // replay from solved, coarsening fc at each phase boundary, applying the first k moves.
 function stateAt(k){
   const c=buildSolved(W,H,D);
@@ -453,7 +462,7 @@ function stateAt(k){
   let applied=0;
   for(const ph of phases){
     coarsen(c, ph.eff);
-    const cc = constCubeInfo ? {N:constCubeInfo.N, eff:ph.eff} : null;
+    const cc = notationInfo ? {N:notationInfo.N, eff:ph.eff} : null;
     for(const m of ph.moves){ if(applied>=k) return c; applyMove(c,m,cc); applied++; }
   }
   return c;
@@ -469,7 +478,7 @@ function renderAt(k){
   let hi=null;
   if(k<flat.length && document.getElementById('highlight').checked){
     const mv=parseMove(flat[k]);
-    const sel = constCubeInfo ? selectCoordsConstCube(state,mv,constCubeInfo.N,phaseEffAt(k)) : selectCoords(state,mv);
+    const sel = notationInfo ? selectCoordsConstCube(state,mv,notationInfo.N,phaseEffAt(k)) : selectCoords(state,mv);
     hi={ k:IDX[AXIS[mv.face]], sel, mv };
   }
   renderSVG(state, document.getElementById('shapeonly').checked, hi, constCubeInfo);
@@ -486,24 +495,31 @@ function apply(){
   H=Math.max(1,+document.getElementById('ih').value||1);
   D=Math.max(1,+document.getElementById('id').value||1);
   const per=Math.max(1,Math.min(40,+document.getElementById('perphase').value||6));
-  // Constant-cube toggle uses the SAME phase/reduction structure as normal
-  // mode (getPath is unchanged -- bandaging restricts moves identically
-  // regardless of display), but layer numbers are "distance from outside"
-  // of the fixed N-cube rather than renumbered per phase, so it draws moves
-  // from a different (N-based) pool via generateScrambleConstCube.
+  // Two independent settings, each needing all-even/all-odd dims:
+  //  - constant-cube VIEW: render as a fixed N-cube (rendering only).
+  //  - outside-numbered LAYERS: layer numbers count from the outside of the
+  //    fixed N-cube, never renumbered per phase (move generation/selection).
+  // Both reuse the SAME getPath phase/reduction structure regardless of
+  // whether either is on -- bandaging restricts moves identically either way.
   const wantConstCube=document.getElementById('constcube-toggle').checked;
-  const note=document.getElementById('constcube-note');
-  const useConstCube = wantConstCube && sameParity(W,H,D);
-  const N = useConstCube ? Math.max(W,H,D) : null;
-  phases = useConstCube ? generateScrambleConstCube(W,H,D,per,N) : generateScramble(W,H,D,per);
-  if(useConstCube){
-    constCubeInfo={N, dims:[W,H,D]};
-    note.style.display='block'; note.textContent=`Constant-cube view: rendered as a fixed ${N}×${N}×${N}. Layer numbers count "distance from outside" of the fixed N-cube; bandaged outer layers are simply unavailable rather than renumbered.`;
-  } else {
-    constCubeInfo=null;
-    note.style.display = wantConstCube ? 'block' : 'none';
-    if(wantConstCube) note.textContent=`Constant-cube view needs all-even or all-odd dimensions (got ${W}×${H}×${D}) -- showing the normal reduced view instead.`;
-  }
+  const wantOutsideNum=document.getElementById('outside-numbering-toggle').checked;
+  const viewNote=document.getElementById('constcube-note');
+  const numNote=document.getElementById('numbering-note');
+  const parityOk = sameParity(W,H,D);
+  const useConstCube = wantConstCube && parityOk;
+  const useOutsideNum = wantOutsideNum && parityOk;
+  const N = (useConstCube || useOutsideNum) ? Math.max(W,H,D) : null;
+  phases = useOutsideNum ? generateScrambleConstCube(W,H,D,per,N) : generateScramble(W,H,D,per);
+  constCubeInfo = useConstCube ? {N, dims:[W,H,D]} : null;
+  notationInfo = useOutsideNum ? {N} : null;
+  viewNote.style.display = wantConstCube ? 'block' : 'none';
+  if(wantConstCube) viewNote.textContent = useConstCube
+    ? `Constant-cube view: rendered as a fixed ${N}×${N}×${N}.`
+    : `Constant-cube view needs all-even or all-odd dimensions (got ${W}×${H}×${D}) -- showing the normal shape instead.`;
+  numNote.style.display = wantOutsideNum ? 'block' : 'none';
+  if(wantOutsideNum) numNote.textContent = useOutsideNum
+    ? `Outside-numbered layers: counted from the outside of the fixed ${N}×${N}×${N}; bandaged outer layers are simply unavailable rather than renumbered.`
+    : `Outside-numbered layers needs all-even or all-odd dimensions (got ${W}×${H}×${D}) -- using ordinary reduced-layer numbering instead.`;
   flat=phases.flatMap(p=>p.moves);
   const step=document.getElementById('step');
   step.max=flat.length; step.value=0;
@@ -511,6 +527,7 @@ function apply(){
 }
 document.getElementById('apply').onclick=apply;
 document.getElementById('constcube-toggle').onchange=apply;
+document.getElementById('outside-numbering-toggle').onchange=apply;
 document.getElementById('step').oninput=(e)=>renderAt(+e.target.value);
 document.getElementById('shapeonly').onchange=()=>renderAt(+document.getElementById('step').value);
 document.getElementById('highlight').onchange=()=>renderAt(+document.getElementById('step').value);
