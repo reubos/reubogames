@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cuboid state viewer (prototype)</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font-family: system-ui, sans-serif; margin: 0; padding: 16px; background:#111; color:#eee; }
+  h1 { font-size: 16px; font-weight: 600; margin: 0 0 12px; }
+  .row { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-bottom:10px; }
+  label { font-size:13px; display:flex; align-items:center; gap:5px; }
+  input[type=number]{ width:52px; }
+  input[type=text]{ flex:1; min-width:220px; }
+  input, button { font:inherit; padding:4px 6px; background:#222; color:#eee; border:1px solid #444; border-radius:5px; }
+  button { cursor:pointer; }
+  button:hover { background:#333; }
+  #stage { background:#181818; border:1px solid #333; border-radius:8px; margin-top:8px; }
+  #moveline { font-size:13px; margin:8px 0; min-height:1.4em; letter-spacing:.5px; }
+  #moveline .cur { background:#446; color:#fff; padding:1px 5px; border-radius:4px; }
+  #moveline .done { opacity:.5; }
+  .muted { color:#888; font-size:12px; }
+</style>
+</head>
+<body>
+<h1>Cuboid state viewer — prototype (shapeshifting + colours)</h1>
+
+<div class="row">
+  <label>W <input type="number" id="iw" min="1" max="9" value="3"></label>
+  <label>H <input type="number" id="ih" min="1" max="9" value="5"></label>
+  <label>D <input type="number" id="id" min="1" max="9" value="7"></label>
+  <label style="flex:1;">Scramble <input type="text" id="seq" value="R U F' 2R U2 F"></label>
+  <button id="apply">Apply</button>
+</div>
+<div class="row">
+  <button id="prev">◀ Prev</button>
+  <input type="range" id="step" min="0" max="0" value="0" style="flex:1;">
+  <button id="next">Next ▶</button>
+  <span id="stepnum" class="muted">0 / 0</span>
+  <label><input type="checkbox" id="shapeonly"> shape only</label>
+</div>
+<div id="moveline"></div>
+<svg id="stage" width="100%" height="460" viewBox="0 0 400 300" preserveAspectRatio="xMidYMid meet"></svg>
+<p class="muted">Green front · White up · Yellow down · Red right · Orange left · Blue back · dark = internal body revealed by shapeshifting.</p>
+
+<script>
+/* ===================== engine (mirror of sim-proto.js) ===================== */
+const COLORS = { '+x':'Red','-x':'Orange','+y':'White','-y':'Yellow','+z':'Green','-z':'Blue' };
+const HEX = { Red:'#d22', Orange:'#f80', White:'#f0f0f0', Yellow:'#fd0', Green:'#0a5', Blue:'#06c', Body:'#2a2a2a' };
+const DIRS = { '+x':[1,0,0],'-x':[-1,0,0],'+y':[0,1,0],'-y':[0,-1,0],'+z':[0,0,1],'-z':[0,0,-1] };
+const I3 = [[1,0,0],[0,1,0],[0,0,1]];
+const dot=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
+const matVec=(M,v)=>[dot(M[0],v),dot(M[1],v),dot(M[2],v)];
+const transpose=(M)=>[0,1,2].map(i=>[M[0][i],M[1][i],M[2][i]]);
+const matMul=(A,B)=>{const Bt=transpose(B);return A.map(r=>Bt.map(c=>dot(r,c)));};
+const vecEq=(a,b)=>a[0]===b[0]&&a[1]===b[1]&&a[2]===b[2];
+const P={ x:[[1,0,0],[0,0,-1],[0,1,0]], y:[[0,0,1],[0,1,0],[-1,0,0]], z:[[0,-1,0],[1,0,0],[0,0,1]] };
+const matPow=(M,e)=>e===1?M:e===-1?transpose(M):matMul(M,M);
+const AXIS={R:'x',L:'x',U:'y',D:'y',F:'z',B:'z'}, IDX={x:0,y:1,z:2}, POSITIVE=new Set(['R','U','F']);
+const baseSign=(f)=>POSITIVE.has(f)?-1:1;
+const span=(n)=>Array.from({length:n},(_,i)=>-(n-1)+2*i);
+
+function buildSolved(w,h,d){
+  const xs=span(w),ys=span(h),zs=span(d);
+  const xmax=Math.max(...xs),xmin=Math.min(...xs),ymax=Math.max(...ys),ymin=Math.min(...ys),zmax=Math.max(...zs),zmin=Math.min(...zs);
+  const cubies=[];
+  for(const x of xs)for(const y of ys)for(const z of zs){
+    const st={};
+    if(x===xmax)st['+x']=COLORS['+x']; if(x===xmin)st['-x']=COLORS['-x'];
+    if(y===ymax)st['+y']=COLORS['+y']; if(y===ymin)st['-y']=COLORS['-y'];
+    if(z===zmax)st['+z']=COLORS['+z']; if(z===zmin)st['-z']=COLORS['-z'];
+    cubies.push({home:[x,y,z],pos:[x,y,z],ori:I3,stickers:st});
+  }
+  return cubies;
+}
+function parseMove(m){
+  const x=m.match(/^(\d+)?([RLUDFB])(w?)(2|')?$/);
+  if(!x)throw new Error('bad move: '+m);
+  return {layer:x[1]?+x[1]:1,face:x[2],wide:x[3]==='w',mod:x[4]||''};
+}
+function applyMove(cubies,move){
+  const {face,layer,mod,wide}=typeof move==='string'?parseMove(move):move;
+  const ax=AXIS[face],k=IDX[ax],pos=POSITIVE.has(face);
+  const coords=[...new Set(cubies.map(c=>c.pos[k]))].sort((a,b)=>pos?b-a:a-b);
+  const sel=new Set(wide?coords.slice(0,layer):[coords[layer-1]]);
+  const sign=baseSign(face), exp=mod==='2'?2:mod==="'"?-sign:sign, R=matPow(P[ax],exp);
+  for(const c of cubies){ if(!sel.has(c.pos[k]))continue; c.pos=matVec(R,c.pos); c.ori=matMul(R,c.ori); }
+}
+function worldStickers(c){
+  const out={}, oriT=transpose(c.ori);
+  for(const [key,wv] of Object.entries(DIRS)){
+    const lv=matVec(oriT,wv);
+    const lk=Object.keys(DIRS).find(kk=>vecEq(DIRS[kk],lv));
+    if(c.stickers[lk])out[key]=c.stickers[lk];
+  }
+  return out;
+}
+
+/* ===================== renderer ===================== */
+// axonometric projection: +x right, +y up, +z (front) toward lower-left; back recedes upper-right.
+const S=20, AX=0.55, AY=0.42;
+const project=([x,y,z])=>[ x*S - z*S*AX, -y*S + z*S*AY ];
+const VIS=['+x','+y','+z'];                 // toward-camera face normals for this view
+const SHADE={ '+z':1.0, '+y':0.86, '+x':0.72 };
+function shade(hex,f){
+  const n=parseInt(hex.slice(1),16); let r=(n>>16)&255,g=(n>>8)&255,b=n&255;
+  r=Math.round(r*f); g=Math.round(g*f); b=Math.round(b*f);
+  return '#'+((1<<24)+(r<<16)+(g<<8)+b).toString(16).slice(1);
+}
+// the two in-plane unit axes for a given face normal
+const INPLANE={ '+x':[[0,1,0],[0,0,1]], '+y':[[1,0,0],[0,0,1]], '+z':[[1,0,0],[0,1,0]] };
+
+function renderSVG(cubies, shapeOnly){
+  const occ=new Set(cubies.map(c=>c.pos.join(',')));
+  const faces=[];
+  for(const c of cubies){
+    const ws = shapeOnly ? null : worldStickers(c);
+    for(const dir of VIS){
+      const n=DIRS[dir];
+      const nb=[c.pos[0]+2*n[0],c.pos[1]+2*n[1],c.pos[2]+2*n[2]];
+      if(occ.has(nb.join(',')))continue;                    // interior face — cull
+      const center=[c.pos[0]+n[0],c.pos[1]+n[1],c.pos[2]+n[2]];
+      const [u,v]=INPLANE[dir];
+      const corners=[[+1,+1],[+1,-1],[-1,-1],[-1,+1]].map(([su,sv])=>
+        project([center[0]+su*u[0]+sv*v[0], center[1]+su*u[1]+sv*v[1], center[2]+su*u[2]+sv*v[2]]));
+      let col;
+      if(shapeOnly){ col=shade('#8899aa',SHADE[dir]); }
+      else { const name=ws[dir]; col=shade(HEX[name]||HEX.Body, SHADE[dir]); }
+      const depth = c.pos[0]+c.pos[1]+c.pos[2] + (dir==='+z'?0.5:dir==='+y'?0.25:0); // back-to-front
+      faces.push({corners,col,depth});
+    }
+  }
+  faces.sort((a,b)=>a.depth-b.depth);
+  // fit viewBox
+  let minX=1e9,minY=1e9,maxX=-1e9,maxY=-1e9;
+  for(const f of faces)for(const p of f.corners){ minX=Math.min(minX,p[0]);minY=Math.min(minY,p[1]);maxX=Math.max(maxX,p[0]);maxY=Math.max(maxY,p[1]); }
+  const pad=14, w=(maxX-minX)+2*pad, h=(maxY-minY)+2*pad;
+  let body='';
+  for(const f of faces){
+    const pts=f.corners.map(p=>`${(p[0]-minX+pad).toFixed(1)},${(p[1]-minY+pad).toFixed(1)}`).join(' ');
+    body+=`<polygon points="${pts}" fill="${f.col}" stroke="#111" stroke-width="1" stroke-linejoin="round"/>`;
+  }
+  const svg=document.getElementById('stage');
+  svg.setAttribute('viewBox',`0 0 ${w.toFixed(1)} ${h.toFixed(1)}`);
+  svg.innerHTML=body;
+}
+
+/* ===================== UI ===================== */
+let moves=[], W=3,H=5,D=7;
+function currentMoves(){
+  const raw=document.getElementById('seq').value.trim();
+  return raw?raw.split(/\s+/).filter(Boolean):[];
+}
+function stateAt(k){
+  const c=buildSolved(W,H,D);
+  for(let i=0;i<k;i++)applyMove(c,moves[i]);
+  return c;
+}
+function renderAt(k){
+  renderSVG(stateAt(k), document.getElementById('shapeonly').checked);
+  document.getElementById('stepnum').textContent=`${k} / ${moves.length}`;
+  const line=moves.map((m,i)=>i<k?`<span class="done">${m}</span>`:(i===k?`<span class="cur">${m}</span>`:m)).join(' ');
+  document.getElementById('moveline').innerHTML=line||'<span class="muted">(solved)</span>';
+}
+function apply(){
+  W=Math.max(1,+document.getElementById('iw').value||1);
+  H=Math.max(1,+document.getElementById('ih').value||1);
+  D=Math.max(1,+document.getElementById('id').value||1);
+  try { moves=currentMoves(); moves.forEach(parseMove); }
+  catch(e){ document.getElementById('moveline').innerHTML=`<span style="color:#f77">${e.message}</span>`; return; }
+  const step=document.getElementById('step');
+  step.max=moves.length; step.value=Math.min(step.value,moves.length);
+  renderAt(+step.value);
+}
+document.getElementById('apply').onclick=apply;
+document.getElementById('step').oninput=(e)=>renderAt(+e.target.value);
+document.getElementById('shapeonly').onchange=()=>renderAt(+document.getElementById('step').value);
+document.getElementById('prev').onclick=()=>{const s=document.getElementById('step');s.value=Math.max(0,+s.value-1);renderAt(+s.value);};
+document.getElementById('next').onclick=()=>{const s=document.getElementById('step');s.value=Math.min(moves.length,+s.value+1);renderAt(+s.value);};
+apply();
+</script>
+</body>
+</html>
