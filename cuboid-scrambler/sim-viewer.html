@@ -241,11 +241,20 @@ function renderSVG(cubies, shapeOnly, hi, constCube){
       }
       const corners=[[+1,+1],[+1,-1],[-1,-1],[-1,+1]].map(([su,sv])=>
         project([center[0]+su*u[0]+sv*v[0], center[1]+su*u[1]+sv*v[1], center[2]+su*u[2]+sv*v[2]]));
-      let col;
+      let col, isBody=false;
       if(shapeOnly){ col=shade('#8899aa',SHADE[dir]); }
-      else { const name=ws[dir]; col=shade(HEX[name]||HEX.Body, SHADE[dir]); }
+      else { const name=ws[dir]; isBody=!name; col=shade(HEX[name]||HEX.Body, SHADE[dir]); }
       if(hi && !isSel) col = shade(col,0.4);   // dull the rest; turning layer keeps its true colour
-      const depth = c.pos[0]+c.pos[1]+c.pos[2] + (dir==='+z'?0.5:dir==='+y'?0.25:0); // back-to-front (raw pos)
+      // painter's-algorithm depth key. A scalar x+y+z sum is only an
+      // approximation of true screen depth, which becomes unreliable once
+      // faces are stretched by very different amounts (constant-cube mode);
+      // that let internal "body" faces sometimes paint over sticker faces
+      // that should be in front. Since a body face should NEVER be visibly
+      // exposed in this mode (it exists only because the underlying puzzle
+      // briefly shapeshifts, which this mode is specifically hiding), force
+      // it to sort furthest back so any overlapping sticker always wins.
+      let depth = center[0]+center[1]+center[2] + (dir==='+z'?0.5:dir==='+y'?0.25:0); // back-to-front
+      if(constCube && isBody) depth -= 1000;
       faces.push({corners,col,depth,isSel});
     }
   }
