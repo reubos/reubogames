@@ -493,16 +493,17 @@
         for(let i=1;i<rows;i++){const t=i/rows,p1=L(tl,bl,t),p2=L(tr,br,t);g+=`<line x1="${v(p1[0])}" y1="${v(p1[1])}" x2="${v(p2[0])}" y2="${v(p2[1])}" class="cv-grid" stroke-width="0.6" fill="none"/>`;}
         return g;
       }
-      // t=0..1 interpolates from the far/opposite side to the named face.
-      // R/D/F: t0=(dim-layer)/dim (same wide or slice), t1=1 (wide) or (dim-layer+1)/dim (slice)
-      // L/U/B: t0=0 (wide) or (layer-1)/dim (slice), t1=layer/dim (same wide or slice)
+      // Wide (default): highlight layers 1..layer from the named face.
+      // Slice: highlight only the single layer-th slice from the named face.
+      // The named face's outer cap is only shown when the block reaches it (wide, or layer===1).
       const hp=[];
       if(face==='R'||face==='L'){
+        // width axis on front & top faces: 0=left .. 1=right
         const t0=face==='R'?(W-layer)/W:(wide?0:(layer-1)/W);
         const t1=face==='R'?(wide?1:(W-layer+1)/W):layer/W;
         hp.push([L(C.ftl,C.ftr,t0),L(C.ftl,C.ftr,t1),L(C.fbl,C.fbr,t1),L(C.fbl,C.fbr,t0)]);
         hp.push([L(C.btl,C.btr,t0),L(C.btl,C.btr,t1),L(C.ftl,C.ftr,t1),L(C.ftl,C.ftr,t0)]);
-        if(face==='R'){hp.push([L(C.ftr,C.btr,t0),L(C.ftr,C.btr,t1),L(C.fbr,C.bbr,t1),L(C.fbr,C.bbr,t0)]);if(wide||layer===1)hp.push([C.ftr,C.btr,C.bbr,C.fbr]);}
+        if(face==='R'&&(wide||layer===1))hp.push([C.ftr,C.btr,C.bbr,C.fbr]);
       }else if(face==='U'||face==='D'){
         const t0=face==='U'?(wide?0:(layer-1)/H):(H-layer)/H;
         const t1=face==='U'?layer/H:(wide?1:(H-layer+1)/H);
@@ -510,10 +511,14 @@
         hp.push([L(C.ftr,C.fbr,t0),L(C.btr,C.bbr,t0),L(C.btr,C.bbr,t1),L(C.ftr,C.fbr,t1)]);
         if(face==='U'&&(wide||layer===1))hp.push([C.btl,C.btr,C.ftr,C.ftl]);
       }else if(face==='F'||face==='B'){
+        // top-face depth param: 0=back .. 1=front
         const rt0=face==='F'?(D-layer)/D:(wide?0:(layer-1)/D);
         const rt1=face==='F'?(wide?1:(D-layer+1)/D):layer/D;
         hp.push([L(C.btl,C.ftl,rt0),L(C.btr,C.ftr,rt0),L(C.btr,C.ftr,rt1),L(C.btl,C.ftl,rt1)]);
-        hp.push([L(C.ftr,C.btr,rt0),L(C.ftr,C.btr,rt1),L(C.fbr,C.bbr,rt1),L(C.fbr,C.bbr,rt0)]);
+        // right-face depth param: 0=front .. 1=back (opposite direction)
+        const ct0=face==='F'?(wide?0:(layer-1)/D):(D-layer)/D;
+        const ct1=face==='F'?layer/D:(wide?1:(D-layer+1)/D);
+        hp.push([L(C.ftr,C.btr,ct0),L(C.ftr,C.btr,ct1),L(C.fbr,C.bbr,ct1),L(C.fbr,C.bbr,ct0)]);
         if(face==='F'&&(wide||layer===1))hp.push([C.ftl,C.ftr,C.fbr,C.fbl]);
       }
       let svg=`<svg width="${VW}" height="${VH}" viewBox="0 0 ${VW} ${VH}" xmlns="http://www.w3.org/2000/svg">`;
