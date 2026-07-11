@@ -126,29 +126,30 @@ function mixWhite(hex,t){ const n=parseInt(hex.slice(1),16); let r=(n>>16)&255,g
   r=Math.round(r+(255-r)*t); g=Math.round(g+(255-g)*t); b=Math.round(b+(255-b)*t);
   return '#'+((1<<24)+(r<<16)+(g<<8)+b).toString(16).slice(1); }
 
-// build a rotation-direction arrow (projected points) for the highlighted move
+// build straight rotation arrow(s), tangent to the turn, just outside the layer
+// (mirrors the old cuboidSVG style: one arrow for quarter turns, two parallel for 180s)
 function buildArrow(selected, k, mv){
   if(!selected.length) return null;
   const pos=POSITIVE.has(mv.face);
   const outer=pos?Math.max(...selected.map(c=>c.pos[k])):Math.min(...selected.map(c=>c.pos[k]));
   const [a1,a2]=[0,1,2].filter(i=>i!==k);
-  const e1=[0,0,0],e2=[0,0,0]; e1[a1]=1; e2[a2]=1;
   let r=1; for(const c of selected) r=Math.max(r,Math.abs(c.pos[a1]),Math.abs(c.pos[a2]));
-  r+=1.4;
-  const cen=[0,0,0]; cen[k]=outer+2.4;
+  // anchor beside the layer, along whichever perpendicular axis projects most "up"
+  let up=null;
+  for(const ax of [a1,a2]) for(const s of [1,-1]){ const p=[0,0,0]; p[ax]=s; const sp=project(p); if(!up||sp[1]<up.sy) up={ax,s,sy:sp[1]}; }
+  const radial=[0,0,0]; radial[up.ax]=up.s;
+  const anchor=[0,0,0]; anchor[k]=outer; anchor[up.ax]=(r+1.8)*up.s;
   const sign=baseSign(mv.face);
   const exp=mv.mod==='2'?2:(mv.mod==="'"?-sign:sign);
-  const half=mv.mod==='2';
-  const dir=exp>=0?1:-1;                       // +1 = CCW about +axis(k) (right-hand)
-  const a0=half?-150:-100, a1d=half?150:100;   // arc span in degrees
-  const pt=(deg)=>{ const t=deg*Math.PI/180;
-    const w3=[cen[0]+r*(Math.cos(t)*e1[0]+Math.sin(t)*e2[0]),
-              cen[1]+r*(Math.cos(t)*e1[1]+Math.sin(t)*e2[1]),
-              cen[2]+r*(Math.cos(t)*e1[2]+Math.sin(t)*e2[2])];
-    return project(w3); };
-  const samples=[]; const from=dir>0?a0:a1d, to=dir>0?a1d:a0, steps=24;
-  for(let i=0;i<=steps;i++) samples.push(pt(from+(to-from)*i/steps));
-  return {samples, half};
+  const dir=exp>=0?1:-1;
+  const av=[0,0,0]; av[k]=dir;
+  const t3=[av[1]*radial[2]-av[2]*radial[1], av[2]*radial[0]-av[0]*radial[2], av[0]*radial[1]-av[1]*radial[0]]; // tangent = av × radial
+  const L=2.0;
+  const seg=(off)=>{ const o=radial.map(v=>v*off);
+    const p0=[anchor[0]-t3[0]*L+o[0],anchor[1]-t3[1]*L+o[1],anchor[2]-t3[2]*L+o[2]];
+    const p1=[anchor[0]+t3[0]*L+o[0],anchor[1]+t3[1]*L+o[1],anchor[2]+t3[2]*L+o[2]];
+    return {a:project(p0), b:project(p1)}; };
+  return { arrows: mv.mod==='2' ? [seg(0.6),seg(-0.6)] : [seg(0)] };
 }
 
 function renderSVG(cubies, shapeOnly, hi){
@@ -169,7 +170,7 @@ function renderSVG(cubies, shapeOnly, hi){
       let col;
       if(shapeOnly){ col=shade('#8899aa',SHADE[dir]); }
       else { const name=ws[dir]; col=shade(HEX[name]||HEX.Body, SHADE[dir]); }
-      if(isSel) col=mixWhite(col,0.4);                       // brighten the turning layer
+      if(hi){ col = isSel ? mixWhite(col,0.22) : shade(col,0.4); }  // brighten turning layer, dull the rest
       const depth = c.pos[0]+c.pos[1]+c.pos[2] + (dir==='+z'?0.5:dir==='+y'?0.25:0); // back-to-front
       faces.push({corners,col,depth,isSel});
     }
@@ -180,22 +181,23 @@ function renderSVG(cubies, shapeOnly, hi){
   let minX=1e9,minY=1e9,maxX=-1e9,maxY=-1e9;
   const bump=p=>{ minX=Math.min(minX,p[0]);minY=Math.min(minY,p[1]);maxX=Math.max(maxX,p[0]);maxY=Math.max(maxY,p[1]); };
   for(const f of faces)for(const p of f.corners) bump(p);
-  if(arrow) for(const p of arrow.samples) bump(p);
+  if(arrow) for(const s of arrow.arrows){ bump(s.a); bump(s.b); }
   const pad=14, w=(maxX-minX)+2*pad, h=(maxY-minY)+2*pad;
   const T=p=>`${(p[0]-minX+pad).toFixed(1)},${(p[1]-minY+pad).toFixed(1)}`;
   let body='';
   for(const f of faces){
-    const stroke=f.isSel?'#ffdd33':'#111', sw=f.isSel?2.2:1;
-    body+=`<polygon points="${f.corners.map(T).join(' ')}" fill="${f.col}" stroke="${stroke}" stroke-width="${sw}" stroke-linejoin="round"/>`;
+    const sw=f.isSel?1.4:1;
+    body+=`<polygon points="${f.corners.map(T).join(' ')}" fill="${f.col}" stroke="#111" stroke-width="${sw}" stroke-linejoin="round"/>`;
   }
   if(arrow){
-    const s=arrow.samples, ac='#ff3b00';
-    body+=`<polyline points="${s.map(T).join(' ')}" fill="none" stroke="${ac}" stroke-width="2.4" stroke-linecap="round"/>`;
+    const ac='#ff4500';
     const head=(pen,tip)=>{ const dx=tip[0]-pen[0],dy=tip[1]-pen[1],l=Math.hypot(dx,dy)||1,ux=dx/l,uy=dy/l,s2=6;
       const bx=tip[0]-ux*s2,by=tip[1]-uy*s2;
       return `<polygon points="${T(tip)} ${T([bx-uy*s2*0.6,by+ux*s2*0.6])} ${T([bx+uy*s2*0.6,by-ux*s2*0.6])}" fill="${ac}"/>`; };
-    body+=head(s[s.length-2],s[s.length-1]);
-    if(arrow.half) body+=head(s[1],s[0]);              // second head for 180° turns
+    for(const s of arrow.arrows){
+      body+=`<line x1="${T(s.a).split(',')[0]}" y1="${T(s.a).split(',')[1]}" x2="${T(s.b).split(',')[0]}" y2="${T(s.b).split(',')[1]}" stroke="${ac}" stroke-width="2.4" stroke-linecap="round"/>`;
+      body+=head(s.a,s.b);
+    }
   }
   const svg=document.getElementById('stage');
   svg.setAttribute('viewBox',`0 0 ${w.toFixed(1)} ${h.toFixed(1)}`);
