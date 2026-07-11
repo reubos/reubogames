@@ -101,7 +101,15 @@ function applyMove(cubies,move){
   const ax=AXIS[mv.face], k=IDX[ax];
   const sel=selectCoords(cubies,mv);
   const sign=baseSign(mv.face), exp=mv.mod==='2'?2:mv.mod==="'"?-sign:sign, R=matPow(P[ax],exp);
-  for(const c of cubies){ if(!sel.has(c.fc[k]))continue; c.pos=matVec(R,c.pos); c.ori=matMul(R,c.ori); c.fc=matVec(R,c.fc); }
+  const absR=R.map(row=>row.map(Math.abs));   // permutation-only, for rotating extents (vhalf), not directions
+  for(const c of cubies){
+    if(!sel.has(c.fc[k]))continue;
+    c.pos=matVec(R,c.pos); c.ori=matMul(R,c.ori); c.fc=matVec(R,c.fc);
+    // constant-cube virtual position/half-width: rotated the SAME way as pos,
+    // never recomputed from a lookup (which would break once a real physical
+    // shapeshift moves a coordinate outside its native axis range).
+    if(c.vpos){ c.vpos=matVec(R,c.vpos); c.vhalf=matVec(absR,c.vhalf); }
+  }
 }
 function worldStickers(c){
   const out={}, oriT=transpose(c.ori);
@@ -130,11 +138,15 @@ const INPLANE={ '+x':[[0,1,0],[0,0,1]], '+y':[[1,0,0],[0,0,1]], '+z':[[1,0,0],[0
 // ---- constant-cube display mode ----
 // Represent an all-even/all-odd puzzle as a fixed N=max(w,h,d) cube: shorter
 // axes' outermost layer(s) absorb the extra virtual space (no new cubies, no
-// internal seam -- an existing layer just draws wider). Only valid because a
-// quarter turn never happens on a mismatched axis (that axis stays half-turn
-// only until reduced), and rotating an already-matched square cross-section
-// never shapeshifts -- so a SINGLE unreduced canonical pool, used throughout,
-// never shapeshifts either, and each axis keeps its native size forever.
+// internal seam -- an existing layer just draws wider). The bandaging still
+// restricts moves in exactly the same way a mismatched real dimension would,
+// so scrambling uses the SAME multi-phase reduction as the normal view --
+// only the RENDERING differs. A later-phase quarter turn on a bandaged axis
+// genuinely does shapeshift the raw puzzle (its true cross-section isn't
+// square), so the render position can't be looked up fresh from raw `pos`
+// each frame; instead each cubie carries a virtual position/half-width
+// (vpos/vhalf) seeded once from this map and rotated by the SAME matrices as
+// pos/fc (see applyMove), so it's always valid regardless of rotation history.
 function sameParity(w,h,d){ return (w%2)===(h%2) && (h%2)===(d%2); }
 function renderMap(p,d,N){
   if(d===N) return {c:p,h:1};
@@ -142,17 +154,11 @@ function renderMap(p,d,N){
   if(Math.abs(p)===d-1){ const s=Math.sign(p); return {c:s*(d-2+N)/2, h:(N-d)/2+1}; }
   return {c:p,h:1};
 }
-function generateConstantCubeScramble(w,h,d,total){
-  const pool=getCanonicalPool(w,h,d);
-  if(!pool.length) return [];
-  const mv=[];
-  for(let i=0;i<total;i++){
-    const t=pool[Math.floor(Math.random()*pool.length)];
-    let face=t.face,mod=t.mod;
-    if(t.hasEquiv&&Math.random()<0.5){const e=applyEquiv(t.face,t.mod);face=e.face;mod=e.mod;}
-    mv.push(moveStr(face,t.layer,mod));
+function seedVirtual(cubies, dims, N){
+  for(const c of cubies){
+    const rm=[0,1,2].map(k=>renderMap(c.pos[k], dims[k], N));
+    c.vpos=rm.map(r=>r.c); c.vhalf=rm.map(r=>r.h);
   }
-  return [{eff:[w,h,d], moves:mv}];
 }
 
 // bent rotation arrow hugging one cube corner from outside: its two legs run
@@ -165,8 +171,12 @@ function generateConstantCubeScramble(w,h,d,total){
 //   L front-top-left, F front-bottom-left, B back-top-right.
 const ARROW_CORNER={ U:[-1,+1,-1], D:[+1,-1,+1], R:[+1,-1,-1], L:[-1,+1,+1], F:[-1,-1,+1], B:[+1,+1,-1] };
 function buildArrow(cubies, mv, constCube){
+  // Extent per axis: derived from the LIVE (rotated) coordinate, same pattern
+  // either way -- vpos in constant-cube mode (always exactly N-1, by
+  // construction, since rotations only permute a uniform N-cube), raw pos
+  // otherwise.
   const M = constCube
-    ? [0,1,2].map(k=>renderMap(constCube.dims[k]-1, constCube.dims[k], constCube.N).c)
+    ? [0,1,2].map(k=>Math.max(1,...cubies.map(c=>Math.abs(c.vpos[k]))))
     : [0,1,2].map(k=>Math.max(1,...cubies.map(c=>Math.abs(c.pos[k]))));
   const sgn=ARROW_CORNER[mv.face];
   const C=[sgn[0]*M[0], sgn[1]*M[1], sgn[2]*M[2]];        // the chosen cube corner
@@ -213,18 +223,18 @@ function renderSVG(cubies, shapeOnly, hi, constCube){
   for(const c of cubies){
     const isSel = hi && hi.sel.has(c.fc[hi.k]);
     const ws = shapeOnly ? null : worldStickers(c);
-    // per-axis render mapping: {c:renderCenter, h:renderHalfwidth}, identity
-    // unless this axis is shorter than N (constant-cube mode).
-    const rm = constCube ? [0,1,2].map(k=>renderMap(c.pos[k], constCube.dims[k], constCube.N)) : null;
     for(const dir of VIS){
       const n=DIRS[dir];
       const nb=[c.pos[0]+2*n[0],c.pos[1]+2*n[1],c.pos[2]+2*n[2]];
-      if(occ.has(nb.join(',')))continue;                    // interior face — cull
+      if(occ.has(nb.join(',')))continue;                    // interior face — cull (real adjacency, unaffected by display stretch)
       const [u0,v0]=INPLANE[dir];
       let center,u,v;
-      if(rm){
-        center=[0,1,2].map(k=>rm[k].c + n[k]*rm[k].h);      // push to the mapped outer boundary along the normal
-        u=u0.map((x,k)=>x*rm[k].h); v=v0.map((x,k)=>x*rm[k].h); // scale the in-plane half-widths too
+      if(constCube){
+        // use the LIVE, incrementally-rotated vpos/vhalf, not a fresh lookup
+        // from raw pos (which can be outside its native axis range after a
+        // real shapeshifting rotation of a bandaged group).
+        center=[0,1,2].map(k=>c.vpos[k] + n[k]*c.vhalf[k]);
+        u=u0.map((x,k)=>x*c.vhalf[k]); v=v0.map((x,k)=>x*c.vhalf[k]);
       } else {
         center=[c.pos[0]+n[0],c.pos[1]+n[1],c.pos[2]+n[2]];
         u=u0; v=v0;
@@ -235,7 +245,7 @@ function renderSVG(cubies, shapeOnly, hi, constCube){
       if(shapeOnly){ col=shade('#8899aa',SHADE[dir]); }
       else { const name=ws[dir]; col=shade(HEX[name]||HEX.Body, SHADE[dir]); }
       if(hi && !isSel) col = shade(col,0.4);   // dull the rest; turning layer keeps its true colour
-      const depth = c.pos[0]+c.pos[1]+c.pos[2] + (dir==='+z'?0.5:dir==='+y'?0.25:0); // back-to-front (raw pos; monotonic under render mapping)
+      const depth = c.pos[0]+c.pos[1]+c.pos[2] + (dir==='+z'?0.5:dir==='+y'?0.25:0); // back-to-front (raw pos)
       faces.push({corners,col,depth,isSel});
     }
   }
@@ -356,6 +366,7 @@ let phases=[], flat=[], W=3,H=5,D=7, constCubeInfo=null;
 // replay from solved, coarsening fc at each phase boundary, applying the first k moves.
 function stateAt(k){
   const c=buildSolved(W,H,D);
+  if(constCubeInfo) seedVirtual(c, constCubeInfo.dims, constCubeInfo.N);
   let applied=0;
   for(const ph of phases){
     coarsen(c, ph.eff);
@@ -384,16 +395,19 @@ function apply(){
   H=Math.max(1,+document.getElementById('ih').value||1);
   D=Math.max(1,+document.getElementById('id').value||1);
   const per=Math.max(1,Math.min(40,+document.getElementById('perphase').value||6));
+  // Constant-cube toggle affects RENDERING ONLY -- the bandaging restricts
+  // moves exactly the same way a mismatched real dimension would, so
+  // scrambling always uses the same multi-phase reduction (same reductions,
+  // same forced first moves, same per-phase pool) regardless of display mode.
   const wantConstCube=document.getElementById('constcube-toggle').checked;
   const note=document.getElementById('constcube-note');
+  phases=generateScramble(W,H,D,per);
   if(wantConstCube && sameParity(W,H,D)){
     const N=Math.max(W,H,D);
     constCubeInfo={N, dims:[W,H,D]};
-    phases=generateConstantCubeScramble(W,H,D,per);
-    note.style.display='block'; note.textContent=`Constant-cube view: rendered as a fixed ${N}×${N}×${N}. No phase reduction -- a single canonical pool is used throughout, so nothing shapeshifts.`;
+    note.style.display='block'; note.textContent=`Constant-cube view: rendered as a fixed ${N}×${N}×${N}. Same scramble/reductions as the normal view, only the display is stretched.`;
   } else {
     constCubeInfo=null;
-    phases=generateScramble(W,H,D,per);
     note.style.display = wantConstCube ? 'block' : 'none';
     if(wantConstCube) note.textContent=`Constant-cube view needs all-even or all-odd dimensions (got ${W}×${H}×${D}) -- showing the normal reduced view instead.`;
   }
