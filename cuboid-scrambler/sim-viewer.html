@@ -122,9 +122,6 @@ function shade(hex,f){
 }
 // the two in-plane unit axes for a given face normal
 const INPLANE={ '+x':[[0,1,0],[0,0,1]], '+y':[[1,0,0],[0,0,1]], '+z':[[1,0,0],[0,1,0]] };
-function mixWhite(hex,t){ const n=parseInt(hex.slice(1),16); let r=(n>>16)&255,g=(n>>8)&255,b=n&255;
-  r=Math.round(r+(255-r)*t); g=Math.round(g+(255-g)*t); b=Math.round(b+(255-b)*t);
-  return '#'+((1<<24)+(r<<16)+(g<<8)+b).toString(16).slice(1); }
 
 // straight rotation arrow(s) placed at the same face edges as the old cuboidSVG:
 // R/L beside the front vertical edges, U/D/F above/below the front horizontal
@@ -170,7 +167,7 @@ function renderSVG(cubies, shapeOnly, hi){
       let col;
       if(shapeOnly){ col=shade('#8899aa',SHADE[dir]); }
       else { const name=ws[dir]; col=shade(HEX[name]||HEX.Body, SHADE[dir]); }
-      if(hi){ col = isSel ? mixWhite(col,0.22) : shade(col,0.4); }  // brighten turning layer, dull the rest
+      if(hi && !isSel) col = shade(col,0.4);   // dull the rest; turning layer keeps its true colour
       const depth = c.pos[0]+c.pos[1]+c.pos[2] + (dir==='+z'?0.5:dir==='+y'?0.25:0); // back-to-front
       faces.push({corners,col,depth,isSel});
     }
