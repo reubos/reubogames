@@ -173,7 +173,7 @@ function getCanonicalPool(w,h,d){
     for(let l=1;l<=ml;l++){
       const hasEquiv=N%2===0 && l*2===N;
       if(secondary&&hasEquiv)continue;
-      for(const mod of (qt?['',"'",'2']:['2'])) pool.push({face,layer:l,mod,hasEquiv});
+      for(const mod of (qt?['',"'",'2']:['2'])) pool.push({face,layer:l,mod,qt,hasEquiv});
     }
   }
   return pool;
@@ -201,12 +201,19 @@ function getPath(w,h,d){
 }
 function generateScramble(w,h,d,perPhase){
   const phases=[];
+  let prevQTFaces=new Set();
   for(const eff of getPath(w,h,d)){
     const pool=getCanonicalPool(...eff);
     if(!pool.length)continue;
+    const curQTFaces=new Set(pool.filter(t=>t.qt).map(t=>t.face));
+    // forced first move: a quarter turn on a newly-QT-eligible face performs the
+    // reduction that initiates this phase (mirrors doGenerate's forcedFirstPool).
+    const forced = phases.length>0 ? pool.filter(t=>t.qt && !prevQTFaces.has(t.face) && t.mod!=='2') : [];
+    prevQTFaces=curQTFaces;
     const mv=[];
     for(let i=0;i<perPhase;i++){
-      const t=pool[Math.floor(Math.random()*pool.length)];
+      const basePool = (i===0 && forced.length) ? forced : pool;
+      const t=basePool[Math.floor(Math.random()*basePool.length)];
       let face=t.face,mod=t.mod;
       if(t.hasEquiv&&Math.random()<0.5){const e=applyEquiv(t.face,t.mod);face=e.face;mod=e.mod;}
       mv.push(moveStr(face,t.layer,mod));
