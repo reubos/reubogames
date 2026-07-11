@@ -477,6 +477,25 @@ function phaseEffAt(k){
   for(const ph of phases){ if(idx+ph.moves.length>k) return ph.eff; idx+=ph.moves.length; }
   return phases.length ? phases[phases.length-1].eff : [W,H,D];
 }
+// Outside-numbered, standalone (non-constant-cube-view) display label. The
+// generated layer number reflects a static per-axis formula, but a group's
+// TRUE physical width can be inflated at runtime: fc merges on one axis
+// during its own reduction, then a later rotation on a DIFFERENT axis can
+// import that already-merged identity via a 90-degree swap, even though the
+// receiving axis never reduced on its own. Selection is already correct
+// (fc-based, grabs the right group regardless of label) -- this only fixes
+// the DISPLAYED label by counting how many distinct raw physical layers are
+// currently bandaged into the move's target fc, right before it's applied.
+function outsideNumberedLabel(state, moveStr, eff, Nper){
+  const mv=parseMove(moveStr);
+  const k=IDX[AXIS[mv.face]], positive=POSITIVE.has(mv.face);
+  const target=virtualLayerFc(mv.layer,Nper[k],eff[k],positive);
+  const rawPositions=new Set();
+  for(const c of state) if(c.fc[k]===target) rawPositions.add(c.pos[k]);
+  const width=rawPositions.size;
+  if(width<=1) return moveStr;
+  return `${width}${mv.face}w${mv.mod}`;
+}
 function renderAt(k){
   const state=stateAt(k);
   let hi=null;
@@ -487,10 +506,14 @@ function renderAt(k){
   }
   renderSVG(state, document.getElementById('shapeonly').checked, hi, constCubeInfo);
   document.getElementById('stepnum').textContent=`${k} / ${flat.length}`;
+  const relabel = notationInfo && notationInfo.standalone;
   let html='', i=0;
   for(const ph of phases){
     html+=`<span class="muted">[${ph.eff.join('×')}]</span> `;
-    for(const m of ph.moves){ const cls=i<k?'done':(i===k?'cur':''); html+=`<span class="${cls}">${m}</span> `; i++; }
+    for(const m of ph.moves){
+      const label = relabel ? outsideNumberedLabel(stateAt(i), m, ph.eff, notationInfo.Nper) : m;
+      const cls=i<k?'done':(i===k?'cur':''); html+=`<span class="${cls}">${label}</span> `; i++;
+    }
   }
   document.getElementById('moveline').innerHTML=html||'<span class="muted">(no moves)</span>';
 }
@@ -518,7 +541,7 @@ function apply(){
   const Nper = wantOutsideNum ? (useConstCube ? [N,N,N] : [W,H,D]) : null;
   phases = wantOutsideNum ? generateScrambleConstCube(W,H,D,per,Nper) : generateScramble(W,H,D,per);
   constCubeInfo = useConstCube ? {N, dims:[W,H,D]} : null;
-  notationInfo = wantOutsideNum ? {Nper} : null;
+  notationInfo = wantOutsideNum ? {Nper, standalone: !useConstCube} : null;
   viewNote.style.display = wantConstCube ? 'block' : 'none';
   if(wantConstCube) viewNote.textContent = useConstCube
     ? `Constant-cube view: rendered as a fixed ${N}×${N}×${N}.`
