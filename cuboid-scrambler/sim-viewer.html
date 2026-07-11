@@ -118,10 +118,10 @@ function constCubeLayerAvailable(L,N,eff,positive){
   if(L>=maxN) return true;
   return virtualLayerFc(L,N,eff,positive)!==virtualLayerFc(L+1,N,eff,positive);
 }
-function selectCoordsConstCube(cubies,mv,N,eff){
+function selectCoordsConstCube(cubies,mv,Nper,eff){
   const {face,layer,wide}=mv;
   const k=IDX[AXIS[face]], positive=POSITIVE.has(face);
-  const target=virtualLayerFc(layer,N,eff[k],positive);
+  const target=virtualLayerFc(layer,Nper[k],eff[k],positive);
   const sel=new Set();
   for(const c of cubies){
     const fc=c.fc[k];
@@ -358,16 +358,20 @@ function getCanonicalPool(w,h,d){
   }
   return pool;
 }
-// Constant-cube pool: layer numbers count from the outside of the fixed
-// N-cube ("distance from outside"), never renumbered. A layer is only
-// offered if it's independently selectable at this phase (see
-// constCubeLayerAvailable); qt/hasEquiv still use the phase's effective
-// dims and N respectively, same meaning as the normal pool.
-function getConstantCubePool(N, eff){
-  const pool=[]; const maxN=Math.floor(N/2);
-  if(maxN<1) return pool;
+// Outside-numbered pool: layer numbers count from the outside of a fixed
+// reference size per axis, never renumbered per phase. Nper=[Nx,Ny,Nz] is
+// either the true global N repeated 3x (paired with constant-cube view, so
+// notation matches the rendered shape) or each axis's own native size
+// (standalone -- no cross-axis alignment needed, so no parity requirement).
+// A layer is only offered if it's independently selectable at this phase
+// (see constCubeLayerAvailable); qt uses the phase's effective dims as
+// usual, hasEquiv uses that axis's own Nper entry.
+function getConstantCubePool(Nper, eff){
+  const pool=[];
   for(const face of ['R','L','U','D','F','B']){
     const k=IDX[AXIS[face]], positive=POSITIVE.has(face);
+    const N=Nper[k], maxN=Math.floor(N/2);
+    if(maxN<1) continue;
     const qt=faceQT(face, ...eff);
     const secondary=face==='L'||face==='D'||face==='B';
     for(let l=1;l<=maxN;l++){
@@ -426,11 +430,11 @@ function generateScramble(w,h,d,perPhase){
 // Same phase/reduction structure as generateScramble (getPath is unchanged --
 // the bandaging restricts moves identically regardless of display mode), but
 // draws from the N-based constant-cube pool instead of the eff-based one.
-function generateScrambleConstCube(w,h,d,perPhase,N){
+function generateScrambleConstCube(w,h,d,perPhase,Nper){
   const phases=[];
   let prevQTFaces=new Set();
   for(const eff of getPath(w,h,d)){
-    const pool=getConstantCubePool(N,eff);
+    const pool=getConstantCubePool(Nper,eff);
     if(!pool.length)continue;
     const curQTFaces=new Set(pool.filter(t=>t.qt).map(t=>t.face));
     const forced = phases.length>0 ? pool.filter(t=>t.qt && !prevQTFaces.has(t.face) && t.mod!=='2') : [];
@@ -462,7 +466,7 @@ function stateAt(k){
   let applied=0;
   for(const ph of phases){
     coarsen(c, ph.eff);
-    const cc = notationInfo ? {N:notationInfo.N, eff:ph.eff} : null;
+    const cc = notationInfo ? {N:notationInfo.Nper, eff:ph.eff} : null;
     for(const m of ph.moves){ if(applied>=k) return c; applyMove(c,m,cc); applied++; }
   }
   return c;
@@ -478,7 +482,7 @@ function renderAt(k){
   let hi=null;
   if(k<flat.length && document.getElementById('highlight').checked){
     const mv=parseMove(flat[k]);
-    const sel = notationInfo ? selectCoordsConstCube(state,mv,notationInfo.N,phaseEffAt(k)) : selectCoords(state,mv);
+    const sel = notationInfo ? selectCoordsConstCube(state,mv,notationInfo.Nper,phaseEffAt(k)) : selectCoords(state,mv);
     hi={ k:IDX[AXIS[mv.face]], sel, mv };
   }
   renderSVG(state, document.getElementById('shapeonly').checked, hi, constCubeInfo);
@@ -495,31 +499,34 @@ function apply(){
   H=Math.max(1,+document.getElementById('ih').value||1);
   D=Math.max(1,+document.getElementById('id').value||1);
   const per=Math.max(1,Math.min(40,+document.getElementById('perphase').value||6));
-  // Two independent settings, each needing all-even/all-odd dims:
-  //  - constant-cube VIEW: render as a fixed N-cube (rendering only).
-  //  - outside-numbered LAYERS: layer numbers count from the outside of the
-  //    fixed N-cube, never renumbered per phase (move generation/selection).
-  // Both reuse the SAME getPath phase/reduction structure regardless of
-  // whether either is on -- bandaging restricts moves identically either way.
+  // Two independent settings:
+  //  - constant-cube VIEW: render as a fixed N-cube (rendering only). Needs
+  //    all-even/all-odd dims, since every axis must share one N to form a cube.
+  //  - outside-numbered LAYERS: layer numbers count from the outside of a
+  //    fixed reference size, never renumbered per phase. No parity
+  //    requirement on its own (each axis is self-referential -- no cross-axis
+  //    alignment needed) UNLESS it's paired with an ACTIVE constant-cube
+  //    view, in which case it uses that view's shared N so the notation
+  //    matches what's drawn; otherwise each axis uses its own native size.
   const wantConstCube=document.getElementById('constcube-toggle').checked;
   const wantOutsideNum=document.getElementById('outside-numbering-toggle').checked;
   const viewNote=document.getElementById('constcube-note');
   const numNote=document.getElementById('numbering-note');
   const parityOk = sameParity(W,H,D);
   const useConstCube = wantConstCube && parityOk;
-  const useOutsideNum = wantOutsideNum && parityOk;
-  const N = (useConstCube || useOutsideNum) ? Math.max(W,H,D) : null;
-  phases = useOutsideNum ? generateScrambleConstCube(W,H,D,per,N) : generateScramble(W,H,D,per);
+  const N = useConstCube ? Math.max(W,H,D) : null;
+  const Nper = wantOutsideNum ? (useConstCube ? [N,N,N] : [W,H,D]) : null;
+  phases = wantOutsideNum ? generateScrambleConstCube(W,H,D,per,Nper) : generateScramble(W,H,D,per);
   constCubeInfo = useConstCube ? {N, dims:[W,H,D]} : null;
-  notationInfo = useOutsideNum ? {N} : null;
+  notationInfo = wantOutsideNum ? {Nper} : null;
   viewNote.style.display = wantConstCube ? 'block' : 'none';
   if(wantConstCube) viewNote.textContent = useConstCube
     ? `Constant-cube view: rendered as a fixed ${N}×${N}×${N}.`
     : `Constant-cube view needs all-even or all-odd dimensions (got ${W}×${H}×${D}) -- showing the normal shape instead.`;
   numNote.style.display = wantOutsideNum ? 'block' : 'none';
-  if(wantOutsideNum) numNote.textContent = useOutsideNum
-    ? `Outside-numbered layers: counted from the outside of the fixed ${N}×${N}×${N}; bandaged outer layers are simply unavailable rather than renumbered.`
-    : `Outside-numbered layers needs all-even or all-odd dimensions (got ${W}×${H}×${D}) -- using ordinary reduced-layer numbering instead.`;
+  if(wantOutsideNum) numNote.textContent = useConstCube
+    ? `Outside-numbered layers: counted from the outside of the fixed ${N}×${N}×${N} (matching the constant-cube view); bandaged outer layers are simply unavailable rather than renumbered.`
+    : `Outside-numbered layers: each axis counted from its own native size (${W}×${H}×${D}); bandaged outer layers are simply unavailable rather than renumbered.`;
   flat=phases.flatMap(p=>p.moves);
   const step=document.getElementById('step');
   step.max=flat.length; step.value=0;
