@@ -245,6 +245,10 @@
         <input type="checkbox" id="wide-toggle" checked onchange="clearScramble()">
         Wide moves (e.g. 3Rw)
       </label>
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;user-select:none;" title="For the axis that bandages next phase, only scramble the outer layers about to be frozen; deeper layers are mixed in later phases.">
+        <input type="checkbox" id="efficient-toggle" onchange="clearScramble()">
+        Efficient mode
+      </label>
     </div>
 
     <div id="out"></div>
@@ -633,6 +637,19 @@
     function clearScramble() {
       document.getElementById('out').innerHTML = '';
     }
+    function isEfficient() { return document.getElementById('efficient-toggle').checked; }
+    // Which axis bandages when going from dimsA -> dimsB, and how many outer layers freeze.
+    function bandageInfo(dimsA, dimsB) {
+      for (let k = 0; k < 3; k++) {
+        if (dimsA[k] !== dimsB[k]) {
+          const axis = k === 0 ? 'x' : k === 1 ? 'y' : 'z';
+          const face = k === 0 ? 'R' : k === 1 ? 'U' : 'F';
+          const delta = maxLayers(face, ...dimsA) - maxLayers(face, ...dimsB);
+          return { axis, delta };
+        }
+      }
+      return null;
+    }
     function doGenerate() {
       const W = Math.max(1, parseInt(document.getElementById('iw').value) || 1);
       const H = Math.max(1, parseInt(document.getElementById('ih').value) || 1);
@@ -649,9 +666,21 @@
         const curQTFaces = new Set(canonPool.filter(t => t.qt).map(t => t.face));
         const forcedFirstPool = i > 0 ? canonPool.filter(t => t.qt && !prevQTFaces.has(t.face) && t.mod !== '2') : null;
         prevQTFaces = curQTFaces;
-        const phaseLabel = `Phase ${i + 1} · ${w}×${h}×${d}`;
+        // Efficient mode: for the axis that bandages next phase, keep only the
+        // outermost Δ layers (the ones about to be frozen); deeper layers survive
+        // and are mixed in later phases under their renumbered identity.
+        let effPool = canonPool;
+        let effLabel = '';
+        if (isEfficient() && i < stages.length - 1) {
+          const bi = bandageInfo(stages[i].dims, stages[i + 1].dims);
+          if (bi && bi.delta >= 1) {
+            const restricted = canonPool.filter(t => !(faceAxis(t.face) === bi.axis && t.layer > bi.delta));
+            if (restricted.length) { effPool = restricted; effLabel = ` · efficient: ${bi.axis}-axis layers ≤ ${bi.delta}`; }
+          }
+        }
+        const phaseLabel = `Phase ${i + 1} · ${w}×${h}×${d}${effLabel}`;
         const n = ns[i] ?? ns[ns.length - 1];
-        const moves = scramblePhase(canonPool, n, lastRef, phaseLabel, forcedFirstPool && forcedFirstPool.length ? forcedFirstPool : null);
+        const moves = scramblePhase(effPool, n, lastRef, phaseLabel, forcedFirstPool && forcedFirstPool.length ? forcedFirstPool : null);
         if (moves.length) phasesData.push({ dims: stages[i].dims, qt: stages[i].qt, moves });
       }
       const out = document.getElementById('out');
