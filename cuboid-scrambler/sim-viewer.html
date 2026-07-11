@@ -126,30 +126,30 @@ function mixWhite(hex,t){ const n=parseInt(hex.slice(1),16); let r=(n>>16)&255,g
   r=Math.round(r+(255-r)*t); g=Math.round(g+(255-g)*t); b=Math.round(b+(255-b)*t);
   return '#'+((1<<24)+(r<<16)+(g<<8)+b).toString(16).slice(1); }
 
-// build straight rotation arrow(s), tangent to the turn, just outside the layer
-// (mirrors the old cuboidSVG style: one arrow for quarter turns, two parallel for 180s)
-function buildArrow(selected, k, mv){
-  if(!selected.length) return null;
-  const pos=POSITIVE.has(mv.face);
-  const outer=pos?Math.max(...selected.map(c=>c.pos[k])):Math.min(...selected.map(c=>c.pos[k]));
-  const [a1,a2]=[0,1,2].filter(i=>i!==k);
-  let r=1; for(const c of selected) r=Math.max(r,Math.abs(c.pos[a1]),Math.abs(c.pos[a2]));
-  // anchor beside the layer, along whichever perpendicular axis projects most "up"
-  let up=null;
-  for(const ax of [a1,a2]) for(const s of [1,-1]){ const p=[0,0,0]; p[ax]=s; const sp=project(p); if(!up||sp[1]<up.sy) up={ax,s,sy:sp[1]}; }
-  const radial=[0,0,0]; radial[up.ax]=up.s;
-  const anchor=[0,0,0]; anchor[k]=outer; anchor[up.ax]=(r+1.8)*up.s;
-  const sign=baseSign(mv.face);
-  const exp=mv.mod==='2'?2:(mv.mod==="'"?-sign:sign);
-  const dir=exp>=0?1:-1;
-  const av=[0,0,0]; av[k]=dir;
-  const t3=[av[1]*radial[2]-av[2]*radial[1], av[2]*radial[0]-av[0]*radial[2], av[0]*radial[1]-av[1]*radial[0]]; // tangent = av × radial
-  const L=2.0;
-  const seg=(off)=>{ const o=radial.map(v=>v*off);
-    const p0=[anchor[0]-t3[0]*L+o[0],anchor[1]-t3[1]*L+o[1],anchor[2]-t3[2]*L+o[2]];
-    const p1=[anchor[0]+t3[0]*L+o[0],anchor[1]+t3[1]*L+o[1],anchor[2]+t3[2]*L+o[2]];
-    return {a:project(p0), b:project(p1)}; };
-  return { arrows: mv.mod==='2' ? [seg(0.6),seg(-0.6)] : [seg(0)] };
+// straight rotation arrow(s) placed at the same face edges as the old cuboidSVG:
+// R/L beside the front vertical edges, U/D/F above/below the front horizontal
+// edges, B above the back-top edge. One arrow for quarter turns, two for 180s.
+function buildArrow(cubies, mv){
+  const MX=Math.max(1,...cubies.map(c=>Math.abs(c.pos[0])));
+  const MY=Math.max(1,...cubies.map(c=>Math.abs(c.pos[1])));
+  const MZ=Math.max(1,...cubies.map(c=>Math.abs(c.pos[2])));
+  const off=3;
+  // per face: base clockwise segment S->E and outward offset O (world coords)
+  const cfg={
+    R:{S:[MX,-MY,MZ],E:[MX,MY,MZ],O:[off,0,0]},   // front-right edge, up
+    L:{S:[-MX,MY,MZ],E:[-MX,-MY,MZ],O:[-off,0,0]}, // front-left edge, down
+    U:{S:[MX,MY,MZ],E:[-MX,MY,MZ],O:[0,off,0]},    // front-top edge, right->left
+    D:{S:[-MX,-MY,MZ],E:[MX,-MY,MZ],O:[0,-off,0]}, // front-bottom edge, left->right
+    F:{S:[-MX,MY,MZ],E:[MX,MY,MZ],O:[0,off,0]},    // front-top edge, left->right
+    B:{S:[MX,MY,-MZ],E:[-MX,MY,-MZ],O:[0,off,0]},  // back-top edge, right->left
+  }[mv.face];
+  const P0=project(cfg.S.map((v,i)=>v+cfg.O[i]));
+  const P1=project(cfg.E.map((v,i)=>v+cfg.O[i]));
+  if(mv.mod==='2'){ // two parallel arrows, both base direction
+    const dx=P1[0]-P0[0],dy=P1[1]-P0[1],l=Math.hypot(dx,dy)||1,p=4,px=-dy/l*p,py=dx/l*p;
+    return {arrows:[{a:[P0[0]+px,P0[1]+py],b:[P1[0]+px,P1[1]+py]},{a:[P0[0]-px,P0[1]-py],b:[P1[0]-px,P1[1]-py]}]};
+  }
+  return {arrows: mv.mod==='' ? [{a:P0,b:P1}] : [{a:P1,b:P0}]}; // '' base, "'" reversed
 }
 
 function renderSVG(cubies, shapeOnly, hi){
@@ -176,7 +176,7 @@ function renderSVG(cubies, shapeOnly, hi){
     }
   }
   faces.sort((a,b)=>a.depth-b.depth);
-  const arrow = hi ? buildArrow(sel, hi.k, hi.mv) : null;
+  const arrow = hi ? buildArrow(cubies, hi.mv) : null;
   // fit viewBox over faces (and arrow)
   let minX=1e9,minY=1e9,maxX=-1e9,maxY=-1e9;
   const bump=p=>{ minX=Math.min(minX,p[0]);minY=Math.min(minY,p[1]);maxX=Math.max(maxX,p[0]);maxY=Math.max(maxY,p[1]); };
@@ -186,8 +186,8 @@ function renderSVG(cubies, shapeOnly, hi){
   const T=p=>`${(p[0]-minX+pad).toFixed(1)},${(p[1]-minY+pad).toFixed(1)}`;
   let body='';
   for(const f of faces){
-    const sw=f.isSel?1.4:1;
-    body+=`<polygon points="${f.corners.map(T).join(' ')}" fill="${f.col}" stroke="#111" stroke-width="${sw}" stroke-linejoin="round"/>`;
+    const stroke=f.isSel?'#bbbbbb':'#111';
+    body+=`<polygon points="${f.corners.map(T).join(' ')}" fill="${f.col}" stroke="${stroke}" stroke-width="1" stroke-linejoin="round"/>`;
   }
   if(arrow){
     const ac='#ff4500';
