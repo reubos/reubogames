@@ -38,6 +38,7 @@
   <button id="next">Next ▶</button>
   <span id="stepnum" class="muted">0 / 0</span>
   <label><input type="checkbox" id="shapeonly"> shape only</label>
+  <label><input type="checkbox" id="highlight" checked> highlight next move</label>
 </div>
 <div id="moveline"></div>
 <svg id="stage" width="100%" height="460" viewBox="0 0 400 300" preserveAspectRatio="xMidYMid meet"></svg>
@@ -121,11 +122,41 @@ function shade(hex,f){
 }
 // the two in-plane unit axes for a given face normal
 const INPLANE={ '+x':[[0,1,0],[0,0,1]], '+y':[[1,0,0],[0,0,1]], '+z':[[1,0,0],[0,1,0]] };
+function mixWhite(hex,t){ const n=parseInt(hex.slice(1),16); let r=(n>>16)&255,g=(n>>8)&255,b=n&255;
+  r=Math.round(r+(255-r)*t); g=Math.round(g+(255-g)*t); b=Math.round(b+(255-b)*t);
+  return '#'+((1<<24)+(r<<16)+(g<<8)+b).toString(16).slice(1); }
 
-function renderSVG(cubies, shapeOnly){
+// build a rotation-direction arrow (projected points) for the highlighted move
+function buildArrow(selected, k, mv){
+  if(!selected.length) return null;
+  const pos=POSITIVE.has(mv.face);
+  const outer=pos?Math.max(...selected.map(c=>c.pos[k])):Math.min(...selected.map(c=>c.pos[k]));
+  const [a1,a2]=[0,1,2].filter(i=>i!==k);
+  const e1=[0,0,0],e2=[0,0,0]; e1[a1]=1; e2[a2]=1;
+  let r=1; for(const c of selected) r=Math.max(r,Math.abs(c.pos[a1]),Math.abs(c.pos[a2]));
+  r+=1.4;
+  const cen=[0,0,0]; cen[k]=outer+2.4;
+  const sign=baseSign(mv.face);
+  const exp=mv.mod==='2'?2:(mv.mod==="'"?-sign:sign);
+  const half=mv.mod==='2';
+  const dir=exp>=0?1:-1;                       // +1 = CCW about +axis(k) (right-hand)
+  const a0=half?-150:-100, a1d=half?150:100;   // arc span in degrees
+  const pt=(deg)=>{ const t=deg*Math.PI/180;
+    const w3=[cen[0]+r*(Math.cos(t)*e1[0]+Math.sin(t)*e2[0]),
+              cen[1]+r*(Math.cos(t)*e1[1]+Math.sin(t)*e2[1]),
+              cen[2]+r*(Math.cos(t)*e1[2]+Math.sin(t)*e2[2])];
+    return project(w3); };
+  const samples=[]; const from=dir>0?a0:a1d, to=dir>0?a1d:a0, steps=24;
+  for(let i=0;i<=steps;i++) samples.push(pt(from+(to-from)*i/steps));
+  return {samples, half};
+}
+
+function renderSVG(cubies, shapeOnly, hi){
   const occ=new Set(cubies.map(c=>c.pos.join(',')));
+  const sel = hi ? cubies.filter(c=>hi.sel.has(c.fc[hi.k])) : [];
   const faces=[];
   for(const c of cubies){
+    const isSel = hi && hi.sel.has(c.fc[hi.k]);
     const ws = shapeOnly ? null : worldStickers(c);
     for(const dir of VIS){
       const n=DIRS[dir];
@@ -138,19 +169,33 @@ function renderSVG(cubies, shapeOnly){
       let col;
       if(shapeOnly){ col=shade('#8899aa',SHADE[dir]); }
       else { const name=ws[dir]; col=shade(HEX[name]||HEX.Body, SHADE[dir]); }
+      if(isSel) col=mixWhite(col,0.4);                       // brighten the turning layer
       const depth = c.pos[0]+c.pos[1]+c.pos[2] + (dir==='+z'?0.5:dir==='+y'?0.25:0); // back-to-front
-      faces.push({corners,col,depth});
+      faces.push({corners,col,depth,isSel});
     }
   }
   faces.sort((a,b)=>a.depth-b.depth);
-  // fit viewBox
+  const arrow = hi ? buildArrow(sel, hi.k, hi.mv) : null;
+  // fit viewBox over faces (and arrow)
   let minX=1e9,minY=1e9,maxX=-1e9,maxY=-1e9;
-  for(const f of faces)for(const p of f.corners){ minX=Math.min(minX,p[0]);minY=Math.min(minY,p[1]);maxX=Math.max(maxX,p[0]);maxY=Math.max(maxY,p[1]); }
+  const bump=p=>{ minX=Math.min(minX,p[0]);minY=Math.min(minY,p[1]);maxX=Math.max(maxX,p[0]);maxY=Math.max(maxY,p[1]); };
+  for(const f of faces)for(const p of f.corners) bump(p);
+  if(arrow) for(const p of arrow.samples) bump(p);
   const pad=14, w=(maxX-minX)+2*pad, h=(maxY-minY)+2*pad;
+  const T=p=>`${(p[0]-minX+pad).toFixed(1)},${(p[1]-minY+pad).toFixed(1)}`;
   let body='';
   for(const f of faces){
-    const pts=f.corners.map(p=>`${(p[0]-minX+pad).toFixed(1)},${(p[1]-minY+pad).toFixed(1)}`).join(' ');
-    body+=`<polygon points="${pts}" fill="${f.col}" stroke="#111" stroke-width="1" stroke-linejoin="round"/>`;
+    const stroke=f.isSel?'#ffdd33':'#111', sw=f.isSel?2.2:1;
+    body+=`<polygon points="${f.corners.map(T).join(' ')}" fill="${f.col}" stroke="${stroke}" stroke-width="${sw}" stroke-linejoin="round"/>`;
+  }
+  if(arrow){
+    const s=arrow.samples, ac='#ff3b00';
+    body+=`<polyline points="${s.map(T).join(' ')}" fill="none" stroke="${ac}" stroke-width="2.4" stroke-linecap="round"/>`;
+    const head=(pen,tip)=>{ const dx=tip[0]-pen[0],dy=tip[1]-pen[1],l=Math.hypot(dx,dy)||1,ux=dx/l,uy=dy/l,s2=6;
+      const bx=tip[0]-ux*s2,by=tip[1]-uy*s2;
+      return `<polygon points="${T(tip)} ${T([bx-uy*s2*0.6,by+ux*s2*0.6])} ${T([bx+uy*s2*0.6,by-ux*s2*0.6])}" fill="${ac}"/>`; };
+    body+=head(s[s.length-2],s[s.length-1]);
+    if(arrow.half) body+=head(s[1],s[0]);              // second head for 180° turns
   }
   const svg=document.getElementById('stage');
   svg.setAttribute('viewBox',`0 0 ${w.toFixed(1)} ${h.toFixed(1)}`);
@@ -236,7 +281,13 @@ function stateAt(k){
   return c;
 }
 function renderAt(k){
-  renderSVG(stateAt(k), document.getElementById('shapeonly').checked);
+  const state=stateAt(k);
+  let hi=null;
+  if(k<flat.length && document.getElementById('highlight').checked){
+    const mv=parseMove(flat[k]);
+    hi={ k:IDX[AXIS[mv.face]], sel:selectCoords(state,mv), mv };
+  }
+  renderSVG(state, document.getElementById('shapeonly').checked, hi);
   document.getElementById('stepnum').textContent=`${k} / ${flat.length}`;
   let html='', i=0;
   for(const ph of phases){
@@ -259,6 +310,7 @@ function apply(){
 document.getElementById('apply').onclick=apply;
 document.getElementById('step').oninput=(e)=>renderAt(+e.target.value);
 document.getElementById('shapeonly').onchange=()=>renderAt(+document.getElementById('step').value);
+document.getElementById('highlight').onchange=()=>renderAt(+document.getElementById('step').value);
 document.getElementById('prev').onclick=()=>{const s=document.getElementById('step');s.value=Math.max(0,+s.value-1);renderAt(+s.value);};
 document.getElementById('next').onclick=()=>{const s=document.getElementById('step');s.value=Math.min(flat.length,+s.value+1);renderAt(+s.value);};
 apply();
