@@ -96,10 +96,39 @@ function selectCoords(cubies,mv){
   const coords=[...new Set(cubies.map(c=>c.fc[k]))].sort((a,b)=>pos?b-a:a-b);
   return new Set(wide?coords.slice(0,layer):[coords[layer-1]]);
 }
-function applyMove(cubies,move){
+// ---- constant-cube "distance from outside" layer numbering ----
+// Layer numbers are ALWAYS relative to the fixed virtual N-cube, never
+// renumbered per phase. Layer L's target fc is found by clamping its virtual
+// doubled position straight down to the CURRENT phase's effective dimension
+// for that axis (composing the N-vs-true-size mapping with any further
+// phase reduction, since clamping to a smaller range after a larger one is
+// the same as clamping directly to the smaller one).
+function virtualLayerFc(L,N,eff,positive){
+  const p=N-(2*L-1), signed=positive?p:-p, lim=eff-1;
+  return Math.max(-lim,Math.min(lim,signed));
+}
+// Layer L is independently selectable iff it isn't redundant with the next
+// deeper layer (same target fc = already covered by grabbing L+1 alone).
+function constCubeLayerAvailable(L,N,eff,positive){
+  const maxN=Math.floor(N/2);
+  if(L>=maxN) return true;
+  return virtualLayerFc(L,N,eff,positive)!==virtualLayerFc(L+1,N,eff,positive);
+}
+function selectCoordsConstCube(cubies,mv,N,eff){
+  const {face,layer,wide}=mv;
+  const k=IDX[AXIS[face]], positive=POSITIVE.has(face);
+  const target=virtualLayerFc(layer,N,eff[k],positive);
+  const sel=new Set();
+  for(const c of cubies){
+    const fc=c.fc[k];
+    if(wide ? (positive?fc>=target:fc<=target) : fc===target) sel.add(fc);
+  }
+  return sel;
+}
+function applyMove(cubies,move,cc){
   const mv=typeof move==='string'?parseMove(move):move;
   const ax=AXIS[mv.face], k=IDX[ax];
-  const sel=selectCoords(cubies,mv);
+  const sel = cc ? selectCoordsConstCube(cubies,mv,cc.N,cc.eff) : selectCoords(cubies,mv);
   const sign=baseSign(mv.face), exp=mv.mod==='2'?2:mv.mod==="'"?-sign:sign, R=matPow(P[ax],exp);
   const absR=R.map(row=>row.map(Math.abs));   // permutation-only, for rotating extents (vhalf), not directions
   for(const c of cubies){
@@ -325,6 +354,27 @@ function getCanonicalPool(w,h,d){
   }
   return pool;
 }
+// Constant-cube pool: layer numbers count from the outside of the fixed
+// N-cube ("distance from outside"), never renumbered. A layer is only
+// offered if it's independently selectable at this phase (see
+// constCubeLayerAvailable); qt/hasEquiv still use the phase's effective
+// dims and N respectively, same meaning as the normal pool.
+function getConstantCubePool(N, eff){
+  const pool=[]; const maxN=Math.floor(N/2);
+  if(maxN<1) return pool;
+  for(const face of ['R','L','U','D','F','B']){
+    const k=IDX[AXIS[face]], positive=POSITIVE.has(face);
+    const qt=faceQT(face, ...eff);
+    const secondary=face==='L'||face==='D'||face==='B';
+    for(let l=1;l<=maxN;l++){
+      if(!constCubeLayerAvailable(l,N,eff[k],positive)) continue;
+      const hasEquiv=N%2===0 && l*2===N;
+      if(secondary&&hasEquiv)continue;
+      for(const mod of (qt?['',"'",'2']:['2'])) pool.push({face,layer:l,mod,qt,hasEquiv});
+    }
+  }
+  return pool;
+}
 function canInc(w,h,d){
   const o=[];
   if(w>=2&&h>1&&d>1&&h!==d&&h%2===d%2)o.push({hi:Math.max(h,d),lo:Math.min(h,d),idx:[1,2]});
@@ -369,6 +419,30 @@ function generateScramble(w,h,d,perPhase){
   }
   return phases;
 }
+// Same phase/reduction structure as generateScramble (getPath is unchanged --
+// the bandaging restricts moves identically regardless of display mode), but
+// draws from the N-based constant-cube pool instead of the eff-based one.
+function generateScrambleConstCube(w,h,d,perPhase,N){
+  const phases=[];
+  let prevQTFaces=new Set();
+  for(const eff of getPath(w,h,d)){
+    const pool=getConstantCubePool(N,eff);
+    if(!pool.length)continue;
+    const curQTFaces=new Set(pool.filter(t=>t.qt).map(t=>t.face));
+    const forced = phases.length>0 ? pool.filter(t=>t.qt && !prevQTFaces.has(t.face) && t.mod!=='2') : [];
+    prevQTFaces=curQTFaces;
+    const mv=[];
+    for(let i=0;i<perPhase;i++){
+      const basePool = (i===0 && forced.length) ? forced : pool;
+      const t=basePool[Math.floor(Math.random()*basePool.length)];
+      let face=t.face,mod=t.mod;
+      if(t.hasEquiv&&Math.random()<0.5){const e=applyEquiv(t.face,t.mod);face=e.face;mod=e.mod;}
+      mv.push(moveStr(face,t.layer,mod));
+    }
+    phases.push({eff,moves:mv});
+  }
+  return phases;
+}
 
 /* ===================== UI ===================== */
 let phases=[], flat=[], W=3,H=5,D=7, constCubeInfo=null;
@@ -379,16 +453,24 @@ function stateAt(k){
   let applied=0;
   for(const ph of phases){
     coarsen(c, ph.eff);
-    for(const m of ph.moves){ if(applied>=k) return c; applyMove(c,m); applied++; }
+    const cc = constCubeInfo ? {N:constCubeInfo.N, eff:ph.eff} : null;
+    for(const m of ph.moves){ if(applied>=k) return c; applyMove(c,m,cc); applied++; }
   }
   return c;
+}
+// which phase's effective dims a given flat move-index falls within
+function phaseEffAt(k){
+  let idx=0;
+  for(const ph of phases){ if(idx+ph.moves.length>k) return ph.eff; idx+=ph.moves.length; }
+  return phases.length ? phases[phases.length-1].eff : [W,H,D];
 }
 function renderAt(k){
   const state=stateAt(k);
   let hi=null;
   if(k<flat.length && document.getElementById('highlight').checked){
     const mv=parseMove(flat[k]);
-    hi={ k:IDX[AXIS[mv.face]], sel:selectCoords(state,mv), mv };
+    const sel = constCubeInfo ? selectCoordsConstCube(state,mv,constCubeInfo.N,phaseEffAt(k)) : selectCoords(state,mv);
+    hi={ k:IDX[AXIS[mv.face]], sel, mv };
   }
   renderSVG(state, document.getElementById('shapeonly').checked, hi, constCubeInfo);
   document.getElementById('stepnum').textContent=`${k} / ${flat.length}`;
@@ -404,17 +486,19 @@ function apply(){
   H=Math.max(1,+document.getElementById('ih').value||1);
   D=Math.max(1,+document.getElementById('id').value||1);
   const per=Math.max(1,Math.min(40,+document.getElementById('perphase').value||6));
-  // Constant-cube toggle affects RENDERING ONLY -- the bandaging restricts
-  // moves exactly the same way a mismatched real dimension would, so
-  // scrambling always uses the same multi-phase reduction (same reductions,
-  // same forced first moves, same per-phase pool) regardless of display mode.
+  // Constant-cube toggle uses the SAME phase/reduction structure as normal
+  // mode (getPath is unchanged -- bandaging restricts moves identically
+  // regardless of display), but layer numbers are "distance from outside"
+  // of the fixed N-cube rather than renumbered per phase, so it draws moves
+  // from a different (N-based) pool via generateScrambleConstCube.
   const wantConstCube=document.getElementById('constcube-toggle').checked;
   const note=document.getElementById('constcube-note');
-  phases=generateScramble(W,H,D,per);
-  if(wantConstCube && sameParity(W,H,D)){
-    const N=Math.max(W,H,D);
+  const useConstCube = wantConstCube && sameParity(W,H,D);
+  const N = useConstCube ? Math.max(W,H,D) : null;
+  phases = useConstCube ? generateScrambleConstCube(W,H,D,per,N) : generateScramble(W,H,D,per);
+  if(useConstCube){
     constCubeInfo={N, dims:[W,H,D]};
-    note.style.display='block'; note.textContent=`Constant-cube view: rendered as a fixed ${N}×${N}×${N}. Same scramble/reductions as the normal view, only the display is stretched.`;
+    note.style.display='block'; note.textContent=`Constant-cube view: rendered as a fixed ${N}×${N}×${N}. Layer numbers count "distance from outside" of the fixed N-cube; bandaged outer layers are simply unavailable rather than renumbered.`;
   } else {
     constCubeInfo=null;
     note.style.display = wantConstCube ? 'block' : 'none';
