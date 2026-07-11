@@ -123,32 +123,52 @@ function shade(hex,f){
 // the two in-plane unit axes for a given face normal
 const INPLANE={ '+x':[[0,1,0],[0,0,1]], '+y':[[1,0,0],[0,0,1]], '+z':[[1,0,0],[0,1,0]] };
 
-// straight rotation arrow(s) placed at the same face edges as the old cuboidSVG:
-// R/L beside the front vertical edges, U/D/F above/below the front horizontal
-// edges, B above the back-top edge. One arrow for quarter turns, two for 180s.
+// bent rotation arrow: two straight legs meeting at a vertex just outside one
+// specific cube corner, sweeping in the true rotation direction of the move.
+// Corner per face (verified as a clean bijection over the 6 visible corners,
+// each the diagonal opposite of its opposite face's corner):
+//   U back-top-left, D front-bottom-right, R back-bottom-right,
+//   L front-top-left, F front-bottom-left, B back-top-right.
+// Bend angle: 135° for axis-pairs involving depth (U/D/R/L), 45° for the F/B
+// pair (front/back faces, viewed flat-on).
+const ARROW_CORNER={ U:[-1,+1,-1], D:[+1,-1,+1], R:[+1,-1,-1], L:[-1,+1,+1], F:[-1,-1,+1], B:[+1,+1,-1] };
+const ARROW_BEND_DEG={ U:135, D:135, R:135, L:135, F:45, B:45 };
 function buildArrow(cubies, mv){
   const MX=Math.max(1,...cubies.map(c=>Math.abs(c.pos[0])));
   const MY=Math.max(1,...cubies.map(c=>Math.abs(c.pos[1])));
   const MZ=Math.max(1,...cubies.map(c=>Math.abs(c.pos[2])));
-  const off=3;
-  // per face: base clockwise segment S->E and outward offset O (world coords)
-  const cfg={
-    R:{S:[MX,-MY,MZ],E:[MX,MY,MZ],O:[off,0,0]},   // front-right edge, up
-    L:{S:[-MX,MY,MZ],E:[-MX,-MY,MZ],O:[-off,0,0]}, // front-left edge, down
-    U:{S:[MX,MY,MZ],E:[-MX,MY,MZ],O:[0,off,0]},    // front-top edge, right->left
-    D:{S:[-MX,-MY,MZ],E:[MX,-MY,MZ],O:[0,-off,0]}, // front-bottom edge, left->right
-    F:{S:[-MX,MY,MZ],E:[MX,MY,MZ],O:[0,off,0]},    // front-top edge, left->right
-    B:{S:[MX,MY,-MZ],E:[-MX,MY,-MZ],O:[0,off,0]},  // back-top edge, right->left
-  }[mv.face];
-  // which screen edge the arrow sits beyond, so it never overlaps the diagram
-  const side={R:'right',L:'left',U:'top',D:'bottom',F:'top',B:'top'}[mv.face];
-  const P0=project(cfg.S.map((v,i)=>v+cfg.O[i]));
-  const P1=project(cfg.E.map((v,i)=>v+cfg.O[i]));
-  if(mv.mod==='2'){ // two parallel arrows, both base direction
-    const dx=P1[0]-P0[0],dy=P1[1]-P0[1],l=Math.hypot(dx,dy)||1,p=4,px=-dy/l*p,py=dx/l*p;
-    return {side, arrows:[{a:[P0[0]+px,P0[1]+py],b:[P1[0]+px,P1[1]+py]},{a:[P0[0]-px,P0[1]-py],b:[P1[0]-px,P1[1]-py]}]};
+  const sgn=ARROW_CORNER[mv.face];
+  const C=[sgn[0]*MX, sgn[1]*MY, sgn[2]*MZ];             // the chosen cube corner
+  const Cs=project(C);                                    // also = outward direction from screen origin
+  const thetaB=Math.atan2(-Cs[1],Cs[0]);                  // bisector angle, math convention (up positive)
+
+  // true local sweep direction at this corner: chord from C to a base quarter-
+  // turn of C in this move's actual rotation direction ('2' uses the base cw sense).
+  const ax=AXIS[mv.face], sign=baseSign(mv.face);
+  const dirExp = mv.mod==="'" ? -sign : sign;
+  const C2=matVec(matPow(P[ax],dirExp), C);
+  const dScreen=[project(C2)[0]-Cs[0], project(C2)[1]-Cs[1]];
+  const phi=Math.atan2(-dScreen[1],dScreen[0]);
+  let dphi=phi-thetaB; while(dphi>Math.PI)dphi-=2*Math.PI; while(dphi<=-Math.PI)dphi+=2*Math.PI;
+  const ccw=dphi>0;
+
+  const half=(ARROW_BEND_DEG[mv.face]*Math.PI/180)/2;
+  const thetaA=thetaB-half, thetaC=thetaB+half;
+  const pushOut=22, legLen=15;
+  const bxu=Math.cos(thetaB), byu=-Math.sin(thetaB);      // unit bisector, screen (svg) coords
+  const vertex=[Cs[0]+bxu*pushOut, Cs[1]+byu*pushOut];
+  const leg=(theta)=>[vertex[0]+Math.cos(theta)*legLen, vertex[1]-Math.sin(theta)*legLen];
+  const EA=leg(thetaA), EC=leg(thetaC);
+  const start=ccw?EA:EC, end=ccw?EC:EA;                   // sweep so the arrowhead matches true rotation
+  if(mv.mod==='2'){
+    const px=-byu*4, py=bxu*4;                            // perpendicular offset for a parallel second arrow
+    const off=(p,ox,oy)=>[p[0]+ox,p[1]+oy];
+    return { bx:bxu, by:byu, paths:[
+      [off(start,px,py),off(vertex,px,py),off(end,px,py)],
+      [off(start,-px,-py),off(vertex,-px,-py),off(end,-px,-py)],
+    ]};
   }
-  return {side, arrows: mv.mod==='' ? [{a:P0,b:P1}] : [{a:P1,b:P0}]}; // '' base, "'" reversed
+  return { bx:bxu, by:byu, paths:[[start,vertex,end]] };
 }
 
 function renderSVG(cubies, shapeOnly, hi){
@@ -179,21 +199,22 @@ function renderSVG(cubies, shapeOnly, hi){
   // diagram bbox from the cubies only
   let dminX=1e9,dminY=1e9,dmaxX=-1e9,dmaxY=-1e9;
   for(const f of faces)for(const p of f.corners){ dminX=Math.min(dminX,p[0]);dminY=Math.min(dminY,p[1]);dmaxX=Math.max(dmaxX,p[0]);dmaxY=Math.max(dmaxY,p[1]); }
-  // shift the arrow (as a whole) so it sits just outside the diagram on its side
+  // shift the arrow (as a whole) along its outward bisector so it clears the diagram
   if(arrow){
-    const gap=16, pts=arrow.arrows.flatMap(s=>[s.a,s.b]);
-    const axmin=Math.min(...pts.map(p=>p[0])), axmax=Math.max(...pts.map(p=>p[0]));
-    const aymin=Math.min(...pts.map(p=>p[1])), aymax=Math.max(...pts.map(p=>p[1]));
-    let sx=0,sy=0;
-    if(arrow.side==='right') sx=(dmaxX+gap)-axmin;
-    else if(arrow.side==='left') sx=(dminX-gap)-axmax;
-    else if(arrow.side==='top') sy=(dminY-gap)-aymax;
-    else if(arrow.side==='bottom') sy=(dmaxY+gap)-aymin;
-    for(const s of arrow.arrows){ s.a=[s.a[0]+sx,s.a[1]+sy]; s.b=[s.b[0]+sx,s.b[1]+sy]; }
+    const gap=16;
+    const proj=p=>p[0]*arrow.bx+p[1]*arrow.by;
+    const pts=arrow.paths.flat();
+    const arrowMinProj=Math.min(...pts.map(proj));
+    const diagCorners=[[dminX,dminY],[dminX,dmaxY],[dmaxX,dminY],[dmaxX,dmaxY]];
+    const diagMaxProj=Math.max(...diagCorners.map(proj));
+    if(arrowMinProj < diagMaxProj+gap){
+      const s=(diagMaxProj+gap)-arrowMinProj, sx=arrow.bx*s, sy=arrow.by*s;
+      arrow.paths=arrow.paths.map(path=>path.map(p=>[p[0]+sx,p[1]+sy]));
+    }
   }
   // fit viewBox over faces + shifted arrow
   let minX=dminX,minY=dminY,maxX=dmaxX,maxY=dmaxY;
-  if(arrow) for(const s of arrow.arrows)for(const p of [s.a,s.b]){ minX=Math.min(minX,p[0]);minY=Math.min(minY,p[1]);maxX=Math.max(maxX,p[0]);maxY=Math.max(maxY,p[1]); }
+  if(arrow) for(const path of arrow.paths)for(const p of path){ minX=Math.min(minX,p[0]);minY=Math.min(minY,p[1]);maxX=Math.max(maxX,p[0]);maxY=Math.max(maxY,p[1]); }
   const pad=14, w=(maxX-minX)+2*pad, h=(maxY-minY)+2*pad;
   const T=p=>`${(p[0]-minX+pad).toFixed(1)},${(p[1]-minY+pad).toFixed(1)}`;
   let body='';
@@ -206,9 +227,9 @@ function renderSVG(cubies, shapeOnly, hi){
     const head=(pen,tip)=>{ const dx=tip[0]-pen[0],dy=tip[1]-pen[1],l=Math.hypot(dx,dy)||1,ux=dx/l,uy=dy/l,s2=6;
       const bx=tip[0]-ux*s2,by=tip[1]-uy*s2;
       return `<polygon points="${T(tip)} ${T([bx-uy*s2*0.6,by+ux*s2*0.6])} ${T([bx+uy*s2*0.6,by-ux*s2*0.6])}" fill="${ac}"/>`; };
-    for(const s of arrow.arrows){
-      body+=`<line x1="${T(s.a).split(',')[0]}" y1="${T(s.a).split(',')[1]}" x2="${T(s.b).split(',')[0]}" y2="${T(s.b).split(',')[1]}" stroke="${ac}" stroke-width="2.4" stroke-linecap="round"/>`;
-      body+=head(s.a,s.b);
+    for(const path of arrow.paths){
+      body+=`<polyline points="${path.map(T).join(' ')}" fill="none" stroke="${ac}" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>`;
+      body+=head(path[1],path[2]); // arrowhead at the terminal end, pointing away from the bend vertex
     }
   }
   const svg=document.getElementById('stage');
