@@ -39,7 +39,11 @@
   <span id="stepnum" class="muted">0 / 0</span>
   <label><input type="checkbox" id="shapeonly"> shape only</label>
   <label><input type="checkbox" id="highlight" checked> highlight next move</label>
+  <label title="All-even or all-odd puzzles only: render as a fixed N=max(w,h,d) cube, with the shorter axes' outer layers drawn thicker instead of shapeshifting.">
+    <input type="checkbox" id="constcube-toggle"> constant-cube view
+  </label>
 </div>
+<div id="constcube-note" class="muted" style="display:none;"></div>
 <div id="moveline"></div>
 <svg id="stage" width="100%" height="460" viewBox="0 0 400 300" preserveAspectRatio="xMidYMid meet"></svg>
 <p class="muted">Green front · White up · Yellow down · Red right · Orange left · Blue back · dark = internal body revealed by shapeshifting.</p>
@@ -123,6 +127,34 @@ function shade(hex,f){
 // the two in-plane unit axes for a given face normal
 const INPLANE={ '+x':[[0,1,0],[0,0,1]], '+y':[[1,0,0],[0,0,1]], '+z':[[1,0,0],[0,1,0]] };
 
+// ---- constant-cube display mode ----
+// Represent an all-even/all-odd puzzle as a fixed N=max(w,h,d) cube: shorter
+// axes' outermost layer(s) absorb the extra virtual space (no new cubies, no
+// internal seam -- an existing layer just draws wider). Only valid because a
+// quarter turn never happens on a mismatched axis (that axis stays half-turn
+// only until reduced), and rotating an already-matched square cross-section
+// never shapeshifts -- so a SINGLE unreduced canonical pool, used throughout,
+// never shapeshifts either, and each axis keeps its native size forever.
+function sameParity(w,h,d){ return (w%2)===(h%2) && (h%2)===(d%2); }
+function renderMap(p,d,N){
+  if(d===N) return {c:p,h:1};
+  if(d===1) return {c:0,h:N};
+  if(Math.abs(p)===d-1){ const s=Math.sign(p); return {c:s*(d-2+N)/2, h:(N-d)/2+1}; }
+  return {c:p,h:1};
+}
+function generateConstantCubeScramble(w,h,d,total){
+  const pool=getCanonicalPool(w,h,d);
+  if(!pool.length) return [];
+  const mv=[];
+  for(let i=0;i<total;i++){
+    const t=pool[Math.floor(Math.random()*pool.length)];
+    let face=t.face,mod=t.mod;
+    if(t.hasEquiv&&Math.random()<0.5){const e=applyEquiv(t.face,t.mod);face=e.face;mod=e.mod;}
+    mv.push(moveStr(face,t.layer,mod));
+  }
+  return [{eff:[w,h,d], moves:mv}];
+}
+
 // bent rotation arrow hugging one cube corner from outside: its two legs run
 // parallel to the two SILHOUETTE edges of the projected cuboid meeting at that
 // corner, so the bend matches the outline (90° at the F/B corners where the
@@ -132,8 +164,10 @@ const INPLANE={ '+x':[[0,1,0],[0,0,1]], '+y':[[1,0,0],[0,0,1]], '+z':[[1,0,0],[0
 //   U back-top-left, D front-bottom-right, R back-bottom-right,
 //   L front-top-left, F front-bottom-left, B back-top-right.
 const ARROW_CORNER={ U:[-1,+1,-1], D:[+1,-1,+1], R:[+1,-1,-1], L:[-1,+1,+1], F:[-1,-1,+1], B:[+1,+1,-1] };
-function buildArrow(cubies, mv){
-  const M=[0,1,2].map(k=>Math.max(1,...cubies.map(c=>Math.abs(c.pos[k]))));
+function buildArrow(cubies, mv, constCube){
+  const M = constCube
+    ? [0,1,2].map(k=>renderMap(constCube.dims[k]-1, constCube.dims[k], constCube.N).c)
+    : [0,1,2].map(k=>Math.max(1,...cubies.map(c=>Math.abs(c.pos[k]))));
   const sgn=ARROW_CORNER[mv.face];
   const C=[sgn[0]*M[0], sgn[1]*M[1], sgn[2]*M[2]];        // the chosen cube corner
   const Cs=project(C);
@@ -172,31 +206,41 @@ function buildArrow(cubies, mv){
   return { bx:ox, by:oy, paths:[bracket(pushOut)] };
 }
 
-function renderSVG(cubies, shapeOnly, hi){
-  const occ=new Set(cubies.map(c=>c.pos.join(',')));
+function renderSVG(cubies, shapeOnly, hi, constCube){
+  const occ=new Set(cubies.map(c=>c.pos.join(',')));       // real adjacency, unaffected by display stretch
   const sel = hi ? cubies.filter(c=>hi.sel.has(c.fc[hi.k])) : [];
   const faces=[];
   for(const c of cubies){
     const isSel = hi && hi.sel.has(c.fc[hi.k]);
     const ws = shapeOnly ? null : worldStickers(c);
+    // per-axis render mapping: {c:renderCenter, h:renderHalfwidth}, identity
+    // unless this axis is shorter than N (constant-cube mode).
+    const rm = constCube ? [0,1,2].map(k=>renderMap(c.pos[k], constCube.dims[k], constCube.N)) : null;
     for(const dir of VIS){
       const n=DIRS[dir];
       const nb=[c.pos[0]+2*n[0],c.pos[1]+2*n[1],c.pos[2]+2*n[2]];
       if(occ.has(nb.join(',')))continue;                    // interior face — cull
-      const center=[c.pos[0]+n[0],c.pos[1]+n[1],c.pos[2]+n[2]];
-      const [u,v]=INPLANE[dir];
+      const [u0,v0]=INPLANE[dir];
+      let center,u,v;
+      if(rm){
+        center=[0,1,2].map(k=>rm[k].c + n[k]*rm[k].h);      // push to the mapped outer boundary along the normal
+        u=u0.map((x,k)=>x*rm[k].h); v=v0.map((x,k)=>x*rm[k].h); // scale the in-plane half-widths too
+      } else {
+        center=[c.pos[0]+n[0],c.pos[1]+n[1],c.pos[2]+n[2]];
+        u=u0; v=v0;
+      }
       const corners=[[+1,+1],[+1,-1],[-1,-1],[-1,+1]].map(([su,sv])=>
         project([center[0]+su*u[0]+sv*v[0], center[1]+su*u[1]+sv*v[1], center[2]+su*u[2]+sv*v[2]]));
       let col;
       if(shapeOnly){ col=shade('#8899aa',SHADE[dir]); }
       else { const name=ws[dir]; col=shade(HEX[name]||HEX.Body, SHADE[dir]); }
       if(hi && !isSel) col = shade(col,0.4);   // dull the rest; turning layer keeps its true colour
-      const depth = c.pos[0]+c.pos[1]+c.pos[2] + (dir==='+z'?0.5:dir==='+y'?0.25:0); // back-to-front
+      const depth = c.pos[0]+c.pos[1]+c.pos[2] + (dir==='+z'?0.5:dir==='+y'?0.25:0); // back-to-front (raw pos; monotonic under render mapping)
       faces.push({corners,col,depth,isSel});
     }
   }
   faces.sort((a,b)=>a.depth-b.depth);
-  const arrow = hi ? buildArrow(cubies, hi.mv) : null;
+  const arrow = hi ? buildArrow(cubies, hi.mv, constCube) : null;
   // diagram bbox from the cubies only
   let dminX=1e9,dminY=1e9,dmaxX=-1e9,dmaxY=-1e9;
   for(const f of faces)for(const p of f.corners){ dminX=Math.min(dminX,p[0]);dminY=Math.min(dminY,p[1]);dmaxX=Math.max(dmaxX,p[0]);dmaxY=Math.max(dmaxY,p[1]); }
@@ -308,7 +352,7 @@ function generateScramble(w,h,d,perPhase){
 }
 
 /* ===================== UI ===================== */
-let phases=[], flat=[], W=3,H=5,D=7;
+let phases=[], flat=[], W=3,H=5,D=7, constCubeInfo=null;
 // replay from solved, coarsening fc at each phase boundary, applying the first k moves.
 function stateAt(k){
   const c=buildSolved(W,H,D);
@@ -326,7 +370,7 @@ function renderAt(k){
     const mv=parseMove(flat[k]);
     hi={ k:IDX[AXIS[mv.face]], sel:selectCoords(state,mv), mv };
   }
-  renderSVG(state, document.getElementById('shapeonly').checked, hi);
+  renderSVG(state, document.getElementById('shapeonly').checked, hi, constCubeInfo);
   document.getElementById('stepnum').textContent=`${k} / ${flat.length}`;
   let html='', i=0;
   for(const ph of phases){
@@ -340,13 +384,26 @@ function apply(){
   H=Math.max(1,+document.getElementById('ih').value||1);
   D=Math.max(1,+document.getElementById('id').value||1);
   const per=Math.max(1,Math.min(40,+document.getElementById('perphase').value||6));
-  phases=generateScramble(W,H,D,per);
+  const wantConstCube=document.getElementById('constcube-toggle').checked;
+  const note=document.getElementById('constcube-note');
+  if(wantConstCube && sameParity(W,H,D)){
+    const N=Math.max(W,H,D);
+    constCubeInfo={N, dims:[W,H,D]};
+    phases=generateConstantCubeScramble(W,H,D,per);
+    note.style.display='block'; note.textContent=`Constant-cube view: rendered as a fixed ${N}×${N}×${N}. No phase reduction -- a single canonical pool is used throughout, so nothing shapeshifts.`;
+  } else {
+    constCubeInfo=null;
+    phases=generateScramble(W,H,D,per);
+    note.style.display = wantConstCube ? 'block' : 'none';
+    if(wantConstCube) note.textContent=`Constant-cube view needs all-even or all-odd dimensions (got ${W}×${H}×${D}) -- showing the normal reduced view instead.`;
+  }
   flat=phases.flatMap(p=>p.moves);
   const step=document.getElementById('step');
   step.max=flat.length; step.value=0;
   renderAt(0);
 }
 document.getElementById('apply').onclick=apply;
+document.getElementById('constcube-toggle').onchange=apply;
 document.getElementById('step').oninput=(e)=>renderAt(+e.target.value);
 document.getElementById('shapeonly').onchange=()=>renderAt(+document.getElementById('step').value);
 document.getElementById('highlight').onchange=()=>renderAt(+document.getElementById('step').value);
