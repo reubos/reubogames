@@ -158,15 +158,18 @@ function buildArrow(cubies, mv){
   const dot=d=>d[0]*m[0]+d[1]*m[1];
   const end=dot(legDirs[0])>=dot(legDirs[1])?legDirs[0]:legDirs[1];
   const startL=end===legDirs[0]?legDirs[1]:legDirs[0];
-  const pushOut=14, legLen=17;
-  const vertex=[Cs[0]+ox*pushOut, Cs[1]+oy*pushOut];
-  const S=[vertex[0]+startL[0]*legLen, vertex[1]+startL[1]*legLen];
-  const E=[vertex[0]+end[0]*legLen, vertex[1]+end[1]*legLen];
-  if(mv.mod==='2'){                                        // two parallel brackets
-    const px=-oy*4, py=ox*4, off=(p,s)=>[p[0]+px*s, p[1]+py*s];
-    return { bx:ox, by:oy, paths:[[off(S,1),off(vertex,1),off(E,1)],[off(S,-1),off(vertex,-1),off(E,-1)]] };
+  const pushOut=6, legLen=17, ringGap=6;
+  // a bracket at a given radial distance from the corner, along the outward normal
+  const bracket=(r)=>{
+    const vertex=[Cs[0]+ox*r, Cs[1]+oy*r];
+    return [ [vertex[0]+startL[0]*legLen,vertex[1]+startL[1]*legLen], vertex, [vertex[0]+end[0]*legLen,vertex[1]+end[1]*legLen] ];
+  };
+  if(mv.mod==='2'){
+    // two brackets nested along the same outward normal (pure radial translates
+    // of each other) so they stay parallel and never cross.
+    return { bx:ox, by:oy, paths:[bracket(pushOut), bracket(pushOut+ringGap)] };
   }
-  return { bx:ox, by:oy, paths:[[S,vertex,E]] };
+  return { bx:ox, by:oy, paths:[bracket(pushOut)] };
 }
 
 function renderSVG(cubies, shapeOnly, hi){
@@ -197,14 +200,17 @@ function renderSVG(cubies, shapeOnly, hi){
   // diagram bbox from the cubies only
   let dminX=1e9,dminY=1e9,dmaxX=-1e9,dmaxY=-1e9;
   for(const f of faces)for(const p of f.corners){ dminX=Math.min(dminX,p[0]);dminY=Math.min(dminY,p[1]);dmaxX=Math.max(dmaxX,p[0]);dmaxY=Math.max(dmaxY,p[1]); }
-  // shift the arrow (as a whole) along its outward bisector so it clears the diagram
+  // Shift the arrow along its outward normal just enough to clear the diagram,
+  // using a true separating-axis argument: project every ACTUAL diagram vertex
+  // (not synthetic bbox corners, which overshoot for non-cubic shapes) onto the
+  // outward direction. If every arrow point's projection exceeds every diagram
+  // vertex's projection (plus a gap), the two point sets provably cannot touch
+  // -- correct in one shot, no iteration needed.
   if(arrow){
-    const gap=16;
+    const gap=4;
     const proj=p=>p[0]*arrow.bx+p[1]*arrow.by;
-    const pts=arrow.paths.flat();
-    const arrowMinProj=Math.min(...pts.map(proj));
-    const diagCorners=[[dminX,dminY],[dminX,dmaxY],[dmaxX,dminY],[dmaxX,dmaxY]];
-    const diagMaxProj=Math.max(...diagCorners.map(proj));
+    const diagMaxProj=Math.max(...faces.flatMap(f=>f.corners).map(proj));
+    const arrowMinProj=Math.min(...arrow.paths.flat().map(proj));
     if(arrowMinProj < diagMaxProj+gap){
       const s=(diagMaxProj+gap)-arrowMinProj, sx=arrow.bx*s, sy=arrow.by*s;
       arrow.paths=arrow.paths.map(path=>path.map(p=>[p[0]+sx,p[1]+sy]));
