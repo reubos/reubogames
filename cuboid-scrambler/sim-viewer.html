@@ -152,11 +152,14 @@ function buildArrow(cubies, mv){
   let dphi=phi-thetaB; while(dphi>Math.PI)dphi-=2*Math.PI; while(dphi<=-Math.PI)dphi+=2*Math.PI;
   const ccw=dphi>0;
 
+  // legs sweep back TOWARD the cube (opposite the outward bisector) so they hug
+  // alongside the two real edges and the cube sits in the bend's concave crook.
   const half=(ARROW_BEND_DEG[mv.face]*Math.PI/180)/2;
-  const thetaA=thetaB-half, thetaC=thetaB+half;
-  const pushOut=22, legLen=15;
-  const bxu=Math.cos(thetaB), byu=-Math.sin(thetaB);      // unit bisector, screen (svg) coords
-  const vertex=[Cs[0]+bxu*pushOut, Cs[1]+byu*pushOut];
+  const inward=thetaB+Math.PI;
+  const thetaA=inward-half, thetaC=inward+half;
+  const pushOut=16, legLen=15;
+  const bxu=Math.cos(thetaB), byu=-Math.sin(thetaB);      // unit outward bisector, screen (svg) coords
+  const vertex=[Cs[0]+bxu*pushOut, Cs[1]+byu*pushOut];    // just outside the corner, for clearance
   const leg=(theta)=>[vertex[0]+Math.cos(theta)*legLen, vertex[1]-Math.sin(theta)*legLen];
   const EA=leg(thetaA), EC=leg(thetaC);
   const start=ccw?EA:EC, end=ccw?EC:EA;                   // sweep so the arrowhead matches true rotation
