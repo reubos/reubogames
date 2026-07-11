@@ -140,13 +140,15 @@ function buildArrow(cubies, mv){
     F:{S:[-MX,MY,MZ],E:[MX,MY,MZ],O:[0,off,0]},    // front-top edge, left->right
     B:{S:[MX,MY,-MZ],E:[-MX,MY,-MZ],O:[0,off,0]},  // back-top edge, right->left
   }[mv.face];
+  // which screen edge the arrow sits beyond, so it never overlaps the diagram
+  const side={R:'right',L:'left',U:'top',D:'bottom',F:'top',B:'top'}[mv.face];
   const P0=project(cfg.S.map((v,i)=>v+cfg.O[i]));
   const P1=project(cfg.E.map((v,i)=>v+cfg.O[i]));
   if(mv.mod==='2'){ // two parallel arrows, both base direction
     const dx=P1[0]-P0[0],dy=P1[1]-P0[1],l=Math.hypot(dx,dy)||1,p=4,px=-dy/l*p,py=dx/l*p;
-    return {arrows:[{a:[P0[0]+px,P0[1]+py],b:[P1[0]+px,P1[1]+py]},{a:[P0[0]-px,P0[1]-py],b:[P1[0]-px,P1[1]-py]}]};
+    return {side, arrows:[{a:[P0[0]+px,P0[1]+py],b:[P1[0]+px,P1[1]+py]},{a:[P0[0]-px,P0[1]-py],b:[P1[0]-px,P1[1]-py]}]};
   }
-  return {arrows: mv.mod==='' ? [{a:P0,b:P1}] : [{a:P1,b:P0}]}; // '' base, "'" reversed
+  return {side, arrows: mv.mod==='' ? [{a:P0,b:P1}] : [{a:P1,b:P0}]}; // '' base, "'" reversed
 }
 
 function renderSVG(cubies, shapeOnly, hi){
@@ -174,11 +176,24 @@ function renderSVG(cubies, shapeOnly, hi){
   }
   faces.sort((a,b)=>a.depth-b.depth);
   const arrow = hi ? buildArrow(cubies, hi.mv) : null;
-  // fit viewBox over faces (and arrow)
-  let minX=1e9,minY=1e9,maxX=-1e9,maxY=-1e9;
-  const bump=p=>{ minX=Math.min(minX,p[0]);minY=Math.min(minY,p[1]);maxX=Math.max(maxX,p[0]);maxY=Math.max(maxY,p[1]); };
-  for(const f of faces)for(const p of f.corners) bump(p);
-  if(arrow) for(const s of arrow.arrows){ bump(s.a); bump(s.b); }
+  // diagram bbox from the cubies only
+  let dminX=1e9,dminY=1e9,dmaxX=-1e9,dmaxY=-1e9;
+  for(const f of faces)for(const p of f.corners){ dminX=Math.min(dminX,p[0]);dminY=Math.min(dminY,p[1]);dmaxX=Math.max(dmaxX,p[0]);dmaxY=Math.max(dmaxY,p[1]); }
+  // shift the arrow (as a whole) so it sits just outside the diagram on its side
+  if(arrow){
+    const gap=16, pts=arrow.arrows.flatMap(s=>[s.a,s.b]);
+    const axmin=Math.min(...pts.map(p=>p[0])), axmax=Math.max(...pts.map(p=>p[0]));
+    const aymin=Math.min(...pts.map(p=>p[1])), aymax=Math.max(...pts.map(p=>p[1]));
+    let sx=0,sy=0;
+    if(arrow.side==='right') sx=(dmaxX+gap)-axmin;
+    else if(arrow.side==='left') sx=(dminX-gap)-axmax;
+    else if(arrow.side==='top') sy=(dminY-gap)-aymax;
+    else if(arrow.side==='bottom') sy=(dmaxY+gap)-aymin;
+    for(const s of arrow.arrows){ s.a=[s.a[0]+sx,s.a[1]+sy]; s.b=[s.b[0]+sx,s.b[1]+sy]; }
+  }
+  // fit viewBox over faces + shifted arrow
+  let minX=dminX,minY=dminY,maxX=dmaxX,maxY=dmaxY;
+  if(arrow) for(const s of arrow.arrows)for(const p of [s.a,s.b]){ minX=Math.min(minX,p[0]);minY=Math.min(minY,p[1]);maxX=Math.max(maxX,p[0]);maxY=Math.max(maxY,p[1]); }
   const pad=14, w=(maxX-minX)+2*pad, h=(maxY-minY)+2*pad;
   const T=p=>`${(p[0]-minX+pad).toFixed(1)},${(p[1]-minY+pad).toFixed(1)}`;
   let body='';
