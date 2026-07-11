@@ -66,9 +66,19 @@ function buildSolved(w, h, d) {
     if (y === ymin) stickers['-y'] = COLORS['-y'];
     if (z === zmax) stickers['+z'] = COLORS['+z'];
     if (z === zmin) stickers['-z'] = COLORS['-z'];
-    cubies.push({ home: [x, y, z], pos: [x, y, z], ori: I3, stickers });
+    // fc = functional coordinate (effective-space position): seeded to the
+    // physical position, rotates with the piece, coarsened at phase boundaries.
+    cubies.push({ home: [x, y, z], pos: [x, y, z], ori: I3, fc: [x, y, z], stickers });
   }
   return cubies;
+}
+
+// Reduce each fc to the phase's effective dims by centre-aligned clamping:
+// physical layers outside the effective range fold onto the outermost retained
+// functional layer (outer-fat bandaging).
+function coarsen(cubies, eff) {
+  const lim = eff.map(e => e - 1);
+  for (const c of cubies) c.fc = c.fc.map((v, k) => Math.max(-lim[k], Math.min(lim[k], v)));
 }
 
 function parseMove(m) {
@@ -77,26 +87,15 @@ function parseMove(m) {
   return { layer: x[1] ? +x[1] : 1, face: x[2], wide: x[3] === 'w', mod: x[4] || '' };
 }
 
-// Functional-layer selection with centre alignment:
-//   * layers are counted by FULL cross-section planes from the named face;
-//   * outer layers whose cross-section is a proper subset of the next inner
-//     layer are "protrusions" (bandaged): they cannot be cut on their own and
-//     instead ride along with functional layer 1.
+// Functional-layer selection: a move on functional layer k from the named face
+// grabs every cubie whose FUNCTIONAL coord on that axis matches. Bandaged
+// physical layers share an fc value (set by coarsen), so they come together
+// automatically — no geometry inference.
 function selectCoords(cubies, mv) {
   const { face, layer, wide } = mv;
   const k = IDX[AXIS[face]], pos = POSITIVE.has(face);
-  const [o1, o2] = [0, 1, 2].filter(i => i !== k);
-  const coords = [...new Set(cubies.map(c => c.pos[k]))].sort((a, b) => pos ? b - a : a - b);
-  const cross = {};
-  for (const c of cubies) { (cross[c.pos[k]] || (cross[c.pos[k]] = new Set())).add(c.pos[o1] + ',' + c.pos[o2]); }
-  const properSubset = (a, b) => a.size < b.size && [...a].every(e => b.has(e));
-  let pref = 0; // outboard protrusion prefix
-  while (pref < coords.length - 1 && properSubset(cross[coords[pref]], cross[coords[pref + 1]])) pref++;
-  if (wide) return new Set(coords.slice(0, pref + layer));
-  const idx = Math.min(pref + layer - 1, coords.length - 1);
-  const chosen = new Set([coords[idx]]);
-  if (layer === 1) coords.slice(0, pref).forEach(x => chosen.add(x));
-  return chosen;
+  const coords = [...new Set(cubies.map(c => c.fc[k]))].sort((a, b) => pos ? b - a : a - b);
+  return new Set(wide ? coords.slice(0, layer) : [coords[layer - 1]]);
 }
 function applyMove(cubies, move) {
   const mv = typeof move === 'string' ? parseMove(move) : move;
@@ -106,9 +105,10 @@ function applyMove(cubies, move) {
   const exp = mv.mod === '2' ? 2 : mv.mod === "'" ? -sign : sign;
   const R = matPow(P[ax], exp);
   for (const c of cubies) {
-    if (!sel.has(c.pos[k])) continue;
+    if (!sel.has(c.fc[k])) continue;
     c.pos = matVec(R, c.pos);
     c.ori = matMul(R, c.ori);
+    c.fc = matVec(R, c.fc);
   }
 }
 

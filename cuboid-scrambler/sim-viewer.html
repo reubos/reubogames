@@ -29,8 +29,8 @@
   <label>W <input type="number" id="iw" min="1" max="9" value="3"></label>
   <label>H <input type="number" id="ih" min="1" max="9" value="5"></label>
   <label>D <input type="number" id="id" min="1" max="9" value="7"></label>
-  <label style="flex:1;">Scramble <input type="text" id="seq" value="R U F' 2R U2 F"></label>
-  <button id="apply">Apply</button>
+  <label>Moves/phase <input type="number" id="perphase" min="1" max="40" value="6"></label>
+  <button id="apply">Generate</button>
 </div>
 <div class="row">
   <button id="prev">◀ Prev</button>
@@ -69,40 +69,34 @@ function buildSolved(w,h,d){
     if(x===xmax)st['+x']=COLORS['+x']; if(x===xmin)st['-x']=COLORS['-x'];
     if(y===ymax)st['+y']=COLORS['+y']; if(y===ymin)st['-y']=COLORS['-y'];
     if(z===zmax)st['+z']=COLORS['+z']; if(z===zmin)st['-z']=COLORS['-z'];
-    cubies.push({home:[x,y,z],pos:[x,y,z],ori:I3,stickers:st});
+    cubies.push({home:[x,y,z],pos:[x,y,z],ori:I3,fc:[x,y,z],stickers:st});
   }
   return cubies;
+}
+// coarsen fc to a phase's effective dims (centre-aligned clamp = outer-fat bandaging)
+function coarsen(cubies,eff){
+  const lim=eff.map(e=>e-1);
+  for(const c of cubies) c.fc=c.fc.map((v,k)=>Math.max(-lim[k],Math.min(lim[k],v)));
 }
 function parseMove(m){
   const x=m.match(/^(\d+)?([RLUDFB])(w?)(2|')?$/);
   if(!x)throw new Error('bad move: '+m);
   return {layer:x[1]?+x[1]:1,face:x[2],wide:x[3]==='w',mod:x[4]||''};
 }
-// functional-layer selection: count full cross-section planes from the face;
-// outer layers that are a proper subset of the next inner one are protrusions
-// (bandaged) and ride along with functional layer 1 instead of being cuttable.
+// functional-layer selection by fc: bandaged physical layers share an fc value
+// (from coarsen) so they are grabbed together — no geometry inference.
 function selectCoords(cubies,mv){
   const {face,layer,wide}=mv;
   const k=IDX[AXIS[face]], pos=POSITIVE.has(face);
-  const [o1,o2]=[0,1,2].filter(i=>i!==k);
-  const coords=[...new Set(cubies.map(c=>c.pos[k]))].sort((a,b)=>pos?b-a:a-b);
-  const cross={};
-  for(const c of cubies){ (cross[c.pos[k]]||(cross[c.pos[k]]=new Set())).add(c.pos[o1]+','+c.pos[o2]); }
-  const properSubset=(a,b)=>a.size<b.size && [...a].every(e=>b.has(e));
-  let pref=0;
-  while(pref<coords.length-1 && properSubset(cross[coords[pref]],cross[coords[pref+1]])) pref++;
-  if(wide) return new Set(coords.slice(0,pref+layer));
-  const idx=Math.min(pref+layer-1,coords.length-1);
-  const chosen=new Set([coords[idx]]);
-  if(layer===1) coords.slice(0,pref).forEach(x=>chosen.add(x));
-  return chosen;
+  const coords=[...new Set(cubies.map(c=>c.fc[k]))].sort((a,b)=>pos?b-a:a-b);
+  return new Set(wide?coords.slice(0,layer):[coords[layer-1]]);
 }
 function applyMove(cubies,move){
   const mv=typeof move==='string'?parseMove(move):move;
   const ax=AXIS[mv.face], k=IDX[ax];
   const sel=selectCoords(cubies,mv);
   const sign=baseSign(mv.face), exp=mv.mod==='2'?2:mv.mod==="'"?-sign:sign, R=matPow(P[ax],exp);
-  for(const c of cubies){ if(!sel.has(c.pos[k]))continue; c.pos=matVec(R,c.pos); c.ori=matMul(R,c.ori); }
+  for(const c of cubies){ if(!sel.has(c.fc[k]))continue; c.pos=matVec(R,c.pos); c.ori=matMul(R,c.ori); c.fc=matVec(R,c.fc); }
 }
 function worldStickers(c){
   const out={}, oriT=transpose(c.ori);
@@ -163,38 +157,103 @@ function renderSVG(cubies, shapeOnly){
   svg.innerHTML=body;
 }
 
-/* ===================== UI ===================== */
-let moves=[], W=3,H=5,D=7;
-function currentMoves(){
-  const raw=document.getElementById('seq').value.trim();
-  return raw?raw.split(/\s+/).filter(Boolean):[];
+/* ===================== phase generator (mirrors the main scrambler) ===================== */
+function faceAvail(f,w,h,d){return f==='R'||f==='L'?w>=2:f==='U'||f==='D'?h>=2:d>=2;}
+function faceQT(f,w,h,d){ if(f==='R'||f==='L')return h===d; if(f==='U'||f==='D')return w===d; return w===h; }
+function maxLayers(f,w,h,d){ if(f==='R'||f==='L')return Math.floor(w/2); if(f==='U'||f==='D')return Math.floor(h/2); return Math.floor(d/2); }
+function getAxisDim(f,w,h,d){ return f==='R'||f==='L'?w:f==='U'||f==='D'?h:d; }
+function applyEquiv(face,mod){ const opp={R:'L',L:'R',U:'D',D:'U',F:'B',B:'F'}[face]; return {face:opp,mod:mod===''?"'":mod==="'"?'':'2'}; }
+function moveStr(face,layer,mod){ return (layer>1?String(layer):'')+face+mod; }
+function getCanonicalPool(w,h,d){
+  const pool=[];
+  for(const face of ['R','L','U','D','F','B']){
+    if(!faceAvail(face,w,h,d))continue;
+    const qt=faceQT(face,w,h,d), ml=maxLayers(face,w,h,d), N=getAxisDim(face,w,h,d);
+    const secondary=face==='L'||face==='D'||face==='B';
+    for(let l=1;l<=ml;l++){
+      const hasEquiv=N%2===0 && l*2===N;
+      if(secondary&&hasEquiv)continue;
+      for(const mod of (qt?['',"'",'2']:['2'])) pool.push({face,layer:l,mod,hasEquiv});
+    }
+  }
+  return pool;
 }
+function canInc(w,h,d){
+  const o=[];
+  if(w>=2&&h>1&&d>1&&h!==d&&h%2===d%2)o.push({hi:Math.max(h,d),lo:Math.min(h,d),idx:[1,2]});
+  if(h>=2&&w>1&&d>1&&w!==d&&w%2===d%2)o.push({hi:Math.max(w,d),lo:Math.min(w,d),idx:[0,2]});
+  if(d>=2&&w>1&&h>1&&w!==h&&w%2===h%2)o.push({hi:Math.max(w,h),lo:Math.min(w,h),idx:[0,1]});
+  return o;
+}
+function applyRed(dims,opt){ const nd=[...dims]; const [i,j]=opt.idx; if(nd[i]>nd[j])nd[i]=opt.lo; else nd[j]=opt.lo; return nd; }
+function getPath(w,h,d){
+  const stages=[]; let dims=[w,h,d];
+  for(let it=0;it<20;it++){
+    const inc=canInc(...dims); stages.push([...dims]);
+    if(!inc.length)break;
+    const maxHi=Math.max(...inc.map(o=>o.hi));
+    const topHi=inc.filter(o=>o.hi===maxHi);
+    const maxLo=Math.max(...topHi.map(o=>o.lo));
+    const top=topHi.filter(o=>o.lo===maxLo);
+    dims=applyRed(dims, top[Math.floor(Math.random()*top.length)]);
+  }
+  return stages;
+}
+function generateScramble(w,h,d,perPhase){
+  const phases=[];
+  for(const eff of getPath(w,h,d)){
+    const pool=getCanonicalPool(...eff);
+    if(!pool.length)continue;
+    const mv=[];
+    for(let i=0;i<perPhase;i++){
+      const t=pool[Math.floor(Math.random()*pool.length)];
+      let face=t.face,mod=t.mod;
+      if(t.hasEquiv&&Math.random()<0.5){const e=applyEquiv(t.face,t.mod);face=e.face;mod=e.mod;}
+      mv.push(moveStr(face,t.layer,mod));
+    }
+    phases.push({eff,moves:mv});
+  }
+  return phases;
+}
+
+/* ===================== UI ===================== */
+let phases=[], flat=[], W=3,H=5,D=7;
+// replay from solved, coarsening fc at each phase boundary, applying the first k moves.
 function stateAt(k){
   const c=buildSolved(W,H,D);
-  for(let i=0;i<k;i++)applyMove(c,moves[i]);
+  let applied=0;
+  for(const ph of phases){
+    coarsen(c, ph.eff);
+    for(const m of ph.moves){ if(applied>=k) return c; applyMove(c,m); applied++; }
+  }
   return c;
 }
 function renderAt(k){
   renderSVG(stateAt(k), document.getElementById('shapeonly').checked);
-  document.getElementById('stepnum').textContent=`${k} / ${moves.length}`;
-  const line=moves.map((m,i)=>i<k?`<span class="done">${m}</span>`:(i===k?`<span class="cur">${m}</span>`:m)).join(' ');
-  document.getElementById('moveline').innerHTML=line||'<span class="muted">(solved)</span>';
+  document.getElementById('stepnum').textContent=`${k} / ${flat.length}`;
+  let html='', i=0;
+  for(const ph of phases){
+    html+=`<span class="muted">[${ph.eff.join('×')}]</span> `;
+    for(const m of ph.moves){ const cls=i<k?'done':(i===k?'cur':''); html+=`<span class="${cls}">${m}</span> `; i++; }
+  }
+  document.getElementById('moveline').innerHTML=html||'<span class="muted">(no moves)</span>';
 }
 function apply(){
   W=Math.max(1,+document.getElementById('iw').value||1);
   H=Math.max(1,+document.getElementById('ih').value||1);
   D=Math.max(1,+document.getElementById('id').value||1);
-  try { moves=currentMoves(); moves.forEach(parseMove); }
-  catch(e){ document.getElementById('moveline').innerHTML=`<span style="color:#f77">${e.message}</span>`; return; }
+  const per=Math.max(1,Math.min(40,+document.getElementById('perphase').value||6));
+  phases=generateScramble(W,H,D,per);
+  flat=phases.flatMap(p=>p.moves);
   const step=document.getElementById('step');
-  step.max=moves.length; step.value=Math.min(step.value,moves.length);
-  renderAt(+step.value);
+  step.max=flat.length; step.value=0;
+  renderAt(0);
 }
 document.getElementById('apply').onclick=apply;
 document.getElementById('step').oninput=(e)=>renderAt(+e.target.value);
 document.getElementById('shapeonly').onchange=()=>renderAt(+document.getElementById('step').value);
 document.getElementById('prev').onclick=()=>{const s=document.getElementById('step');s.value=Math.max(0,+s.value-1);renderAt(+s.value);};
-document.getElementById('next').onclick=()=>{const s=document.getElementById('step');s.value=Math.min(moves.length,+s.value+1);renderAt(+s.value);};
+document.getElementById('next').onclick=()=>{const s=document.getElementById('step');s.value=Math.min(flat.length,+s.value+1);renderAt(+s.value);};
 apply();
 </script>
 </body>

@@ -38,8 +38,21 @@ def build_solved(w, h, d):
                 if y == ymin: st['-y'] = COLORS['-y']
                 if z == zmax: st['+z'] = COLORS['+z']
                 if z == zmin: st['-z'] = COLORS['-z']
-                cubies.append({'home': (x, y, z), 'pos': (x, y, z), 'ori': I3, 'stickers': st})
+                # fc = functional coordinate (effective-space position). Seeded to
+                # the physical position (effective == physical while solved); it
+                # rotates with the piece and is coarsened at each phase boundary.
+                cubies.append({'home': (x, y, z), 'pos': (x, y, z), 'ori': I3,
+                               'fc': (x, y, z), 'stickers': st})
     return cubies
+
+def coarsen(cubies, eff):
+    # Reduce each cubie's functional coord to the phase's effective dims by
+    # centre-aligned clamping: physical layers outside the effective range fold
+    # onto the outermost retained functional layer (outer-fat bandaging).
+    lim = [e - 1 for e in eff]
+    for c in cubies:
+        f = c['fc']
+        c['fc'] = tuple(max(-lim[k], min(lim[k], f[k])) for k in range(3))
 
 def parse_move(m):
     x = re.match(r'^(\d+)?([RLUDFB])(w?)(2|\')?$', m)
@@ -48,41 +61,28 @@ def parse_move(m):
             'wide': x.group(3) == 'w', 'mod': x.group(4) or ''}
 
 def select_coords(cubies, mv):
-    # Functional-layer selection with centre alignment:
-    #   * layers are counted by FULL cross-section planes from the named face;
-    #   * outer layers whose cross-section is a proper subset of the next inner
-    #     layer are "protrusions" (bandaged), and ride along with functional
-    #     layer 1 rather than being cuttable on their own.
+    # Functional-layer selection: a move on functional layer k from the named
+    # face grabs every cubie whose FUNCTIONAL coord on that axis matches. Bandaged
+    # physical layers share an fc value (from coarsening), so they come together
+    # automatically -- no geometry inference.
     face, layer, wide = mv['face'], mv['layer'], mv['wide']
     k, pos = IDX[AXIS[face]], face in POSITIVE
-    o1, o2 = [i for i in range(3) if i != k]
-    coords = sorted({c['pos'][k] for c in cubies}, reverse=pos)  # from face inward
-    cross = {}
-    for c in cubies:
-        cross.setdefault(c['pos'][k], set()).add((c['pos'][o1], c['pos'][o2]))
-    pref = 0  # length of the outboard protrusion prefix
-    while pref < len(coords) - 1 and cross[coords[pref]] < cross[coords[pref + 1]]:
-        pref += 1
-    if wide:
-        return set(coords[:pref + layer])                 # protrusions + functional 1..layer
-    idx = min(pref + layer - 1, len(coords) - 1)
-    chosen = {coords[idx]}
-    if layer == 1:
-        chosen |= set(coords[:pref])                      # attach outboard protrusions to layer 1
-    return chosen
+    coords = sorted({c['fc'][k] for c in cubies}, reverse=pos)  # from face inward
+    return set(coords[:layer]) if wide else {coords[layer - 1]}
 
 def apply_move(cubies, move):
     mv = parse_move(move) if isinstance(move, str) else move
-    face, layer, mod, wide = mv['face'], mv['layer'], mv['mod'], mv['wide']
-    ax, k, pos = AXIS[face], IDX[AXIS[face]], face in POSITIVE
+    face, mod = mv['face'], mv['mod']
+    ax, k = AXIS[face], IDX[AXIS[face]]
     sel = select_coords(cubies, mv)
     sign = base_sign(face)
     exp = 2 if mod == '2' else (-sign if mod == "'" else sign)
     R = matpow(P[ax], exp)
     for c in cubies:
-        if c['pos'][k] in sel:
+        if c['fc'][k] in sel:
             c['pos'] = matvec(R, c['pos'])
             c['ori'] = matmul(R, c['ori'])
+            c['fc'] = matvec(R, c['fc'])
 
 def apply_scramble(cubies, seq):
     for tok in seq.split():
@@ -130,29 +130,30 @@ c = build_solved(3, 3, 3)
 apply_move(c, 'R')
 check(bounding_cells(c) == [3, 3, 3], 'bounding box after R = 3x3x3 (got %s)' % bounding_cells(c))
 
-print('\n=== shapeshift demo (3x5x7, R quarter turn) ===')
+print('\n=== bandaged selection via fc: U after R on 3x5x7 (phase 2 eff 3x5x5) ===')
 c = build_solved(3, 5, 7)
-print('  solved bounding cells:', bounding_cells(c))
-apply_move(c, 'R')
+coarsen(c, (3, 5, 5))                     # enter phase 2: depth 7 -> functional 5
+apply_move(c, 'R')                        # R/L now effectively square -> quarter turn shapeshifts
 print('  after R  bounding cells:', bounding_cells(c))
-protruding = [x for x in c if abs(x['pos'][1]) > 4]
-check(len(protruding) > 0, 'R shapeshifts: %d cubies protrude past the 5-tall body' % len(protruding))
-print('  sample protruding cubie:', {'home': protruding[0]['home'], 'pos': protruding[0]['pos'],
-                                      'stickers': world_stickers(protruding[0])})
-apply_move(c, "R'")
-check(is_solved(c), 'R then R\' returns to solved box')
-
-print('\n=== bandaged selection: U after R on 3x5x7 ===')
-c = build_solved(3, 5, 7)
-apply_move(c, 'R')                       # right slice now 7 tall (y = -6..6), body 5 tall
-sel = select_coords(c, parse_move('U'))  # top functional layer
-print('  U selects y-coords:', sorted(sel, reverse=True))
-check(sel == {4, 6}, 'U grabs body top (y=4) + bandaged protrusion (y=6), NOT y=6 alone')
-moved = [x for x in c if x['pos'][1] in sel]
-check(len(moved) == 24, 'U after R moves 24 cubies (19 at y=4 + 5 at y=6), got %d' % len(moved))
-# the protrusion rides along rigidly, then everything unwinds
+sel = select_coords(c, parse_move('U'))   # top functional layer, selected by fc
+moved_y = sorted({x['pos'][1] for x in c if x['fc'][1] in sel}, reverse=True)
+print('  U moves physical y-coords:', moved_y)
+check(moved_y == [6, 4], 'U grabs body top (y=4) + bandaged protrusion (y=6), NOT y=6 alone')
+moved = [x for x in c if x['fc'][1] in sel]
+check(len(moved) == 24, 'U after R moves 24 cubies, got %d' % len(moved))
 apply_move(c, 'U'); apply_move(c, "U'"); apply_move(c, "R'")
 check(is_solved(c), "R U U' R' returns to solved box")
+
+print('\n=== fc handles the 7x3x5 F\' case cleanly (no subset test) ===')
+c = build_solved(7, 3, 5)
+coarsen(c, (5, 3, 5))                      # a phase where U/D is square
+apply_move(c, 'U')                         # quarter turn, shapeshifts
+sel = select_coords(c, parse_move("F'"))
+moved_z = sorted({x['pos'][2] for x in c if x['fc'][2] in sel}, reverse=True)
+print('  F\' moves physical z-coords:', moved_z)
+check(len(sel) == 1, "F' selects exactly one functional depth layer (got %d)" % len(sel))
+apply_move(c, "F'"); apply_move(c, 'F'); apply_move(c, "U'")
+check(is_solved(c), "U F' F U' returns to solved box")
 
 print('\n=== sample state dump (2x2x3 after F) ===')
 c = build_solved(2, 2, 3)
