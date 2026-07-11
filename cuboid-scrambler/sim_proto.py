@@ -47,12 +47,35 @@ def parse_move(m):
     return {'layer': int(x.group(1)) if x.group(1) else 1, 'face': x.group(2),
             'wide': x.group(3) == 'w', 'mod': x.group(4) or ''}
 
+def select_coords(cubies, mv):
+    # Functional-layer selection with centre alignment:
+    #   * layers are counted by FULL cross-section planes from the named face;
+    #   * outer layers whose cross-section is a proper subset of the next inner
+    #     layer are "protrusions" (bandaged), and ride along with functional
+    #     layer 1 rather than being cuttable on their own.
+    face, layer, wide = mv['face'], mv['layer'], mv['wide']
+    k, pos = IDX[AXIS[face]], face in POSITIVE
+    o1, o2 = [i for i in range(3) if i != k]
+    coords = sorted({c['pos'][k] for c in cubies}, reverse=pos)  # from face inward
+    cross = {}
+    for c in cubies:
+        cross.setdefault(c['pos'][k], set()).add((c['pos'][o1], c['pos'][o2]))
+    pref = 0  # length of the outboard protrusion prefix
+    while pref < len(coords) - 1 and cross[coords[pref]] < cross[coords[pref + 1]]:
+        pref += 1
+    if wide:
+        return set(coords[:pref + layer])                 # protrusions + functional 1..layer
+    idx = min(pref + layer - 1, len(coords) - 1)
+    chosen = {coords[idx]}
+    if layer == 1:
+        chosen |= set(coords[:pref])                      # attach outboard protrusions to layer 1
+    return chosen
+
 def apply_move(cubies, move):
     mv = parse_move(move) if isinstance(move, str) else move
     face, layer, mod, wide = mv['face'], mv['layer'], mv['mod'], mv['wide']
     ax, k, pos = AXIS[face], IDX[AXIS[face]], face in POSITIVE
-    coords = sorted({c['pos'][k] for c in cubies}, reverse=pos)
-    sel = set(coords[:layer] if wide else [coords[layer - 1]])
+    sel = select_coords(cubies, mv)
     sign = base_sign(face)
     exp = 2 if mod == '2' else (-sign if mod == "'" else sign)
     R = matpow(P[ax], exp)
@@ -118,6 +141,18 @@ print('  sample protruding cubie:', {'home': protruding[0]['home'], 'pos': protr
                                       'stickers': world_stickers(protruding[0])})
 apply_move(c, "R'")
 check(is_solved(c), 'R then R\' returns to solved box')
+
+print('\n=== bandaged selection: U after R on 3x5x7 ===')
+c = build_solved(3, 5, 7)
+apply_move(c, 'R')                       # right slice now 7 tall (y = -6..6), body 5 tall
+sel = select_coords(c, parse_move('U'))  # top functional layer
+print('  U selects y-coords:', sorted(sel, reverse=True))
+check(sel == {4, 6}, 'U grabs body top (y=4) + bandaged protrusion (y=6), NOT y=6 alone')
+moved = [x for x in c if x['pos'][1] in sel]
+check(len(moved) == 24, 'U after R moves 24 cubies (19 at y=4 + 5 at y=6), got %d' % len(moved))
+# the protrusion rides along rigidly, then everything unwinds
+apply_move(c, 'U'); apply_move(c, "U'"); apply_move(c, "R'")
+check(is_solved(c), "R U U' R' returns to solved box")
 
 print('\n=== sample state dump (2x2x3 after F) ===')
 c = build_solved(2, 2, 3)

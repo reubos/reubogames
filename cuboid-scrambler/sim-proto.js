@@ -77,14 +77,33 @@ function parseMove(m) {
   return { layer: x[1] ? +x[1] : 1, face: x[2], wide: x[3] === 'w', mod: x[4] || '' };
 }
 
-function applyMove(cubies, move) {
-  const { face, layer, mod, wide } = typeof move === 'string' ? parseMove(move) : move;
-  const ax = AXIS[face], k = IDX[ax], pos = POSITIVE.has(face);
-  // distinct current coordinates ordered from the named face inward
+// Functional-layer selection with centre alignment:
+//   * layers are counted by FULL cross-section planes from the named face;
+//   * outer layers whose cross-section is a proper subset of the next inner
+//     layer are "protrusions" (bandaged): they cannot be cut on their own and
+//     instead ride along with functional layer 1.
+function selectCoords(cubies, mv) {
+  const { face, layer, wide } = mv;
+  const k = IDX[AXIS[face]], pos = POSITIVE.has(face);
+  const [o1, o2] = [0, 1, 2].filter(i => i !== k);
   const coords = [...new Set(cubies.map(c => c.pos[k]))].sort((a, b) => pos ? b - a : a - b);
-  const sel = new Set(wide ? coords.slice(0, layer) : [coords[layer - 1]]);
-  const sign = BASE_SIGN(face);
-  const exp = mod === '2' ? 2 : mod === "'" ? -sign : sign;
+  const cross = {};
+  for (const c of cubies) { (cross[c.pos[k]] || (cross[c.pos[k]] = new Set())).add(c.pos[o1] + ',' + c.pos[o2]); }
+  const properSubset = (a, b) => a.size < b.size && [...a].every(e => b.has(e));
+  let pref = 0; // outboard protrusion prefix
+  while (pref < coords.length - 1 && properSubset(cross[coords[pref]], cross[coords[pref + 1]])) pref++;
+  if (wide) return new Set(coords.slice(0, pref + layer));
+  const idx = Math.min(pref + layer - 1, coords.length - 1);
+  const chosen = new Set([coords[idx]]);
+  if (layer === 1) coords.slice(0, pref).forEach(x => chosen.add(x));
+  return chosen;
+}
+function applyMove(cubies, move) {
+  const mv = typeof move === 'string' ? parseMove(move) : move;
+  const ax = AXIS[mv.face], k = IDX[ax];
+  const sel = selectCoords(cubies, mv);
+  const sign = BASE_SIGN(mv.face);
+  const exp = mv.mod === '2' ? 2 : mv.mod === "'" ? -sign : sign;
   const R = matPow(P[ax], exp);
   for (const c of cubies) {
     if (!sel.has(c.pos[k])) continue;
