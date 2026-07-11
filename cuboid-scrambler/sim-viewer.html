@@ -478,23 +478,36 @@ function phaseEffAt(k){
   return phases.length ? phases[phases.length-1].eff : [W,H,D];
 }
 // Outside-numbered, standalone (non-constant-cube-view) display label. The
-// generated layer number reflects a static per-axis formula, but a group's
-// TRUE physical width can be inflated at runtime: fc merges on one axis
-// during its own reduction, then a later rotation on a DIFFERENT axis can
-// import that already-merged identity via a 90-degree swap, even though the
-// receiving axis never reduced on its own. Selection is already correct
-// (fc-based, grabs the right group regardless of label) -- this only fixes
-// the DISPLAYED label by counting how many distinct raw physical layers are
-// currently bandaged into the move's target fc, right before it's applied.
+// generated layer number/width reflect a static per-axis formula, but the
+// TRUE physical picture can differ at runtime: fc merges on one axis during
+// its own reduction, then a later rotation on a DIFFERENT axis can import
+// that already-merged identity via a 90-degree swap, even onto an axis that
+// never reduced on its own. Selection is already correct (fc-based, grabs
+// the right group regardless of label) -- this only fixes the DISPLAYED
+// label, and needs TWO separate counts, not one:
+//   - cumulative depth (the NUMBER): every distinct raw physical layer from
+//     the face through and including this move's own target, inclusive --
+//     an OUTER group can have widened even when this move's own group
+//     hasn't, which still pushes this move's true depth deeper.
+//   - own-group width (the "w" FLAG): only cubies exactly at this move's own
+//     target -- whether ITS group specifically can't be turned alone.
+// A move can have a corrected number with no "w" (reaches deeper because an
+// outer layer widened, but its own group is still cleanly separable), or a
+// "w" with an unchanged number (its own group is the outermost and widened).
 function outsideNumberedLabel(state, moveStr, eff, Nper){
   const mv=parseMove(moveStr);
   const k=IDX[AXIS[mv.face]], positive=POSITIVE.has(mv.face);
   const target=virtualLayerFc(mv.layer,Nper[k],eff[k],positive);
-  const rawPositions=new Set();
-  for(const c of state) if(c.fc[k]===target) rawPositions.add(c.pos[k]);
-  const width=rawPositions.size;
-  if(width<=1) return moveStr;
-  return `${width}${mv.face}w${mv.mod}`;
+  const ownRaw=new Set(), cumRaw=new Set();
+  for(const c of state){
+    const fc=c.fc[k];
+    if(fc===target) ownRaw.add(c.pos[k]);
+    if(positive ? fc>=target : fc<=target) cumRaw.add(c.pos[k]);
+  }
+  const ownWidth=ownRaw.size, depth=cumRaw.size;
+  if(depth<=1 && ownWidth<=1) return moveStr;
+  const num = depth>1 ? depth : (mv.layer>1?String(mv.layer):'');
+  return `${num}${mv.face}${ownWidth>1?'w':''}${mv.mod}`;
 }
 function renderAt(k){
   const state=stateAt(k);
