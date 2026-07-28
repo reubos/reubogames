@@ -1,0 +1,1001 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lights Out — Tilings</title>
+<style>
+  :root {
+    --bg: #1a3a1a;
+    --panel: #204324;
+    --panel-2: #1c3a20;
+    --line: #2f5c38;
+    --text: #d4e8d4;
+    --muted: #86a886;
+    --accent: #4ade80;
+    --accent-soft: #86efac;
+    --gold: #facc15;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    background-color: var(--bg);
+    color: var(--text);
+    font-family: 'Segoe UI', sans-serif;
+    margin: 0;
+    padding: 24px 20px 60px;
+    min-height: 100vh;
+  }
+
+  .wrap { max-width: 980px; margin: 0 auto; }
+
+  h1 { font-size: 2rem; color: #fff; margin: 0 0 6px; }
+  .sub { color: var(--muted); font-size: 0.95rem; margin: 0 0 24px; }
+
+  .layout { display: grid; grid-template-columns: 1fr 260px; gap: 24px; align-items: start; }
+  @media (max-width: 780px) { .layout { grid-template-columns: 1fr; } }
+
+  .panel {
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 16px;
+  }
+
+  /* ---------- board ---------- */
+  .board-panel { position: relative; padding: 10px; }
+  #board { width: 100%; height: auto; display: block; touch-action: manipulation; }
+
+  /* stroke-width is set on the <g> in render(): all tilings use edge length 1,
+     so it is a constant in user units and must not be overridden here. */
+  .cell {
+    fill: #24422a;
+    stroke: #17301b;
+    stroke-linejoin: round;
+    cursor: pointer;
+    transition: fill 110ms ease;
+  }
+  .cell.lit { fill: var(--accent); }
+  .glow { filter: url(#glow); }
+
+  .marker { fill: var(--gold); pointer-events: none; opacity: 0.9; }
+  .marker.hint { animation: pulse 900ms ease-in-out infinite; }
+  @keyframes pulse { 0%,100% { opacity: 0.25; } 50% { opacity: 1; } }
+
+  #win {
+    position: absolute; inset: 10px;
+    display: none;
+    align-items: center; justify-content: center;
+    flex-direction: column; gap: 10px;
+    background: rgba(20, 45, 24, 0.86);
+    border-radius: 8px;
+    text-align: center;
+  }
+  #win.show { display: flex; }
+  #win .big { font-size: 1.8rem; color: var(--accent); font-weight: bold; }
+  #win .small { color: var(--muted); font-size: 0.9rem; }
+
+  /* ---------- controls ---------- */
+  .side { display: flex; flex-direction: column; gap: 16px; }
+
+  .label {
+    font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.09em;
+    color: var(--muted); margin: 0 0 8px;
+  }
+
+  button {
+    font-family: inherit; font-size: 0.9rem;
+    background: var(--panel); color: var(--text);
+    border: 1px solid var(--line); border-radius: 7px;
+    padding: 9px 12px; cursor: pointer;
+    transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+  }
+  button:hover:not(:disabled) { background: #2a5530; border-color: var(--accent); color: #fff; }
+  button:disabled { opacity: 0.45; cursor: not-allowed; }
+  button.primary { background: #2c6b3c; border-color: #3d8a51; color: #fff; font-weight: 600; }
+  button.primary:hover { background: #35804a; }
+  button.on { border-color: var(--gold); color: var(--gold); }
+
+  .btn-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .btn-row .full { grid-column: 1 / -1; }
+
+  .tiling-btn {
+    width: 100%; display: flex; align-items: center; gap: 10px;
+    text-align: left; padding: 10px;
+  }
+  .tiling-btn svg { flex: 0 0 auto; width: 40px; height: 40px; border-radius: 5px; background: #17301b; }
+  .tiling-btn .tname { font-weight: 600; color: #fff; }
+  .tiling-btn .tcfg { font-size: 0.75rem; color: var(--muted); font-family: ui-monospace, monospace; }
+
+  .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .stat { background: var(--panel); border: 1px solid var(--line); border-radius: 7px; padding: 8px 10px; }
+  .stat .v { font-size: 1.25rem; color: #fff; font-weight: 600; line-height: 1.2; }
+  .stat .k { font-size: 0.7rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+
+  input[type=range] { width: 100%; accent-color: var(--accent); }
+
+  .seg { display: flex; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; }
+  .seg button { border: 0; border-radius: 0; flex: 1; font-size: 0.8rem; padding: 8px 4px; }
+  .seg button.sel { background: #2c6b3c; color: #fff; }
+
+  .note { font-size: 0.78rem; color: var(--muted); line-height: 1.5; margin: 10px 0 0; }
+
+  /* ---------- picker modal ---------- */
+  .modal {
+    position: fixed; inset: 0; z-index: 20;
+    background: rgba(10, 24, 12, 0.85);
+    display: none; align-items: flex-start; justify-content: center;
+    padding: 40px 20px; overflow-y: auto;
+  }
+  .modal.show { display: flex; }
+  .modal-box {
+    background: var(--panel-2); border: 1px solid var(--line);
+    border-radius: 12px; padding: 24px; max-width: 900px; width: 100%;
+  }
+  .modal-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
+  .modal-head h2 { margin: 0; font-size: 1.3rem; color: #fff; }
+
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(158px, 1fr)); gap: 12px; margin-top: 14px; }
+  .card {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; padding: 10px; cursor: pointer; position: relative;
+    transition: border-color 120ms ease, transform 120ms ease;
+  }
+  .card:hover { border-color: var(--accent); transform: translateY(-2px); }
+  .card.sel { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+  .card svg { width: 100%; height: 96px; display: block; background: #17301b; border-radius: 6px; }
+  .card .cname { font-weight: 600; color: #fff; margin-top: 9px; font-size: 0.88rem; line-height: 1.25; }
+  .card .cmeta { font-size: 0.73rem; color: var(--muted); font-family: ui-monospace, monospace; margin-top: 2px; }
+
+  .section-title {
+    font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.09em;
+    color: var(--muted); margin: 26px 0 0; padding-top: 18px; border-top: 1px solid var(--line);
+  }
+  .section-title:first-of-type { border-top: 0; padding-top: 0; margin-top: 20px; }
+
+  .chips { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 12px; }
+  .chip {
+    font-family: ui-monospace, monospace; font-size: 0.74rem;
+    background: var(--panel); border: 1px dashed var(--line); color: var(--muted);
+    border-radius: 20px; padding: 4px 11px;
+  }
+
+  .backlink { display: inline-block; margin-top: 30px; color: var(--muted); font-size: 0.85rem; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>Lights Out</h1>
+  <p class="sub">Switch off every light. Clicking a tile toggles it and every tile it touches &mdash; on any tiling you like.</p>
+
+  <div class="layout">
+
+    <!-- ================= BOARD ================= -->
+    <div class="panel board-panel">
+      <svg id="board" viewBox="0 0 100 100" aria-label="Lights Out board"></svg>
+      <div id="win">
+        <div class="big">Lights out!</div>
+        <div class="small" id="winSub"></div>
+        <button class="primary" onclick="newGame()">New puzzle</button>
+      </div>
+    </div>
+
+    <!-- ================= SIDEBAR ================= -->
+    <div class="side">
+
+      <div class="panel">
+        <p class="label">Tiling</p>
+        <button class="tiling-btn" id="tilingBtn" onclick="openPicker()">
+          <svg id="tilingThumb" viewBox="0 0 100 100"></svg>
+          <span>
+            <span class="tname" id="tilingName">Square</span><br>
+            <span class="tcfg" id="tilingCfg">4.4.4.4</span>
+          </span>
+        </button>
+        <p class="note" id="tileCount"></p>
+      </div>
+
+      <div class="panel">
+        <p class="label">Board size <span id="sizeVal" style="color:var(--text)"></span></p>
+        <input type="range" id="sizeSlider" min="3" max="8" value="5" oninput="onSize(this.value)">
+
+        <p class="label" style="margin-top:16px">Neighbours</p>
+        <div class="seg">
+          <button id="modeEdge" class="sel" onclick="setMode('edge')">Shared edge</button>
+          <button id="modeCorner" onclick="setMode('corner')">+ Corners</button>
+        </div>
+        <p class="note" id="modeNote"></p>
+      </div>
+
+      <div class="panel">
+        <p class="label">Game</p>
+        <div class="btn-row">
+          <button class="primary full" onclick="newGame()">New puzzle</button>
+          <button onclick="restart()">Restart</button>
+          <button onclick="undo()" id="undoBtn">Undo</button>
+          <button onclick="hint()">Hint</button>
+          <button id="solveBtn" onclick="toggleSolution()">Solution</button>
+        </div>
+        <div class="stat-grid" style="margin-top:14px">
+          <div class="stat"><div class="v" id="statMoves">0</div><div class="k">Moves</div></div>
+          <div class="stat"><div class="v" id="statLit">0</div><div class="k">Lit</div></div>
+        </div>
+        <p class="note" id="optNote"></p>
+      </div>
+
+    </div>
+  </div>
+
+  <a class="backlink" href="../">&larr; back to reubo's website</a>
+</div>
+
+<!-- ================= TILING PICKER ================= -->
+<div class="modal" id="picker" onclick="if(event.target===this) closePicker()">
+  <div class="modal-box">
+    <div class="modal-head">
+      <div>
+        <h2>Choose a tiling</h2>
+        <p class="note" style="margin-top:6px">
+          The rules never change &mdash; only the shape of the neighbourhood. Adjacency is derived
+          from which tiles share an edge, so every tiling below runs on the same engine and the
+          same solver.
+        </p>
+      </div>
+      <button onclick="closePicker()">Close</button>
+    </div>
+
+    <p class="section-title">Regular</p>
+    <div class="cards" id="grp-regular"></div>
+
+    <p class="section-title">Semiregular &mdash; Archimedean</p>
+    <div class="cards" id="grp-semi"></div>
+
+    <p class="section-title">Laves duals</p>
+    <div class="cards" id="grp-dual"></div>
+
+    <p class="section-title">2-uniform &mdash; coming next</p>
+    <div class="chips" id="grp-planned"></div>
+  </div>
+</div>
+
+<script>
+"use strict";
+
+/* =====================================================================
+   1. GEOMETRY PRIMITIVES
+
+   Every tiling is described as a fundamental unit cell (a handful of
+   polygons) plus two lattice vectors. Polygons are built with reg() and
+   attach() rather than typed-in coordinates, which keeps them exact.
+   All polygons have edge length 1 and are wound counter-clockwise.
+   ===================================================================== */
+
+const TAU = Math.PI * 2;
+
+// Regular n-gon, edge length 1, centred at (cx,cy), first vertex at `start`.
+function reg(n, cx, cy, start) {
+  const R = 1 / (2 * Math.sin(Math.PI / n));
+  const out = [];
+  for (let k = 0; k < n; k++) {
+    const a = start + TAU * k / n;
+    out.push([cx + R * Math.cos(a), cy + R * Math.sin(a)]);
+  }
+  return out;
+}
+
+// Regular n-gon glued to the outside of edge k of a CCW polygon.
+function attach(poly, k, n) {
+  const a = poly[k], b = poly[(k + 1) % poly.length];
+  const dx = b[0] - a[0], dy = b[1] - a[1], L = Math.hypot(dx, dy);
+  const nx = dy / L, ny = -dx / L;                 // outward normal for CCW winding
+  const ap = 1 / (2 * Math.tan(Math.PI / n));      // apothem for edge length 1
+  const cx = (a[0] + b[0]) / 2 + nx * ap;
+  const cy = (a[1] + b[1]) / 2 + ny * ap;
+  return reg(n, cx, cy, Math.atan2(b[1] - cy, b[0] - cx));
+}
+
+const translate = (poly, ox, oy) => poly.map(p => [p[0] + ox, p[1] + oy]);
+const rot = (v, ang) => [v[0] * Math.cos(ang) - v[1] * Math.sin(ang),
+                         v[0] * Math.sin(ang) + v[1] * Math.cos(ang)];
+
+const S3 = Math.sqrt(3);
+
+/* =====================================================================
+   2. LATTICE REPLICATION + CLIPPING
+   ===================================================================== */
+
+function clipRect(polys, h) {
+  const e = 1e-6;
+  return polys.filter(p => p.every(q =>
+    q[0] >= -h - e && q[0] <= h + e && q[1] >= -h - e && q[1] <= h + e));
+}
+
+// Build a tiling source from a unit cell and two lattice vectors.
+function lattice(cellFn, v1, v2) {
+  const A = Math.abs(v1[0] * v2[1] - v1[1] * v2[0]);
+  const pitch = Math.sqrt(A);                       // normalises "size" across tilings
+
+  function raw(h) {
+    const cell = cellFn();
+    let rad = 0;
+    for (const p of cell) for (const q of p) rad = Math.max(rad, Math.hypot(q[0], q[1]));
+    const reach = h * Math.SQRT2 + rad + 1;
+    const n1 = Math.ceil(reach * Math.hypot(v2[0], v2[1]) / A) + 1;
+    const n2 = Math.ceil(reach * Math.hypot(v1[0], v1[1]) / A) + 1;
+    const out = [];
+    for (let i = -n1; i <= n1; i++) for (let j = -n2; j <= n2; j++) {
+      const ox = i * v1[0] + j * v2[0], oy = i * v1[1] + j * v2[1];
+      if (Math.hypot(ox, oy) > reach) continue;
+      for (const p of cell) out.push(translate(p, ox, oy));
+    }
+    return out;
+  }
+
+  return { pitch, raw, gen: n => clipRect(raw(n * pitch / 2), n * pitch / 2) };
+}
+
+/* =====================================================================
+   3. VERTEX TOPOLOGY  (shared by adjacency, the dual operator and the
+   self-check). Snapping merges vertices that coincide to within a
+   fraction of an edge length.
+   ===================================================================== */
+
+function topology(polys) {
+  const pts = [], buckets = new Map(), EPS = 0.02;
+  function snap(x, y) {
+    const ix = Math.round(x / 0.25), iy = Math.round(y / 0.25);
+    for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) {
+      const b = buckets.get((ix + dx) + ',' + (iy + dy));
+      if (b) for (const p of b) if (Math.abs(p.x - x) < EPS && Math.abs(p.y - y) < EPS) return p.id;
+    }
+    const p = { x, y, id: pts.length };
+    pts.push(p);
+    const k = ix + ',' + iy;
+    let b = buckets.get(k); if (!b) buckets.set(k, b = []);
+    b.push(p);
+    return p.id;
+  }
+
+  const faces = polys.map(poly => {
+    let sx = 0, sy = 0;
+    for (const p of poly) { sx += p[0]; sy += p[1]; }
+    return { poly, v: poly.map(p => snap(p[0], p[1])),
+             cx: sx / poly.length, cy: sy / poly.length };
+  });
+
+  const edgeMap = new Map(), vertFaces = new Map();
+  faces.forEach((f, fi) => {
+    for (let i = 0; i < f.v.length; i++) {
+      const a = f.v[i], b = f.v[(i + 1) % f.v.length];
+      const k = a < b ? a + ':' + b : b + ':' + a;
+      let e = edgeMap.get(k); if (!e) edgeMap.set(k, e = []); e.push(fi);
+      let w = vertFaces.get(a); if (!w) vertFaces.set(a, w = []); w.push(fi);
+    }
+  });
+
+  return { pts, faces, edgeMap, vertFaces };
+}
+
+// Interior angle that face `f` occupies at vertex id `vid`.
+function angleAt(f, vid) {
+  const i = f.v.indexOf(vid);
+  const n = f.poly.length;
+  const c = f.poly[i], p = f.poly[(i - 1 + n) % n], q = f.poly[(i + 1) % n];
+  const a1 = Math.atan2(p[1] - c[1], p[0] - c[0]);
+  const a2 = Math.atan2(q[1] - c[1], q[0] - c[0]);
+  let d = a1 - a2;
+  while (d < 0) d += TAU;
+  while (d > TAU) d -= TAU;
+  return d;
+}
+
+/* =====================================================================
+   4. DUAL OPERATOR  →  the Laves tilings, for free.
+   Each complete (fully surrounded) vertex of the parent becomes one face
+   of the dual, its corners being the centres of the faces around it.
+   ===================================================================== */
+
+function dualPolys(polys) {
+  const { pts, faces, vertFaces } = topology(polys);
+  const out = [];
+  for (const [vid, fl] of vertFaces) {
+    const around = [...new Set(fl)];
+    let sum = 0;
+    for (const fi of around) sum += angleAt(faces[fi], vid);
+    if (Math.abs(sum - TAU) > 1e-6) continue;                    // boundary vertex
+    const v = pts[vid];
+    const ring = around.map(fi => faces[fi])
+      .map(f => ({ p: [f.cx, f.cy], a: Math.atan2(f.cy - v.y, f.cx - v.x) }))
+      .sort((m, n) => m.a - n.a)
+      .map(m => m.p);
+    if (ring.length >= 3) out.push(ring);
+  }
+  return out;
+}
+
+function dualOf(base) {
+  return {
+    pitch: base.pitch,
+    raw: h => dualPolys(base.raw(h + 2.5 * base.pitch)),
+    gen(n) {
+      const h = n * base.pitch / 2;
+      return clipRect(dualPolys(base.raw(h + 2.5 * base.pitch)), h);
+    }
+  };
+}
+
+/* =====================================================================
+   5. THE TILINGS
+   ===================================================================== */
+
+// --- Regular ---------------------------------------------------------
+const T_triangle = lattice(() => {
+  const t = [[0, 0], [1, 0], [0.5, S3 / 2]];
+  return [t, attach(t, 1, 3)];
+}, [1, 0], [0.5, S3 / 2]);
+
+const T_square = lattice(() => [[[0, 0], [1, 0], [1, 1], [0, 1]]], [1, 0], [0, 1]);
+
+const T_hexagon = lattice(() => [reg(6, 0, 0, 0)], [1.5, S3 / 2], [0, S3]);
+
+// --- Semiregular -----------------------------------------------------
+// Trihexagonal (3.6)² : hexagon + the two triangles on adjacent edges.
+const T_trihex = lattice(() => {
+  const h = reg(6, 0, 0, 0);
+  return [h, attach(h, 0, 3), attach(h, 1, 3)];
+}, [2, 0], [1, S3]);
+
+// Truncated square 4.8² : octagon + one square in the diagonal gap.
+const T_truncSquare = lattice(() => {
+  const o = reg(8, 0, 0, -Math.PI / 8);
+  return [o, attach(o, 1, 4)];
+}, [1 + Math.SQRT2, 0], [0, 1 + Math.SQRT2]);
+
+// Truncated hexagonal 3.12² : dodecagon + two triangles on odd edges.
+const T_truncHex = lattice(() => {
+  const d = reg(12, 0, 0, -Math.PI / 12);
+  return [d, attach(d, 1, 3), attach(d, 3, 3)];
+}, [2 + S3, 0], rot([2 + S3, 0], Math.PI / 3));
+
+// Rhombitrihexagonal 3.4.6.4 : hexagon + 3 squares + 2 triangles.
+const T_rhombitrihex = lattice(() => {
+  const h = reg(6, 0, 0, 0);
+  const s0 = attach(h, 0, 4), s1 = attach(h, 1, 4), s2 = attach(h, 2, 4);
+  return [h, s0, s1, s2, attach(s0, 1, 3), attach(s0, 3, 3)];
+}, rot([S3 + 1, 0], Math.PI / 6), [0, S3 + 1]);
+
+// Truncated trihexagonal 4.6.12 : dodecagon + 3 squares + 2 hexagons.
+const T_truncTrihex = lattice(() => {
+  const d = reg(12, 0, 0, -Math.PI / 12);
+  return [d, attach(d, 0, 4), attach(d, 2, 4), attach(d, 4, 4),
+             attach(d, 1, 6), attach(d, 3, 6)];
+}, [3 + S3, 0], rot([3 + S3, 0], Math.PI / 3));
+
+// Snub square 3².4.3.4 : square, its four triangles, and one rotated square.
+const T_snubSquare = lattice(() => {
+  const q = [[0, 0], [1, 0], [1, 1], [0, 1]];
+  const t = [0, 1, 2, 3].map(k => attach(q, k, 3));
+  return [q, ...t, attach(t[2], 1, 4)];
+}, [1 + S3 / 2, 0.5], [-0.5, 1 + S3 / 2]);
+
+// Elongated triangular 3³.4² : a square row and a triangle row.
+const T_elongTri = lattice(() => {
+  const q = [[0, 0], [1, 0], [1, 1], [0, 1]];
+  const t = attach(q, 2, 3);
+  return [q, t, attach(t, 1, 3)];
+}, [1, 0], [0.5, 1 + S3 / 2]);
+
+// Snub trihexagonal 3⁴.6 : hexagon, its six triangles, plus two in the gaps.
+const T_snubTrihex = lattice(() => {
+  const h = reg(6, 0, 0, 0);
+  const t = [0, 1, 2, 3, 4, 5].map(k => attach(h, k, 3));
+  return [h, ...t, attach(t[0], 2, 3), attach(t[1], 2, 3)];
+}, [2.5, S3 / 2], rot([2.5, S3 / 2], Math.PI / 3));
+
+/* --- registry --------------------------------------------------------
+   `cfg` is the vertex configuration used both for display and for the
+   self-check in verify(). Duals are face-uniform rather than vertex-
+   uniform, so they are checked by face congruence instead.            */
+
+const TILINGS = [
+  { id: 'triangle', group: 'regular', name: 'Triangular', cfg: '3.3.3.3.3.3',
+    src: T_triangle, min: 3, max: 9, def: 5, preview: 3 },
+  { id: 'square', group: 'regular', name: 'Square', cfg: '4.4.4.4',
+    src: T_square, min: 3, max: 10, def: 5, preview: 4 },
+  { id: 'hexagon', group: 'regular', name: 'Hexagonal', cfg: '6.6.6',
+    src: T_hexagon, min: 3, max: 9, def: 5, preview: 3 },
+
+  { id: 'trihex', group: 'semi', name: 'Trihexagonal', cfg: '3.6.3.6',
+    src: T_trihex, min: 3, max: 7, def: 4, preview: 3 },
+  { id: 'truncSquare', group: 'semi', name: 'Truncated square', cfg: '4.8.8',
+    src: T_truncSquare, min: 3, max: 8, def: 5, preview: 3 },
+  { id: 'truncHex', group: 'semi', name: 'Truncated hexagonal', cfg: '3.12.12',
+    src: T_truncHex, min: 3, max: 7, def: 4, preview: 3 },
+  { id: 'rhombitrihex', group: 'semi', name: 'Rhombitrihexagonal', cfg: '3.4.6.4',
+    src: T_rhombitrihex, min: 2, max: 6, def: 4, preview: 3 },
+  { id: 'truncTrihex', group: 'semi', name: 'Truncated trihexagonal', cfg: '4.6.12',
+    src: T_truncTrihex, min: 2, max: 6, def: 3, preview: 2 },
+  { id: 'snubSquare', group: 'semi', name: 'Snub square', cfg: '3.3.4.3.4',
+    src: T_snubSquare, min: 2, max: 6, def: 4, preview: 3 },
+  { id: 'elongTri', group: 'semi', name: 'Elongated triangular', cfg: '3.3.3.4.4',
+    src: T_elongTri, min: 3, max: 8, def: 5, preview: 3 },
+  { id: 'snubTrihex', group: 'semi', name: 'Snub trihexagonal', cfg: '3.3.3.3.6',
+    src: T_snubTrihex, min: 2, max: 5, def: 3, preview: 2 },
+
+  { id: 'tetrakis', group: 'dual', name: 'Tetrakis square', cfg: 'V4.8.8',
+    src: dualOf(T_truncSquare), min: 3, max: 8, def: 4, preview: 3, faces: 3 },
+  { id: 'cairo', group: 'dual', name: 'Cairo pentagonal', cfg: 'V3.3.4.3.4',
+    src: dualOf(T_snubSquare), min: 3, max: 8, def: 4, preview: 3, faces: 5 },
+  { id: 'rhombille', group: 'dual', name: 'Rhombille', cfg: 'V3.6.3.6',
+    src: dualOf(T_trihex), min: 3, max: 7, def: 4, preview: 3, faces: 4 },
+  { id: 'triakis', group: 'dual', name: 'Triakis triangular', cfg: 'V3.12.12',
+    src: dualOf(T_truncHex), min: 2, max: 6, def: 4, preview: 3, faces: 3 },
+  { id: 'deltoidal', group: 'dual', name: 'Deltoidal trihexagonal', cfg: 'V3.4.6.4',
+    src: dualOf(T_rhombitrihex), min: 2, max: 6, def: 4, preview: 3, faces: 4 },
+  { id: 'kisrhombille', group: 'dual', name: 'Kisrhombille', cfg: 'V4.6.12',
+    src: dualOf(T_truncTrihex), min: 2, max: 5, def: 3, preview: 2, faces: 3 },
+  { id: 'floret', group: 'dual', name: 'Floret pentagonal', cfg: 'V3.3.3.3.6',
+    src: dualOf(T_snubTrihex), min: 2, max: 5, def: 3, preview: 2, faces: 5 },
+  { id: 'prismatic', group: 'dual', name: 'Prismatic pentagonal', cfg: 'V3.3.3.4.4',
+    src: dualOf(T_elongTri), min: 3, max: 8, def: 5, preview: 3, faces: 5 }
+];
+
+// The 20 two-uniform tilings, listed for the picker until they are built.
+const PLANNED_2UNIFORM = [
+  '3⁶; 3².4.3.4', '3.4.6.4; 3².4.3.4', '3.4.6.4; 3³.4²', '3.4.6.4; 3.4².6',
+  '4.6.12; 3.4.6.4', '3⁶; 3².4.12', '3.12²; 3.4.3.12', '3⁶; 3².6²',
+  '3⁶; 3⁴.6₁', '3⁶; 3⁴.6₂', '3².6²; 3⁴.6', '3.6.3.6; 3².6²',
+  '3.4².6; 3.6.3.6₁', '3.4².6; 3.6.3.6₂', '3³.4²; 3².4.3.4₁', '3³.4²; 3².4.3.4₂',
+  '4⁴; 3³.4²₁', '4⁴; 3³.4²₂', '3⁶; 3³.4²₁', '3⁶; 3³.4²₂'
+];
+
+/* =====================================================================
+   6. BOARD  (adjacency derived from shared edges / shared vertices)
+   ===================================================================== */
+
+function buildBoard(polys) {
+  const { pts, faces, edgeMap, vertFaces } = topology(polys);
+  const n = faces.length;
+
+  const edgeSets = faces.map(() => new Set());
+  const cornerSets = faces.map(() => new Set());
+  for (const e of edgeMap.values()) {
+    if (e.length === 2) { edgeSets[e[0]].add(e[1]); edgeSets[e[1]].add(e[0]); }
+  }
+  for (const w of vertFaces.values()) {
+    const u = [...new Set(w)];
+    for (const a of u) for (const b of u) if (a !== b) cornerSets[a].add(b);
+  }
+
+  // Clipping can strand a tile with no edge-neighbour; keep the largest
+  // connected component so the board is always one piece.
+  const comp = new Int32Array(n).fill(-1);
+  let best = [], cid = 0;
+  for (let i = 0; i < n; i++) {
+    if (comp[i] >= 0) continue;
+    const stack = [i], group = [];
+    comp[i] = cid;
+    while (stack.length) {
+      const k = stack.pop(); group.push(k);
+      for (const j of edgeSets[k]) if (comp[j] < 0) { comp[j] = cid; stack.push(j); }
+    }
+    if (group.length > best.length) best = group;
+    cid++;
+  }
+  best.sort((a, b) => a - b);
+  const remap = new Map(best.map((old, i) => [old, i]));
+
+  const cells = best.map(old => ({
+    poly: faces[old].poly, cx: faces[old].cx, cy: faces[old].cy,
+    edgeNb: [...edgeSets[old]].filter(j => remap.has(j)).map(j => remap.get(j)),
+    cornerNb: [...cornerSets[old]].filter(j => remap.has(j)).map(j => remap.get(j))
+  }));
+
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const c of cells) for (const p of c.poly) {
+    if (p[0] < x0) x0 = p[0]; if (p[0] > x1) x1 = p[0];
+    if (p[1] < y0) y0 = p[1]; if (p[1] > y1) y1 = p[1];
+  }
+  return { cells, bbox: [x0, y0, x1 - x0, y1 - y0] };
+}
+
+/* =====================================================================
+   7. SELF-CHECK
+   Confirms each tiling really is what it claims: every interior edge is
+   shared by exactly two tiles, every interior vertex closes to 360°, and
+   the vertex configuration matches the published notation. Duals are
+   face-uniform, so they are checked for congruent faces instead.
+   Run verify() from the console.
+   ===================================================================== */
+
+function canonicalCfg(seq) {
+  let best = null;
+  for (const dir of [seq, [...seq].reverse()]) {
+    for (let r = 0; r < dir.length; r++) {
+      const s = dir.slice(r).concat(dir.slice(0, r)).join('.');
+      if (best === null || s < best) best = s;
+    }
+  }
+  return best;
+}
+
+function verify() {
+  const rows = [];
+  for (const t of TILINGS) {
+    const polys = t.src.gen(t.def);
+    const { pts, faces, edgeMap, vertFaces } = topology(polys);
+
+    // interior vertices: those whose incident angles close to 360°
+    const configs = new Set();
+    let closed = 0;
+    for (const [vid, fl] of vertFaces) {
+      const around = [...new Set(fl)];
+      let sum = 0;
+      for (const fi of around) sum += angleAt(faces[fi], vid);
+      if (Math.abs(sum - TAU) > 1e-6) continue;
+      closed++;
+      const v = pts[vid];
+      const seq = around.map(fi => faces[fi])
+        .map(f => ({ n: f.poly.length, a: Math.atan2(f.cy - v.y, f.cx - v.x) }))
+        .sort((m, o) => m.a - o.a).map(m => m.n);
+      configs.add(canonicalCfg(seq));
+    }
+
+    // no interior edge may carry more than two tiles
+    let badEdge = 0;
+    for (const e of edgeMap.values()) if (e.length > 2) badEdge++;
+
+    const sides = new Set(faces.map(f => f.poly.length));
+    let ok, detail;
+    if (t.faces) {
+      ok = sides.size === 1 && [...sides][0] === t.faces && badEdge === 0 && closed > 0;
+      detail = `faces=${[...sides].join('/')}-gon`;
+    } else {
+      const want = canonicalCfg(t.cfg.split('.').map(Number));
+      ok = configs.size === 1 && [...configs][0] === want && badEdge === 0;
+      detail = `vertex=${[...configs].join(' | ') || 'none'}`;
+    }
+    rows.push({ id: t.id, tiles: polys.length, closed, badEdge, detail, ok });
+  }
+  return rows;
+}
+
+/* =====================================================================
+   8. GAME STATE
+   ===================================================================== */
+
+const state = {
+  tiling: TILINGS[1],
+  size: 5,
+  mode: 'edge',
+  cornerDiffers: true,
+  board: null,
+  lit: null,
+  initial: null,
+  moves: 0,
+  history: [],
+  showSolution: false,
+  hintCell: -1,
+  nodes: []
+};
+
+function neighbours(i) {
+  const c = state.board.cells[i];
+  return state.mode === 'edge' ? c.edgeNb : c.cornerNb;
+}
+
+function rebuild() {
+  state.board = buildBoard(state.tiling.src.gen(state.size));
+
+  // In some tilings (hexagons, 4.8.8) every pair of tiles meeting at a vertex
+  // already shares an edge, so corner mode is the same game. Say so.
+  state.cornerDiffers = state.board.cells.some(c => c.cornerNb.length !== c.edgeNb.length);
+  if (!state.cornerDiffers) state.mode = 'edge';
+  updateModeUI();
+
+  document.getElementById('tileCount').textContent =
+    `${state.board.cells.length} tiles on the board.`;
+  render();
+  newGame();
+}
+
+function newGame() {
+  const n = state.board.cells.length;
+  const lit = new Uint8Array(n);
+  let any = false, guard = 0;
+  while (!any && guard++ < 20) {
+    lit.fill(0);
+    for (let i = 0; i < n; i++) {
+      if (Math.random() < 0.4) {                 // press a random subset of tiles...
+        lit[i] ^= 1;
+        for (const j of neighbours(i)) lit[j] ^= 1;
+      }
+    }
+    any = lit.some(v => v);                       // ...so the puzzle is always solvable
+  }
+  state.lit = lit;
+  state.initial = Uint8Array.from(lit);
+  state.moves = 0;
+  state.history = [];
+  state.showSolution = false;
+  state.hintCell = -1;
+  refresh();
+}
+
+function restart() {
+  state.lit = Uint8Array.from(state.initial);
+  state.moves = 0;
+  state.history = [];
+  state.hintCell = -1;
+  refresh();
+}
+
+function press(i, record) {
+  state.lit[i] ^= 1;
+  for (const j of neighbours(i)) state.lit[j] ^= 1;
+  if (record !== false) { state.history.push(i); state.moves++; }
+  state.hintCell = -1;
+  refresh();
+}
+
+function undo() {
+  const i = state.history.pop();
+  if (i === undefined) return;
+  state.lit[i] ^= 1;
+  for (const j of neighbours(i)) state.lit[j] ^= 1;
+  state.moves = Math.max(0, state.moves - 1);
+  state.hintCell = -1;
+  refresh();
+}
+
+/* =====================================================================
+   9. SOLVER — Gaussian elimination over GF(2)
+   ===================================================================== */
+
+// Rows are packed bitsets in one flat Uint32Array: n coefficient columns
+// plus one augmented column. This runs on every move, so it avoids the
+// per-operation allocation that a BigInt representation incurs.
+function solve() {
+  const n = state.board.cells.length;
+  const W = (n + 32) >> 5;                        // words per row
+  const M = new Uint32Array(n * W);
+  const aw = n >> 5, ab = 1 << (n & 31);          // word/bit of the augmented column
+
+  for (let i = 0; i < n; i++) {
+    const off = i * W;
+    M[off + (i >> 5)] |= 1 << (i & 31);
+    for (const j of neighbours(i)) M[off + (j >> 5)] |= 1 << (j & 31);
+    if (state.lit[i]) M[off + aw] |= ab;
+  }
+
+  const pivotOf = new Int32Array(n).fill(-1);
+  let row = 0;
+  for (let col = 0; col < n && row < n; col++) {
+    const w = col >> 5, b = 1 << (col & 31);
+    let sel = -1;
+    for (let i = row; i < n; i++) if (M[i * W + w] & b) { sel = i; break; }
+    if (sel < 0) continue;                        // free column
+    if (sel !== row) {
+      const a = row * W, c = sel * W;
+      for (let k = 0; k < W; k++) { const t = M[a + k]; M[a + k] = M[c + k]; M[c + k] = t; }
+    }
+    const ro = row * W;
+    for (let i = 0; i < n; i++) {
+      if (i !== row && (M[i * W + w] & b)) {
+        const io = i * W;
+        for (let k = 0; k < W; k++) M[io + k] ^= M[ro + k];
+      }
+    }
+    pivotOf[col] = row++;
+  }
+
+  // A row with no coefficients but a set augmented bit means 0 = 1.
+  for (let i = row; i < n; i++) {
+    const io = i * W;
+    let zero = true;
+    for (let k = 0; k <= aw && zero; k++) {
+      if (M[io + k] & (k === aw ? ab - 1 : 0xFFFFFFFF)) zero = false;
+    }
+    if (zero && (M[io + aw] & ab)) return null;
+  }
+
+  const x = new Uint8Array(n);
+  for (let c = 0; c < n; c++) {
+    const p = pivotOf[c];
+    if (p >= 0 && (M[p * W + aw] & ab)) x[c] = 1;
+  }
+  return x;
+}
+
+function toggleSolution() {
+  state.showSolution = !state.showSolution;
+  state.hintCell = -1;
+  refresh();
+}
+
+function hint() {
+  const s = solve();
+  if (!s) return;
+  const idx = [...s.keys()].filter(i => s[i]);
+  if (!idx.length) return;
+  state.hintCell = idx[Math.floor(Math.random() * idx.length)];
+  state.showSolution = false;
+  refresh();
+}
+
+/* =====================================================================
+   10. RENDERING
+   ===================================================================== */
+
+const SVGNS = 'http://www.w3.org/2000/svg';
+const boardEl = document.getElementById('board');
+
+const ptsAttr = poly => poly.map(p => p[0].toFixed(3) + ',' + p[1].toFixed(3)).join(' ');
+
+function render() {
+  const [x, y, w, h] = state.board.bbox;
+  const pad = Math.max(w, h) * 0.02;
+  boardEl.setAttribute('viewBox', `${x - pad} ${y - pad} ${w + 2 * pad} ${h + 2 * pad}`);
+  boardEl.innerHTML =
+    `<defs><filter id="glow" x="-60%" y="-60%" width="220%" height="220%">
+       <feGaussianBlur stdDeviation="0.05" result="b"/>
+       <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+     </filter></defs>`;
+
+  const gCells = document.createElementNS(SVGNS, 'g');
+  const gMarks = document.createElementNS(SVGNS, 'g');
+  boardEl.append(gCells, gMarks);
+
+  // Edge length is 1 in every tiling, so these are fixed in user units and
+  // stay visually proportional at any board size.
+  gCells.setAttribute('stroke-width', '0.035');
+  const r = 0.15;
+  state.nodes = state.board.cells.map((c, i) => {
+    const el = document.createElementNS(SVGNS, 'polygon');
+    el.setAttribute('points', ptsAttr(c.poly));
+    el.setAttribute('class', 'cell');
+    el.addEventListener('click', () => press(i));
+    gCells.appendChild(el);
+
+    const m = document.createElementNS(SVGNS, 'circle');
+    m.setAttribute('cx', c.cx.toFixed(3));
+    m.setAttribute('cy', c.cy.toFixed(3));
+    m.setAttribute('r', r.toFixed(3));
+    m.setAttribute('class', 'marker');
+    m.style.display = 'none';
+    gMarks.appendChild(m);
+
+    return { cell: el, mark: m };
+  });
+}
+
+function refresh() {
+  const n = state.board.cells.length;
+  let litCount = 0;
+  const opt = solve();                            // drives both the markers and the counter
+  const sol = state.showSolution ? opt : null;
+
+  for (let i = 0; i < n; i++) {
+    const on = !!state.lit[i];
+    if (on) litCount++;
+    const el = state.nodes[i].cell;
+    el.classList.toggle('lit', on);
+    el.classList.toggle('glow', on);
+
+    const mk = state.nodes[i].mark;
+    mk.style.display = ((sol && sol[i]) || i === state.hintCell) ? '' : 'none';
+    mk.classList.toggle('hint', i === state.hintCell);
+  }
+
+  document.getElementById('statMoves').textContent = state.moves;
+  document.getElementById('statLit').textContent = litCount;
+  document.getElementById('solveBtn').classList.toggle('on', state.showSolution);
+  document.getElementById('undoBtn').disabled = state.history.length === 0;
+
+  document.getElementById('optNote').textContent = opt
+    ? `A solution from here takes ${opt.reduce((a, b) => a + b, 0)} presses. Order doesn't matter.`
+    : 'This position has no solution.';
+
+  const win = document.getElementById('win');
+  win.classList.toggle('show', litCount === 0);
+  if (litCount === 0) {
+    document.getElementById('winSub').textContent =
+      `${state.tiling.name} · ${n} tiles · solved in ${state.moves} move${state.moves === 1 ? '' : 's'}`;
+  }
+}
+
+/* =====================================================================
+   11. CONTROLS + PICKER
+   ===================================================================== */
+
+function updateModeUI() {
+  const corner = document.getElementById('modeCorner');
+  document.getElementById('modeEdge').classList.toggle('sel', state.mode === 'edge');
+  corner.classList.toggle('sel', state.mode === 'corner');
+  corner.disabled = !state.cornerDiffers;
+  document.getElementById('modeNote').textContent = state.cornerDiffers ? '' :
+    'Corner mode is identical here — every tile meeting at a vertex already shares an edge.';
+}
+
+function onSize(v) {
+  state.size = +v;
+  document.getElementById('sizeVal').textContent = '(' + v + ')';
+  rebuild();
+}
+
+function setMode(m) {
+  if (m === 'corner' && !state.cornerDiffers) return;
+  state.mode = m;
+  updateModeUI();
+  newGame();
+}
+
+function setTiling(t) {
+  const prev = state.tiling;
+  state.tiling = t;
+  const s = document.getElementById('sizeSlider');
+  s.min = t.min; s.max = t.max;
+  // keep the player's size when it fits, otherwise fall back to the tiling's default
+  state.size = (prev && state.size >= t.min && state.size <= t.max) ? state.size : t.def;
+  s.value = state.size;
+  document.getElementById('sizeVal').textContent = '(' + state.size + ')';
+  document.getElementById('tilingName').textContent = t.name;
+  document.getElementById('tilingCfg').textContent = t.cfg;
+  drawPreview(document.getElementById('tilingThumb'), t.src.gen(t.preview));
+  rebuild();
+  try { localStorage.setItem('lightsout.tiling', t.id); } catch (e) {}
+}
+
+function drawPreview(svg, polys) {
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const poly of polys) for (const p of poly) {
+    if (p[0] < x0) x0 = p[0]; if (p[0] > x1) x1 = p[0];
+    if (p[1] < y0) y0 = p[1]; if (p[1] > y1) y1 = p[1];
+  }
+  const pad = 0.05;
+  svg.setAttribute('viewBox', `${x0 - pad} ${y0 - pad} ${x1 - x0 + 2 * pad} ${y1 - y0 + 2 * pad}`);
+  svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+  svg.innerHTML = polys.map((poly, i) =>
+    `<polygon points="${ptsAttr(poly)}" fill="${(i * 7) % 5 < 2 ? '#4ade80' : '#24422a'}"
+       stroke="#17301b" stroke-width="0.05"/>`).join('');
+}
+
+function buildCards() {
+  for (const g of ['regular', 'semi', 'dual']) {
+    const box = document.getElementById('grp-' + g);
+    box.innerHTML = '';
+    for (const t of TILINGS.filter(x => x.group === g)) {
+      const el = document.createElement('div');
+      el.className = 'card' + (t.id === state.tiling.id ? ' sel' : '');
+      el.innerHTML = `<svg viewBox="0 0 100 100"></svg>
+        <div class="cname">${t.name}</div><div class="cmeta">${t.cfg}</div>`;
+      drawPreview(el.querySelector('svg'), t.src.gen(t.preview));
+      el.onclick = () => { setTiling(t); buildCards(); closePicker(); };
+      box.appendChild(el);
+    }
+  }
+  document.getElementById('grp-planned').innerHTML =
+    PLANNED_2UNIFORM.map(c => `<span class="chip">${c}</span>`).join('');
+}
+
+function openPicker() { buildCards(); document.getElementById('picker').classList.add('show'); }
+function closePicker() { document.getElementById('picker').classList.remove('show'); }
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closePicker();
+  else if (e.key === 'n') newGame();
+  else if (e.key === 'h') hint();
+  else if (e.key === 'u') undo();
+});
+
+/* ---------------- boot ---------------- */
+let saved = null;
+try { saved = localStorage.getItem('lightsout.tiling'); } catch (e) {}
+const start = TILINGS.find(t => t.id === saved) || TILINGS[1];
+state.size = start.def;
+setTiling(start);
+</script>
+</body>
+</html>
