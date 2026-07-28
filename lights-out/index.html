@@ -589,45 +589,45 @@ const T_snubTrihex = lattice(() => {
 
 const TILINGS = [
   { id: 'triangle', group: 'regular', name: 'Triangular', cfg: '3.3.3.3.3.3',
-    src: T_triangle, min: 3, max: 9, def: 5, preview: 3 },
+    src: T_triangle, min: 3, max: 9, def: 5 },
   { id: 'square', group: 'regular', name: 'Square', cfg: '4.4.4.4',
-    src: T_square, min: 3, max: 10, def: 5, preview: 4 },
+    src: T_square, min: 3, max: 10, def: 5 },
   { id: 'hexagon', group: 'regular', name: 'Hexagonal', cfg: '6.6.6',
-    src: T_hexagon, min: 3, max: 9, def: 5, preview: 3 },
+    src: T_hexagon, min: 3, max: 9, def: 5 },
 
   { id: 'trihex', group: 'semi', name: 'Trihexagonal', cfg: '3.6.3.6',
-    src: T_trihex, min: 3, max: 7, def: 4, preview: 3 },
+    src: T_trihex, min: 3, max: 7, def: 4 },
   { id: 'truncSquare', group: 'semi', name: 'Truncated square', cfg: '4.8.8',
-    src: T_truncSquare, min: 3, max: 8, def: 5, preview: 3 },
+    src: T_truncSquare, min: 3, max: 8, def: 5 },
   { id: 'truncHex', group: 'semi', name: 'Truncated hexagonal', cfg: '3.12.12',
-    src: T_truncHex, min: 3, max: 7, def: 4, preview: 3 },
+    src: T_truncHex, min: 3, max: 7, def: 4 },
   { id: 'rhombitrihex', group: 'semi', name: 'Rhombitrihexagonal', cfg: '3.4.6.4',
-    src: T_rhombitrihex, min: 2, max: 6, def: 4, preview: 3 },
+    src: T_rhombitrihex, min: 2, max: 6, def: 4 },
   { id: 'truncTrihex', group: 'semi', name: 'Truncated trihexagonal', cfg: '4.6.12',
-    src: T_truncTrihex, min: 2, max: 6, def: 3, preview: 2 },
+    src: T_truncTrihex, min: 2, max: 6, def: 3 },
   { id: 'snubSquare', group: 'semi', name: 'Snub square', cfg: '3.3.4.3.4',
-    src: T_snubSquare, min: 2, max: 6, def: 4, preview: 3 },
+    src: T_snubSquare, min: 2, max: 6, def: 4 },
   { id: 'elongTri', group: 'semi', name: 'Elongated triangular', cfg: '3.3.3.4.4',
-    src: T_elongTri, min: 3, max: 8, def: 5, preview: 3 },
+    src: T_elongTri, min: 3, max: 8, def: 5 },
   { id: 'snubTrihex', group: 'semi', name: 'Snub trihexagonal', cfg: '3.3.3.3.6',
-    src: T_snubTrihex, min: 2, max: 5, def: 3, preview: 2 },
+    src: T_snubTrihex, min: 2, max: 5, def: 3 },
 
   { id: 'tetrakis', group: 'dual', name: 'Tetrakis square', cfg: 'V4.8.8',
-    src: dualOf(T_truncSquare), min: 3, max: 8, def: 4, preview: 3, faces: 3 },
+    src: dualOf(T_truncSquare), min: 3, max: 8, def: 4, faces: 3 },
   { id: 'cairo', group: 'dual', name: 'Cairo pentagonal', cfg: 'V3.3.4.3.4',
-    src: dualOf(T_snubSquare), min: 3, max: 8, def: 4, preview: 3, faces: 5 },
+    src: dualOf(T_snubSquare), min: 3, max: 8, def: 4, faces: 5 },
   { id: 'rhombille', group: 'dual', name: 'Rhombille', cfg: 'V3.6.3.6',
-    src: dualOf(T_trihex), min: 3, max: 7, def: 4, preview: 3, faces: 4 },
+    src: dualOf(T_trihex), min: 3, max: 7, def: 4, faces: 4 },
   { id: 'triakis', group: 'dual', name: 'Triakis triangular', cfg: 'V3.12.12',
-    src: dualOf(T_truncHex), min: 2, max: 6, def: 4, preview: 3, faces: 3 },
+    src: dualOf(T_truncHex), min: 2, max: 6, def: 4, faces: 3 },
   { id: 'deltoidal', group: 'dual', name: 'Deltoidal trihexagonal', cfg: 'V3.4.6.4',
-    src: dualOf(T_rhombitrihex), min: 2, max: 6, def: 4, preview: 3, faces: 4 },
+    src: dualOf(T_rhombitrihex), min: 2, max: 6, def: 4, faces: 4 },
   { id: 'kisrhombille', group: 'dual', name: 'Kisrhombille', cfg: 'V4.6.12',
-    src: dualOf(T_truncTrihex), min: 2, max: 5, def: 3, preview: 2, faces: 3 },
+    src: dualOf(T_truncTrihex), min: 2, max: 5, def: 3, faces: 3 },
   { id: 'floret', group: 'dual', name: 'Floret pentagonal', cfg: 'V3.3.3.3.6',
-    src: dualOf(T_snubTrihex), min: 2, max: 5, def: 3, preview: 2, faces: 5 },
+    src: dualOf(T_snubTrihex), min: 2, max: 5, def: 3, faces: 5 },
   { id: 'prismatic', group: 'dual', name: 'Prismatic pentagonal', cfg: 'V3.3.3.4.4',
-    src: dualOf(T_elongTri), min: 3, max: 8, def: 5, preview: 3, faces: 5 }
+    src: dualOf(T_elongTri), min: 3, max: 8, def: 5, faces: 5 }
 ];
 
 /* The 2-uniform tilings have no common names, and their vertex notation is
@@ -667,7 +667,7 @@ function compositionName(cell) {
         name: list.length > 1 ? `${g} ${i + 1}` : g,
         cfg: d.name + (d.variant ? ' · ' + d.variant : ''),
         notation: d.name,
-        src: fromCells(d), min: d.min, max: d.max, def: d.def, preview: 2,
+        src: fromCells(d), min: d.min, max: d.max, def: d.def,
         twoUniform: true
       });
     });
@@ -1092,19 +1092,46 @@ function setTiling(t) {
   document.getElementById('sizeVal').textContent = '(' + state.size + ')';
   document.getElementById('tilingName').textContent = t.name;
   document.getElementById('tilingCfg').textContent = t.cfg;
-  drawPreview(document.getElementById('tilingThumb'), t.src.gen(t.preview));
+  // the 40px thumbnail needs far fewer tiles than a card to stay legible
+  drawPreview(document.getElementById('tilingThumb'), previewPatch(t, 12, 1));
   rebuild();
   try { localStorage.setItem('lightsout.tiling', t.id); } catch (e) {}
 }
 
-function drawPreview(svg, polys) {
-  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-  for (const poly of polys) for (const p of poly) {
-    if (p[0] < x0) x0 = p[0]; if (p[0] > x1) x1 = p[0];
-    if (p[1] < y0) y0 = p[1]; if (p[1] > y1) y1 = p[1];
+/* A tiling's board size counts repeats, not tiles, so a fixed size would show
+   9 tiles for the square tiling and 190 for a 2-uniform one with a 21-tile
+   unit. Instead, search for the window that shows roughly `target` tiles, and
+   frame the swatch by that window rather than by the polygons' bounding box —
+   which makes the scale identical across every tiling by construction. */
+
+const PREVIEW_TILES = 50;                    // tiles shown in a picker card
+const CARD_ASPECT = 1.44;                    // matches the card's svg box
+const previewCache = new Map();
+
+function previewPatch(t, target, aspect) {
+  const key = t.id + ':' + target + ':' + aspect;
+  if (previewCache.has(key)) return previewCache.get(key);
+
+  const pitch = t.src.pitch;
+  const all = t.src.raw(5 * pitch);          // generated once, then re-clipped
+  const inBox = (hx, hy) => all.filter(p => p.every(q =>
+    q[0] >= -hx && q[0] <= hx && q[1] >= -hy && q[1] <= hy));
+
+  let lo = 0.3 * pitch, hi = 4.5 * pitch, best = null;
+  for (let i = 0; i < 16; i++) {
+    const hx = (lo + hi) / 2, hy = hx / aspect;
+    const polys = inBox(hx, hy);
+    if (!best || Math.abs(polys.length - target) < Math.abs(best.polys.length - target))
+      best = { polys, hx, hy };
+    if (polys.length < target) lo = hx; else hi = hx;
   }
-  const pad = 0.05;
-  svg.setAttribute('viewBox', `${x0 - pad} ${y0 - pad} ${x1 - x0 + 2 * pad} ${y1 - y0 + 2 * pad}`);
+  previewCache.set(key, best);
+  return best;
+}
+
+function drawPreview(svg, patch) {
+  const { polys, hx, hy } = patch;
+  svg.setAttribute('viewBox', `${-hx} ${-hy} ${2 * hx} ${2 * hy}`);
   svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
   svg.innerHTML = polys.map((poly, i) =>
     `<polygon points="${ptsAttr(poly)}" fill="${(i * 7) % 5 < 2 ? '#4ade80' : '#24422a'}"
@@ -1120,7 +1147,7 @@ function buildCards() {
       el.className = 'card' + (t.id === state.tiling.id ? ' sel' : '');
       el.innerHTML = `<svg viewBox="0 0 100 100"></svg>
         <div class="cname">${t.name}</div><div class="cmeta">${t.cfg}</div>`;
-      drawPreview(el.querySelector('svg'), t.src.gen(t.preview));
+      drawPreview(el.querySelector('svg'), previewPatch(t, PREVIEW_TILES, CARD_ASPECT));
       el.onclick = () => { setTiling(t); buildCards(); closePicker(); };
       box.appendChild(el);
     }
