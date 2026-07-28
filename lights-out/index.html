@@ -422,7 +422,9 @@ function dualPolys(polys) {
 function dualOf(base) {
   return {
     pitch: base.pitch,
-    raw: h => dualPolys(base.raw(h + 2.5 * base.pitch)),
+    // dualPolys returns a face for every complete vertex of the parent, which
+    // reaches well beyond h; trim it so callers get the region they asked for
+    raw: h => clipRect(dualPolys(base.raw(h + 2.5 * base.pitch)), h),
     gen(n) {
       const h = n * base.pitch / 2;
       return clipRect(dualPolys(base.raw(h + 2.5 * base.pitch)), h);
@@ -1093,7 +1095,7 @@ function setTiling(t) {
   document.getElementById('tilingName').textContent = t.name;
   document.getElementById('tilingCfg').textContent = t.cfg;
   // the 40px thumbnail needs far fewer tiles than a card to stay legible
-  drawPreview(document.getElementById('tilingThumb'), previewPatch(t, 12, 1));
+  drawPreview(document.getElementById('tilingThumb'), previewPatch(t, THUMB_TILES, 1));
   rebuild();
   try { localStorage.setItem('lightsout.tiling', t.id); } catch (e) {}
 }
@@ -1105,6 +1107,7 @@ function setTiling(t) {
    which makes the scale identical across every tiling by construction. */
 
 const PREVIEW_TILES = 50;                    // tiles shown in a picker card
+const THUMB_TILES = 16;                      // and in the 40px sidebar thumbnail
 const CARD_ASPECT = 1.44;                    // matches the card's svg box
 const previewCache = new Map();
 
@@ -1112,12 +1115,48 @@ function previewPatch(t, target, aspect) {
   const key = t.id + ':' + target + ':' + aspect;
   if (previewCache.has(key)) return previewCache.get(key);
 
+  // Size the working patch to what the target actually needs. A fixed multiple
+  // of the pitch would generate ~100 unit cells every time, which for a tiling
+  // with 21 tiles per cell is thousands of polygons to find a 50-tile window.
   const pitch = t.src.pitch;
-  const all = t.src.raw(5 * pitch);          // generated once, then re-clipped
-  const inBox = (hx, hy) => all.filter(p => p.every(q =>
-    q[0] >= -hx && q[0] <= hx && q[1] >= -hy && q[1] <= hy));
+  const probe = t.src.gen(2);
+  const density = probe.length / (4 * pitch * pitch) || 1;
+  const need = Math.sqrt(target / density * aspect) / 2;
+  const H = Math.max(1.2 * pitch, need * 1.4);
+  const all = t.src.raw(H);                  // generated once, then re-clipped
 
-  let lo = 0.3 * pitch, hi = 4.5 * pitch, best = null;
+  // Keeping only whole tiles can strand small ones: drop a dodecagon for
+  // crossing the edge and the triangles around it are left floating. So keep
+  // only the largest connected group, inside the search so the tile count
+  // reflects what actually gets drawn. Adjacency is computed once for the
+  // whole patch; each candidate window only re-runs the component scan.
+  const { faces, edgeMap } = topology(all);
+  const adj = faces.map(() => []);
+  for (const e of edgeMap.values()) {
+    if (e.length === 2) { adj[e[0]].push(e[1]); adj[e[1]].push(e[0]); }
+  }
+  const seen = new Int32Array(all.length);
+  let pass = 0;
+
+  const inBox = (hx, hy) => {
+    const keep = all.map(p => p.every(q =>
+      q[0] >= -hx && q[0] <= hx && q[1] >= -hy && q[1] <= hy));
+    pass++;
+    let best = [];
+    for (let i = 0; i < all.length; i++) {
+      if (!keep[i] || seen[i] === pass) continue;
+      const st = [i], run = [];
+      seen[i] = pass;
+      while (st.length) {
+        const k = st.pop(); run.push(k);
+        for (const j of adj[k]) if (keep[j] && seen[j] !== pass) { seen[j] = pass; st.push(j); }
+      }
+      if (run.length > best.length) best = run;
+    }
+    return best.map(i => all[i]);
+  };
+
+  let lo = 0.2 * need, hi = Math.min(H * 0.98, 2.2 * need), best = null;
   for (let i = 0; i < 16; i++) {
     const hx = (lo + hi) / 2, hy = hx / aspect;
     const polys = inBox(hx, hy);
