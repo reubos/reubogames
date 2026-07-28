@@ -1164,16 +1164,87 @@ function previewPatch(t, target, aspect) {
       best = { polys, hx, hy };
     if (polys.length < target) lo = hx; else hi = hx;
   }
+  best.colours = tileColours(best.polys);
   previewCache.set(key, best);
   return best;
 }
 
+/* Shading a preview by the tile's index in the generation order carried no
+   geometric meaning and just read as scattered noise. Colour by what the
+   tiling is made of instead: by polygon where there is more than one shape,
+   and otherwise by a proper colouring so neighbours always differ. */
+
+const SHADES = ['#a7f3c4', '#4ade80', '#2f8a52', '#245c34'];
+
+function tileColours(polys) {
+  const pick = (i, k) => SHADES[Math.round(i * (SHADES.length - 1) / Math.max(1, k - 1))];
+  const shapes = [...new Set(polys.map(p => p.length))].sort((a, b) => b - a);
+
+  if (shapes.length > 1) {                     // largest polygon brightest
+    const rank = new Map(shapes.map((s, i) => [s, i]));
+    return polys.map(p => pick(rank.get(p.length), shapes.length));
+  }
+
+  // One shape throughout — the regular tilings and every Laves dual.
+  const { faces, edgeMap } = topology(polys);
+  const adj = faces.map(() => []);
+  for (const e of edgeMap.values()) {
+    if (e.length === 2) { adj[e[0]].push(e[1]); adj[e[1]].push(e[0]); }
+  }
+
+  /* Where tiles of one shape sit at different angles, their orientation is the
+     structure worth seeing — colouring rhombille by it produces the familiar
+     stacked-cubes reading. Use it only when touching tiles never share an
+     orientation, so the colouring stays proper. Orientation is taken from the
+     vertices furthest from the centre, lowest angle first, so it does not
+     depend on which vertex a polygon happens to start at. */
+  const orient = polys.map(p => {
+    let cx = 0, cy = 0;
+    for (const q of p) { cx += q[0]; cy += q[1]; }
+    cx /= p.length; cy /= p.length;
+    let far = 0;
+    for (const q of p) far = Math.max(far, Math.hypot(q[0] - cx, q[1] - cy));
+    let lo = Infinity;
+    for (const q of p) {
+      if (Math.hypot(q[0] - cx, q[1] - cy) < far - 1e-6) continue;
+      let a = Math.atan2(q[1] - cy, q[0] - cx) * 180 / Math.PI;
+      lo = Math.min(lo, (Math.round(a) % 360 + 360) % 360);
+    }
+    return lo;
+  });
+  const classes = [...new Set(orient)].sort((a, b) => a - b);
+  const properByOrientation = classes.length >= 2 && classes.length <= SHADES.length &&
+    polys.every((_, i) => adj[i].every(j => orient[i] !== orient[j]));
+  if (properByOrientation) {
+    const rank = new Map(classes.map((c, i) => [c, i]));
+    return polys.map((_, i) => pick(rank.get(orient[i]), classes.length));
+  }
+
+  // Otherwise colour so that no two touching tiles match, scanning in reading
+  // order so the result comes out regular (a checkerboard on the square
+  // tiling) rather than patchy.
+  const order = polys.map((_, i) => i).sort((a, b) =>
+    (faces[a].cy - faces[b].cy) || (faces[a].cx - faces[b].cx));
+
+  const col = new Array(polys.length).fill(-1);
+  let used = 1;
+  for (const i of order) {
+    const taken = new Set(adj[i].map(j => col[j]).filter(c => c >= 0));
+    let c = 0;
+    while (taken.has(c)) c++;
+    col[i] = c;
+    used = Math.max(used, c + 1);
+  }
+  const k = Math.min(used, SHADES.length);
+  return col.map(c => pick(Math.min(c, k - 1), k));
+}
+
 function drawPreview(svg, patch) {
-  const { polys, hx, hy } = patch;
+  const { polys, hx, hy, colours } = patch;
   svg.setAttribute('viewBox', `${-hx} ${-hy} ${2 * hx} ${2 * hy}`);
   svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
   svg.innerHTML = polys.map((poly, i) =>
-    `<polygon points="${ptsAttr(poly)}" fill="${(i * 7) % 5 < 2 ? '#4ade80' : '#24422a'}"
+    `<polygon points="${ptsAttr(poly)}" fill="${colours[i]}"
        stroke="#17301b" stroke-width="0.05"/>`).join('');
 }
 
