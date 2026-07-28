@@ -630,16 +630,49 @@ const TILINGS = [
     src: dualOf(T_elongTri), min: 3, max: 8, def: 5, preview: 3, faces: 5 }
 ];
 
-// Five of the twenty share a vertex-configuration pair with another; those are
-// told apart by the size of their repeating unit, which is measured from the
-// geometry rather than assumed.
-for (const d of TWO_UNIFORM) {
-  TILINGS.push({
-    id: d.id, group: 'two', name: d.name, cfg: d.variant || '2-uniform',
-    src: fromCells(d), min: d.min, max: d.max, def: d.def, preview: 2,
-    twoUniform: true
-  });
+/* The 2-uniform tilings have no common names, and their vertex notation is
+   unreadable at a glance, so each gets a plain-English name built from the
+   polygons it actually contains. Several share a polygon set — those are
+   numbered by increasing unit-cell area, so "1" really is the simplest
+   repeat. The exact notation stays on the subtitle line. */
+
+const POLY_NAME = { 3: 'Triangles', 4: 'Squares', 5: 'Pentagons',
+                    6: 'Hexagons', 8: 'Octagons', 12: 'Dodecagons' };
+
+function compositionName(cell) {
+  const kinds = [...new Set(cell.map(c => c[0]))].sort((a, b) => b - a);  // largest first
+  const w = kinds.map(k => POLY_NAME[k] || (k + '-gons'));
+  return w.length === 1 ? w[0] : w.slice(0, -1).join(', ') + ' and ' + w[w.length - 1];
 }
+
+(function nameTwoUniform() {
+  const groups = new Map();
+  for (const d of TWO_UNIFORM) {
+    d.area = Math.abs(d.v1[0] * d.v2[1] - d.v1[1] * d.v2[0]);
+    const g = compositionName(d.cell);
+    let a = groups.get(g); if (!a) groups.set(g, a = []);
+    a.push(d);
+  }
+  // simplest polygon sets first, so the picker reads as a progression
+  const ordered = [...groups.entries()].sort((a, b) =>
+    a[0].split(',').length - b[0].split(',').length ||
+    Math.min(...a[1].map(d => d.area)) - Math.min(...b[1].map(d => d.area)));
+
+  for (const [g, list] of ordered) {
+    list.sort((p, q) => p.area - q.area || p.cell.length - q.cell.length
+                        || p.name.localeCompare(q.name));
+    list.forEach((d, i) => {
+      TILINGS.push({
+        id: d.id, group: 'two',
+        name: list.length > 1 ? `${g} ${i + 1}` : g,
+        cfg: d.name + (d.variant ? ' · ' + d.variant : ''),
+        notation: d.name,
+        src: fromCells(d), min: d.min, max: d.max, def: d.def, preview: 2,
+        twoUniform: true
+      });
+    });
+  }
+})();
 
 /* =====================================================================
    6. BOARD  (adjacency derived from shared edges / shared vertices)
@@ -753,8 +786,8 @@ function verify() {
     const sides = new Set(faces.map(f => f.poly.length));
     let ok, detail;
     if (t.twoUniform) {
-      // must show exactly the two vertex types its name declares
-      const want = t.name.replace(/[\[\]]/g, '').split(';')
+      // must show exactly the two vertex types its notation declares
+      const want = t.notation.replace(/[\[\]]/g, '').split(';')
         .map(s => canonicalCfg(expandCfg(s.trim()))).sort();
       const got = [...configs].sort();
       ok = got.length === 2 && got.join() === want.join() && badEdge === 0;
