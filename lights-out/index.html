@@ -253,6 +253,9 @@
 
     <p class="section-title">2-uniform &mdash; all 20</p>
     <div class="cards" id="grp-two"></div>
+
+    <p class="section-title">Aperiodic</p>
+    <div class="cards" id="grp-aperiodic"></div>
   </div>
 </div>
 
@@ -509,6 +512,69 @@ const TWO_UNIFORM = [
 ];
 
 /* =====================================================================
+   4c. APERIODIC TILINGS — de Bruijn's multigrid
+
+   N families of evenly spaced parallel lines dualise to a rhombic tiling:
+   each crossing of two lines becomes one rhombus, and the index vector of
+   the region it sits in gives that rhombus's position. N = 5 with offsets
+   summing to zero yields the Penrose P3 rhomb tiling; N = 4 yields the
+   octagonal Ammann–Beenker tiling. Both are edge-to-edge, so adjacency,
+   the solver and the renderer need no changes — only the generator is new.
+
+   There is no unit cell to repeat here, so `pitch` is taken as the root of
+   the mean tile area, which keeps the board-size slider meaning roughly
+   the same number of tiles as it does elsewhere.
+   ===================================================================== */
+
+function multigrid(N, offsets) {
+  const dirs = [];
+  for (let j = 0; j < N; j++) dirs.push([Math.cos(Math.PI * j / N), Math.sin(Math.PI * j / N)]);
+
+  function build(R) {                        // R = radius wanted in tiling space
+    const Rg = 2 * R / N + 3;                // the dual map scales by about N/2
+    const kmax = Math.ceil(Rg) + 2;
+    const out = [];
+    for (let j = 0; j < N; j++) for (let m = j + 1; m < N; m++) {
+      const dj = dirs[j], dm = dirs[m];
+      const det = dj[0] * dm[1] - dj[1] * dm[0];
+      for (let a = -kmax; a <= kmax; a++) for (let b = -kmax; b <= kmax; b++) {
+        const p = a - offsets[j], q = b - offsets[m];
+        const x = (p * dm[1] - q * dj[1]) / det;      // where the two lines cross
+        const y = (q * dj[0] - p * dm[0]) / det;
+        if (x * x + y * y > Rg * Rg) continue;
+        let px = 0, py = 0;
+        for (let i = 0; i < N; i++) {
+          const k = i === j ? a : i === m ? b
+                  : Math.ceil(x * dirs[i][0] + y * dirs[i][1] + offsets[i]);
+          px += k * dirs[i][0]; py += k * dirs[i][1];
+        }
+        out.push([[px, py], [px + dj[0], py + dj[1]],
+                  [px + dj[0] + dm[0], py + dj[1] + dm[1]],
+                  [px + dm[0], py + dm[1]]]);       // j < m keeps this wound CCW
+      }
+    }
+    return out;
+  }
+
+  let pitch = null;
+  const src = {
+    get pitch() {
+      if (pitch === null) {
+        const s = build(12);
+        let a = 0;
+        for (const p of s) a += Math.abs((p[1][0] - p[0][0]) * (p[3][1] - p[0][1]) -
+                                         (p[1][1] - p[0][1]) * (p[3][0] - p[0][0]));
+        pitch = Math.sqrt(a / s.length);
+      }
+      return pitch;
+    },
+    raw: h => build(h * Math.SQRT2 + 3),
+    gen(n) { const h = n * src.pitch / 2; return clipRect(build(h * Math.SQRT2 + 3), h); }
+  };
+  return src;
+}
+
+/* =====================================================================
    5. THE TILINGS
    ===================================================================== */
 
@@ -622,7 +688,16 @@ const TILINGS = [
   { id: 'floret', group: 'dual', name: 'Floret pentagonal', cfg: 'V3.3.3.3.6',
     src: dualOf(T_snubTrihex), min: 2, max: 5, def: 3, faces: 5 },
   { id: 'prismatic', group: 'dual', name: 'Prismatic pentagonal', cfg: 'V3.3.3.4.4',
-    src: dualOf(T_elongTri), min: 3, max: 8, def: 5, faces: 5 }
+    src: dualOf(T_elongTri), min: 3, max: 8, def: 5, faces: 5 },
+
+  // Offsets must be generic — three grid lines meeting at a point would break
+  // the construction — and summing to zero is what makes N=5 a true Penrose.
+  { id: 'penrose', group: 'aperiodic', name: 'Penrose rhombs', cfg: 'aperiodic · 5-fold',
+    src: multigrid(5, [0.1234, 0.2371, -0.3123, 0.4111, -0.4593]),
+    min: 4, max: 12, def: 8, aperiodic: true },
+  { id: 'ammann', group: 'aperiodic', name: 'Ammann–Beenker', cfg: 'aperiodic · 8-fold',
+    src: multigrid(4, [0.1913, -0.2671, 0.3319, -0.1237]),
+    min: 4, max: 12, def: 8, aperiodic: true }
 ];
 
 /* The 2-uniform tilings have no common names, and their vertex notation is
@@ -780,7 +855,18 @@ function verify() {
 
     const sides = new Set(faces.map(f => f.poly.length));
     let ok, detail;
-    if (t.twoUniform) {
+    if (t.aperiodic) {
+      // no vertex or face uniformity to lean on: check it is a sound tiling and
+      // that both rhombus shapes are present
+      const areas = new Set(faces.map(f => {
+        const p = f.poly;
+        return Math.round(Math.abs((p[1][0]-p[0][0])*(p[3][1]-p[0][1]) -
+                                   (p[1][1]-p[0][1])*(p[3][0]-p[0][0])) * 1000);
+      }));
+      ok = badEdge === 0 && closed > 0 && sides.size === 1 && [...sides][0] === 4 &&
+           areas.size === 2;
+      detail = `rhombi=${[...areas].sort((a,b)=>a-b).map(a=>(a/1000).toFixed(3)).join('/')}`;
+    } else if (t.twoUniform) {
       // must show exactly the two vertex types its notation declares
       const want = t.notation.replace(/[\[\]]/g, '').split(';')
         .map(s => canonicalCfg(expandCfg(s.trim()))).sort();
@@ -1171,11 +1257,23 @@ const SHADES = ['#a7f3c4', '#4ade80', '#2f8a52', '#245c34'];
 
 function tileColours(polys) {
   const pick = (i, k) => SHADES[Math.round(i * (SHADES.length - 1) / Math.max(1, k - 1))];
-  const shapes = [...new Set(polys.map(p => p.length))].sort((a, b) => b - a);
 
-  if (shapes.length > 1) {                     // largest polygon brightest
+  // Key on side count *and* area: Penrose's thin and thick rhombi are both
+  // quadrilaterals, and telling them apart is the whole point of the picture.
+  const area = p => {
+    let s = 0;
+    for (let i = 0; i < p.length; i++) {
+      const a = p[i], b = p[(i + 1) % p.length];
+      s += a[0] * b[1] - b[0] * a[1];
+    }
+    return Math.abs(s) / 2;
+  };
+  const key = p => p.length * 1e6 + Math.round(area(p) * 1000);
+  const shapes = [...new Set(polys.map(key))].sort((a, b) => b - a);
+
+  if (shapes.length > 1) {                     // biggest tile brightest
     const rank = new Map(shapes.map((s, i) => [s, i]));
-    return polys.map(p => pick(rank.get(p.length), shapes.length));
+    return polys.map(p => pick(rank.get(key(p)), shapes.length));
   }
 
   // One shape throughout — the regular tilings and every Laves dual.
@@ -1244,7 +1342,7 @@ function drawPreview(svg, patch) {
 // Cards carry the preview and the name only; the vertex configuration is left
 // to the sidebar, where there is room for it once a tiling is chosen.
 function buildCards() {
-  for (const g of ['regular', 'semi', 'dual', 'two']) {
+  for (const g of ['regular', 'semi', 'dual', 'two', 'aperiodic']) {
     const box = document.getElementById('grp-' + g);
     box.innerHTML = '';
     for (const t of TILINGS.filter(x => x.group === g)) {
