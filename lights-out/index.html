@@ -900,6 +900,88 @@ for (const id of ['penrose', 'ammann']) {
 }
 
 /* =====================================================================
+   5c. SQUARING THE LATTICES TO THE SCREEN
+
+   Wrapping joins opposite edges of the board, and the join should run along
+   the screen axes rather than at some angle. That needs a lattice vector
+   pointing along each axis, and 51 of the 61 periodic tilings have one.
+
+   The other ten are the chiral ones — snub square, Cairo, floret, snub
+   trihexagonal and their 2-uniform relatives. Their lattices are perfectly
+   square or hexagonal, only tilted: snub square's is a square lattice at 15°,
+   and tan 15° = 2 − √3 is irrational, so it has no horizontal vector at any
+   size and no search will find one. They are rotated instead, in every mode,
+   so a tiling looks the same however it is played.
+   ===================================================================== */
+
+// shortest lattice vector along an axis (0 = x, 1 = y), if there is one. The
+// tolerance is for the stored vectors, which are rounded to four decimals.
+function axisVector(v1, v2, axis) {
+  const other = 1 - axis;
+  let best = null;
+  for (let a = -14; a <= 14; a++) for (let b = -14; b <= 14; b++) {
+    if (!a && !b) continue;
+    const p = [a * v1[0] + b * v2[0], a * v1[1] + b * v2[1]];
+    const L = Math.hypot(p[0], p[1]);
+    if (Math.abs(p[other]) > 1e-3 * Math.max(1, L) || p[axis] <= 1e-6) continue;
+    if (best === null || p[axis] < best) best = p[axis];
+  }
+  return best;
+}
+
+/* The turn that brings a pair of perpendicular lattice vectors onto the axes.
+   Zero when the lattice already has a vector along each axis and that rectangle
+   is not much bigger than the best tilted one — insisting on alignment can cost
+   a great deal, and "Hexagons and Triangles 5" is the case that shows it: its
+   smallest upright rectangle holds 546 tiles, more than the largest board, while
+   turning it 13.9° brings that down to 42. */
+function alignAngle(v1, v2) {
+  const ax = axisVector(v1, v2, 0), ay = axisVector(v1, v2, 1);
+  const uprightArea = ax !== null && ay !== null ? ax * ay : Infinity;
+  const V = [];
+  for (let a = -8; a <= 8; a++) for (let b = -8; b <= 8; b++)
+    if (a || b) V.push([a * v1[0] + b * v2[0], a * v1[1] + b * v2[1]]);
+  let best = null;
+  for (const p of V) {
+    const lp = Math.hypot(p[0], p[1]);
+    for (const q of V) {
+      const lq = Math.hypot(q[0], q[1]);
+      if (Math.abs(p[0] * q[0] + p[1] * q[1]) / (lp * lq) > 1e-4) continue;
+      const area = p[0] * q[1] - p[1] * q[0];
+      if (area <= 1e-6) continue;
+      const h = Math.abs(p[1] / lp) <= Math.abs(q[1] / lq) ? p : q;
+      let r = Math.atan2(h[1], h[0]) % (Math.PI / 2);
+      if (r > Math.PI / 4) r -= Math.PI / 2;
+      if (r < -Math.PI / 4) r += Math.PI / 2;
+      // among equal rectangles prefer the one already closest to the axes
+      if (!best || area < best.area - 1e-6 ||
+          (area < best.area + 1e-6 && Math.abs(r) < Math.abs(best.r)))
+        best = { area, r };
+    }
+  }
+  if (!best) return 0;
+  return best.area < 0.5 * uprightArea ? -best.r : 0;
+}
+
+function rotatedSrc(src, ang) {
+  const c = Math.cos(ang), s = Math.sin(ang);
+  const turn = p => p.map(q => [q[0] * c - q[1] * s, q[0] * s + q[1] * c]);
+  const tv = v => [v[0] * c - v[1] * s, v[0] * s + v[1] * c];
+  return {
+    pitch: src.pitch, density: src.density, vertexDensity: src.vertexDensity,
+    v1: tv(src.v1), v2: tv(src.v2),
+    raw: h => src.raw(h).map(turn),           // raw fills a disc, so turning is free
+    gen(n) { const h = n * src.pitch / 2; return clipRect(src.raw(h).map(turn), h); }
+  };
+}
+
+for (const t of TILINGS) {
+  if (!t.src.v1) continue;
+  const ang = alignAngle(t.src.v1, t.src.v2);
+  if (ang) { t.src = rotatedSrc(t.src, ang); t.turned = Math.round(ang * 180 / Math.PI); }
+}
+
+/* =====================================================================
    6. BOARD  (adjacency derived from shared edges / shared vertices)
    ===================================================================== */
 
@@ -963,55 +1045,78 @@ function buildBoard(polys) {
    not identify the second pair of edges.
    ===================================================================== */
 
-// Gauss reduction: the shortest, most nearly orthogonal basis of the same
-// lattice. Without it a torus of m×n cells is a long thin parallelogram.
-function reduceBasis(a, b) {
-  const dot = (p, q) => p[0] * q[0] + p[1] * q[1];
-  for (let i = 0; i < 40; i++) {
-    if (dot(a, a) > dot(b, b)) { const t = a; a = b; b = t; }
-    const mu = Math.round(dot(a, b) / dot(a, a));
-    if (!mu) break;
-    b = [b[0] - mu * a[0], b[1] - mu * a[1]];
-  }
-  return [a, b];
-}
+/* Pick the rectangle to wrap on. Both sides run along a screen axis, so the
+   seams are horizontal and vertical and the board fills a rectangle — every
+   tiling here has a lattice vector along each axis, the ten that did not
+   having been turned above until they did.
 
-/* Pick the sublattice to wrap on. Every sublattice of index k has a basis in
-   Hermite form — a·v1 and b·v1 + c·v2 with k = a·c and 0 ≤ b < a — so running
-   over those covers all of them, not just the m×n ones. That matters for the
-   shape: on a triangular lattice the diagonal choices give a 60° rhombus,
-   while an off-diagonal one can come out very nearly square. */
-function wrapLattice(src, cellSize, target) {
-  const { v1, v2, pitch } = src;
-  const kMax = Math.ceil(target / cellSize * 2 + 6);
-  let best = null;
-  for (let a = 1; a <= kMax; a++) {
-    for (let c = 1; a * c <= kMax; c++) {
-      const k = a * c;
-      if (k * cellSize < 12) continue;
-      for (let b = 0; b < a; b++) {
-        const [r1, r2] = reduceBasis([a * v1[0], a * v1[1]],
-                                     [b * v1[0] + c * v2[0], b * v1[1] + c * v2[1]]);
-        const L1 = Math.hypot(r1[0], r1[1]), L2 = Math.hypot(r2[0], r2[1]);
-        // a period shorter than this and a tile starts wrapping onto itself
-        if (L1 < 1.8 * pitch) continue;
-        const sin = Math.abs(r1[0] * r2[1] - r1[1] * r2[0]) / (L1 * L2);
-        const score = 2 * Math.abs(Math.log(k * cellSize / target))
-                    + Math.abs(Math.log(L1 / L2)) + Math.abs(Math.log(sin));
-        if (!best || score < best.score) best = { r1, r2, k, score };
-      }
+   An earlier version searched all sublattices by Hermite form and scored them
+   on how square the Gauss-reduced basis came out. That found perfectly square
+   domains and slanted every one of them: 65 = 8² + 1², so the square tiling
+   has an exactly square sublattice spanned by (8,1) and (1,−8), and nothing in
+   the scoring preferred the upright 8×8 to that same square turned 7°. */
+function wrapLattice(src, target) {
+  const H = axisVector(src.v1, src.v2, 0), V = axisVector(src.v1, src.v2, 1);
+  if (H === null || V === null) return [];
+  const per = Math.max(1, Math.round(src.density * H * V));   // tiles per rectangle
+  // some tilings have a large smallest rectangle — snub trihexagonal's is 126
+  // tiles — so the ceiling always has to admit at least that one, or they
+  // would quietly refuse to wrap at the smaller sizes
+  const ceiling = Math.max(target * 2.5 + 30, per * 4);
+  /* A wrapped board is m periods by n periods, so both its tile count and its
+     shape are quantised and the two pull against each other — there is not
+     always a rectangle that is the right size and square. Size wins first:
+     take everything within half again of the target, then among those pick the
+     squarest. Only if nothing is close enough does the whole field compete. */
+  const all = [];
+  for (let m = 1; m * per <= ceiling; m++) {
+    for (let n = 1; m * n * per <= ceiling; n++) {
+      const count = m * n * per;
+      all.push({ r1: [m * H, 0], r2: [0, n * V], count,
+                 off: Math.abs(Math.log(count / target)),
+                 skew: Math.abs(Math.log((m * H) / (n * V))) });
     }
   }
-  return best;
+  const band = all.filter(c => c.off <= Math.log(1.5));
+  const pool = band.length ? band : all;
+  for (const c of pool) c.score = c.skew + 0.35 * c.off;
+  // best first; wrapBoard walks the list until one is big enough that no tile
+  // wraps onto itself, which depends on tile size and cannot be read off the
+  // lattice — a dodecagon spans most of its own cell
+  return pool.sort((a, b) => a.score - b.score).slice(0, 10);
+}
+
+/* The widest a tile gets. A board narrower than twice this would let a tile
+   reach round onto itself or meet a neighbour twice, so candidate boards are
+   filtered on it — cheaper than building each one to find out. */
+const diameterCache = new Map();
+function tileDiameter(t) {
+  if (diameterCache.has(t.id)) return diameterCache.get(t.id);
+  let d = 0;
+  for (const p of t.src.gen(3)) for (const a of p) for (const b of p)
+    d = Math.max(d, Math.hypot(a[0] - b[0], a[1] - b[1]));
+  d = d || t.src.pitch;
+  diameterCache.set(t.id, d);
+  return d;
 }
 
 function wrapBoard(t, target, wrapBoth) {
   const src = t.src;
   if (!src.v1) return null;                          // aperiodic: nothing to wrap
-  const cellSize = Math.round(src.density * Math.abs(src.v1[0] * src.v2[1] -
-                                                     src.v1[1] * src.v2[0]));
-  const L = wrapLattice(src, cellSize, target);
-  if (!L) return null;
+  const room = 2.05 * tileDiameter(t);
+  // if every board near the requested size is too narrow for the tiles, ask for
+  // a bigger one rather than refusing to wrap at all
+  for (let grow = 1; grow <= 8; grow *= 2) {
+    for (const cand of wrapLattice(src, target * grow)) {
+      if (cand.r1[0] < room || cand.r2[1] < room) continue;
+      const b = wrapOn(src, cand, wrapBoth);
+      if (b) return b;                               // backstop: else try a bigger one
+    }
+  }
+  return null;
+}
+
+function wrapOn(src, L, wrapBoth) {
   const { r1, r2 } = L;
 
   // enough patch to cover the domain, centred on the origin, plus a margin so
@@ -1044,12 +1149,12 @@ function wrapBoard(t, target, wrapBoth) {
   };
 
   const shifts = faces.map(f => shift(f.cx, f.cy));
-  const board = [], homeOf = new Int32Array(faces.length).fill(-1);
+  const board = [], boardFace = [], homeOf = new Int32Array(faces.length).fill(-1);
   const K = 0.25, bucket = new Map();
   faces.forEach((f, i) => {
     if (shifts[i][0] || shifts[i][1]) return;        // a copy, not the original
     const n = board.length;
-    board.push(f); homeOf[i] = n;
+    board.push(f); boardFace.push(i); homeOf[i] = n;
     const bk = Math.round(f.cx / K) + ',' + Math.round(f.cy / K);
     if (!bucket.has(bk)) bucket.set(bk, []);
     bucket.get(bk).push(n);
@@ -1074,14 +1179,31 @@ function wrapBoard(t, target, wrapBoth) {
     }
   });
 
-  const edgeNb = board.map(() => new Set());
-  const cornerNb = board.map(() => new Set());
+  /* Adjacency is taken from each board tile's own edges, not from every edge in
+     the patch. The patch holds many copies of the board and they all fold onto
+     the same board edges, so counting from the patch cannot tell a copy of an
+     edge apart from a second, genuinely different edge between the same pair. */
+  const across = faces.map(() => []);
   for (const e of edgeMap.values()) {
     if (e.length !== 2) continue;
-    const a = homeOf[e[0]], b = homeOf[e[1]];
-    // a tile is never its own neighbour: pressing already toggles it
-    if (a < 0 || b < 0 || a === b) continue;
-    edgeNb[a].add(b); edgeNb[b].add(a);
+    across[e[0]].push(e[1]); across[e[1]].push(e[0]);
+  }
+
+  const edgeNb = board.map(() => new Set());
+  const cornerNb = board.map(() => new Set());
+  for (let i = 0; i < board.length; i++) {
+    for (const nb of across[boardFace[i]]) {
+      const h = homeOf[nb];
+      if (h < 0) continue;                           // a real edge on a cylinder
+      /* Meeting itself, or the same neighbour twice, means the board is
+         narrower than the tiles are wide and has wrapped round onto itself —
+         the dodecagons of "Dodecagons, Squares and Triangles 1" do it on a
+         period of 7.5. The repeated edge would collapse into the first and
+         leave the tile short of neighbours, so reject and let the caller try a
+         bigger board. */
+      if (h === i || edgeNb[i].has(h)) return null;
+      edgeNb[i].add(h);
+    }
   }
   for (const w of vertFaces.values()) {
     const u = [...new Set(w.map(i => homeOf[i]))].filter(i => i >= 0);
@@ -1098,7 +1220,7 @@ function wrapBoard(t, target, wrapBoth) {
     if (p[1] < y0) y0 = p[1]; if (p[1] > y1) y1 = p[1];
   }
   return { cells, bbox: [x0, y0, x1 - x0, y1 - y0], wrapped: true,
-           expected: L.k * cellSize };
+           expected: L.count };
 }
 
 /* =====================================================================
