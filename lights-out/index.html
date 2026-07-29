@@ -1464,6 +1464,7 @@ const state = {
   history: [],
   showSolution: false,
   solIndex: 0,                                 // which of the offered solutions
+  follow: null,                                // the one on show, kept across presses
   hintCell: -1,
   nodes: []
 };
@@ -1519,6 +1520,7 @@ function newGame() {
   state.history = [];
   state.showSolution = false;
   state.solIndex = 0;
+  state.follow = null;
   state.hintCell = -1;
   refresh();
 }
@@ -1527,13 +1529,25 @@ function restart() {
   state.lit = Uint8Array.from(state.initial);
   state.moves = 0;
   state.history = [];
+  state.showSolution = false;                  // the followed solution no longer applies
+  state.solIndex = 0;
+  state.follow = null;
   state.hintCell = -1;
   refresh();
+}
+
+/* If x solves this position then x with tile i flipped solves the position after
+   pressing i — so a displayed solution survives a press, and the dots go on
+   meaning "what you still have to press". Following it that way keeps the choice
+   the player made, rather than jumping to whatever is now the second shortest. */
+function followPress(i) {
+  if (state.follow) state.follow[i] ^= 1;
 }
 
 function press(i, record) {
   state.lit[i] ^= 1;
   for (const j of neighbours(i)) state.lit[j] ^= 1;
+  followPress(i);
   if (record !== false) { state.history.push(i); state.moves++; }
   state.hintCell = -1;
   refresh();
@@ -1544,6 +1558,7 @@ function undo() {
   if (i === undefined) return;
   state.lit[i] ^= 1;
   for (const j of neighbours(i)) state.lit[j] ^= 1;
+  followPress(i);                              // the same flip undoes it
   state.moves = Math.max(0, state.moves - 1);
   state.hintCell = -1;
   refresh();
@@ -1581,6 +1596,7 @@ function pickSolution(memo) {
   const pick = f.alts[i];
   pick.free = f.free; pick.minimal = true;
   pick.alts = f.alts.length; pick.rank = i; pick.bestPresses = f.alts[0].presses;
+  pick.altList = f.alts;                          // so the display can spot its own
   return pick;
 }
 
@@ -1727,13 +1743,20 @@ function shortestSolutions(x0, basis, n) {
   });
 }
 
-/* Off, then each solution in turn shortest first, then off again. */
+/* Off, then each solution in turn shortest first, then off again. Stepping is
+   the only thing that changes which solution is on show — a press follows the
+   one already chosen rather than picking afresh. */
 function toggleSolution() {
   const s = solve();
   const many = s && s.alts ? s.alts : 1;
   if (!state.showSolution) { state.showSolution = true; state.solIndex = 0; }
   else if (state.solIndex + 1 < many) state.solIndex++;
   else { state.showSolution = false; state.solIndex = 0; }
+  state.follow = null;                         // re-pick from the current list
+  if (state.showSolution) {
+    const chosen = solve();
+    if (chosen) state.follow = Uint8Array.from(chosen);
+  }
   state.hintCell = -1;
   refresh();
 }
@@ -1742,6 +1765,7 @@ function hint() {
   // back to the shortest first: a hint should not follow whichever alternative
   // the Show solution button was left on
   state.solIndex = 0;
+  state.follow = null;
   const s = solve();
   if (!s) return;
   const idx = [...s.keys()].filter(i => s[i]);
@@ -1807,7 +1831,20 @@ function refresh() {
   const n = state.board.cells.length;
   let litCount = 0;
   const opt = solve();                            // drives both the markers and the counter
-  const sol = state.showSolution ? opt : null;
+  /* The dots follow whichever solution was chosen, kept up to date by the presses
+     since, so they always read as "what you still have to press". It stays a
+     valid solution however far it drifts from the shortest. */
+  const sol = state.showSolution ? (state.follow || opt) : null;
+  const shownPresses = sol ? sol.reduce((a, b) => a + b, 0) : 0;
+  // does it still coincide with one of the offered few? then keep naming its rank
+  let shownRank = -1;
+  if (sol && opt && opt.alts && state.follow) {
+    for (let j = 0; j < opt.altList.length; j++) {
+      let same = true;
+      for (let i = 0; i < n && same; i++) if (opt.altList[j][i] !== sol[i]) same = false;
+      if (same) { shownRank = j; break; }
+    }
+  } else if (sol) shownRank = opt && opt.rank !== undefined ? opt.rank : 0;
 
   for (let i = 0; i < n; i++) {
     const on = !!state.lit[i];
@@ -1845,8 +1882,8 @@ function refresh() {
   else if (litCount === 0) text = 'Solved.';
   else if (!opt.minimal)
     // too many to search, so nothing here can be called the shortest
-    text = `There are ${howMany(opt.free)} solutions — this one takes ${fmt(presses)}.` +
-           order(presses) +
+    text = `There are ${howMany(opt.free)} solutions — this one takes ${fmt(shownPresses || presses)}.` +
+           order(shownPresses || presses) +
            ' It is not necessarily the shortest; there are too many to search.';
   else if (!opt.free)
     text = `There is one unique solution, which takes ${fmt(presses)}.` + order(presses);
@@ -1855,10 +1892,15 @@ function refresh() {
     text = `There are ${howMany(opt.free)} solutions — the shortest takes ${fmt(best)}.` +
            order(best);
     text += state.showSolution
-      ? ` Showing ${opt.rank + 1} of ${opt.alts}` +
-        (opt.rank === 0 ? ' — the shortest.'
-         : presses === best ? ' — also shortest.'
-         : ` — ${fmt(presses)}, ${presses - best} more.`)
+      ? (shownRank >= 0
+          ? ` Showing ${shownRank + 1} of ${opt.alts}` +
+            (shownRank === 0 ? ' — the shortest.'
+             : shownPresses === best ? ' — also shortest.'
+             : ` — ${fmt(shownPresses)}, ${shownPresses - best} more.`)
+          // drifted off the offered list by pressing along it
+          : ` Following the solution you picked — ${fmt(shownPresses)} left` +
+            (shownPresses === best ? ', still the shortest.'
+                                   : `, ${shownPresses - best} more than the shortest.`))
       : opt.alts >= 2 ** opt.free
         ? ' Show solution steps through all the solutions.'
         : ' Show solution steps through the shortest few solutions.';
