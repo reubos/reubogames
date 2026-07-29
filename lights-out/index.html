@@ -195,7 +195,7 @@
 
       <div class="panel">
         <p class="label">Board size <span id="sizeVal" style="color:var(--text)"></span></p>
-        <input type="range" id="sizeSlider" min="0" max="9" value="4" oninput="onSize(this.value)">
+        <input type="range" id="sizeSlider" min="0" max="15" value="6" oninput="onSize(this.value)">
 
         <p class="label" style="margin-top:16px">Neighbours</p>
         <div class="seg">
@@ -1451,7 +1451,7 @@ function verify() {
 
 const state = {
   tiling: TILINGS[1],
-  size: 4,                                   // index into BOARD_SIZES; set at boot
+  size: 6,                                   // index into BOARD_SIZES; set at boot
   mode: 'edge',
   wrap: 'flat',                                // what the player asked for
   wrapping: 'flat',                            // what this board actually does
@@ -1769,12 +1769,14 @@ function refresh() {
      what it is rather than implying it is optimal. */
   const presses = opt ? opt.reduce((a, b) => a + b, 0) : 0;
   const many = opt && opt.free ? ` Multiple solutions exist — 2^${opt.free} of them.` : '';
+  const p = `${presses} press${presses === 1 ? '' : 'es'}`;   // 2×2 boards need one
+  const order = presses > 1 ? " Order doesn't matter." : '';
   document.getElementById('optNote').textContent = !opt
     ? 'This position has no solution.'
     : presses === 0 ? 'Solved.'
     : opt.minimal
-      ? `The shortest solution takes ${presses} presses. Order doesn't matter.` + many
-      : `A solution from here takes ${presses} presses. Order doesn't matter.` + many +
+      ? `The shortest solution takes ${p}.` + order + many
+      : `A solution from here takes ${p}.` + order + many +
         ' This is one of them, not necessarily the shortest — there are too many to search.';
 
   const win = document.getElementById('win');
@@ -1860,8 +1862,16 @@ function setTiling(t) {
    window by half a pitch reaches the other parity, so the search tries both
    in each axis and keeps whichever run lands nearest the target. */
 
-const BOARD_SIZES = [12, 20, 30, 45, 65, 90, 125, 170, 230, 300];
-const DEFAULT_SIZE = 4;                      // index into BOARD_SIZES → 65 tiles
+/* The targets are the perfect squares, one per side length. An arbitrary target
+   is the wrong thing to aim at, because a rectangle can hit it better than a
+   square can: asking for 30 tiles got 5×6 exactly, beating both 5×5 and 6×6 on
+   count while being only 1.2:1 in shape. Squaring the targets makes the square
+   board the exact answer instead, so the square tiling steps 2×2, 3×3, 4×4 …
+   with nothing skipped, nothing repeated and every board dead square. Other
+   tilings land on the same counts and come out as square as their tiles allow. */
+const BOARD_SIZES = [];
+for (let k = 2; k <= 17; k++) BOARD_SIZES.push(k * k);
+const DEFAULT_SIZE = 6;                      // index into BOARD_SIZES → 8×8, 64 tiles
 const PREVIEW_TILES = 50;                    // tiles shown in a picker card
 const THUMB_TILES = 16;                      // and in the 40px sidebar thumbnail
 const CARD_ASPECT = 1.44;                    // matches the card's svg box
