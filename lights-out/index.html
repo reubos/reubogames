@@ -1405,6 +1405,7 @@ const PREVIEW_TILES = 50;                    // tiles shown in a picker card
 const THUMB_TILES = 16;                      // and in the 40px sidebar thumbnail
 const CARD_ASPECT = 1.44;                    // matches the card's svg box
 const previewCache = new Map();
+const densityCache = new Map();              // tiles per unit area, per tiling
 
 function previewPatch(t, target, aspect) {
   const key = t.id + ':' + target + ':' + aspect;
@@ -1413,9 +1414,15 @@ function previewPatch(t, target, aspect) {
   // Size the working patch to what the target actually needs. A fixed multiple
   // of the pitch would generate ~100 unit cells every time, which for a tiling
   // with 21 tiles per cell is thousands of polygons to find a 50-tile window.
+  //
+  // The probe is cached per tiling, not per target: it costs a full generation,
+  // which for a dual means building and dualising a parent patch, and that was
+  // the single largest item in the cold cost of the picker — paid twice over,
+  // once for the card and again for the sidebar thumbnail.
   const pitch = t.src.pitch;
-  const probe = t.src.gen(2);
-  const density = probe.length / (4 * pitch * pitch) || 1;
+  if (!densityCache.has(t.id))
+    densityCache.set(t.id, t.src.gen(2).length / (4 * pitch * pitch) || 1);
+  const density = densityCache.get(t.id);
   const need = Math.sqrt(target / density * aspect) / 2;
   const H = Math.max(1.2 * pitch, need * 1.4);
   const all = t.src.raw(H);                  // generated once, then re-clipped
