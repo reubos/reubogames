@@ -203,6 +203,14 @@
           <button id="modeCorner" onclick="setMode('corner')">+ Corners</button>
         </div>
         <p class="note" id="modeNote"></p>
+
+        <p class="label" style="margin-top:16px">Edges</p>
+        <div class="seg">
+          <button id="wrapFlat" class="sel" onclick="setWrap('flat')">Flat</button>
+          <button id="wrapCyl" onclick="setWrap('cylinder')">Cylinder</button>
+          <button id="wrapTorus" onclick="setWrap('torus')">Torus</button>
+        </div>
+        <p class="note" id="wrapNote"></p>
       </div>
 
       <div class="panel">
@@ -350,7 +358,9 @@ function lattice(cellFn, v1, v2) {
     return out;
   }
 
-  return { pitch, density, vertexDensity, raw,
+  // v1/v2 are what the wrapping needs: identifying opposite edges of a board
+  // means quotienting by a sublattice of this one.
+  return { pitch, density, vertexDensity, v1, v2, raw,
            gen: n => clipRect(raw(n * pitch / 2), n * pitch / 2) };
 }
 
@@ -438,6 +448,8 @@ function dualOf(base) {
     pitch: base.pitch,
     // one dual tile per parent vertex, and one dual vertex per parent tile
     density: base.vertexDensity, vertexDensity: base.density,
+    // the dual repeats on exactly the lattice its parent does
+    v1: base.v1, v2: base.v2,
     // dualPolys returns a face for every complete vertex of the parent, which
     // reaches well beyond h; trim it so callers get the region they asked for
     raw: h => clipRect(dualPolys(base.raw(h + 2.5 * base.pitch)), h),
@@ -938,6 +950,158 @@ function buildBoard(polys) {
 }
 
 /* =====================================================================
+   6b. WRAPPED BOARDS  (cylinder and torus)
+
+   Identifying opposite edges of a board means quotienting the tiling by a
+   sublattice of its own translation lattice, so the board has to be a whole
+   number of unit cells — a fundamental domain — rather than the rectangular
+   clip an ordinary board is. Only the periodic tilings have a lattice at all;
+   the aperiodic ones have none by definition and cannot be wrapped.
+
+   Cylinder and torus share their geometry exactly. Both take the same
+   fundamental domain, so the board looks identical; the cylinder simply does
+   not identify the second pair of edges.
+   ===================================================================== */
+
+// Gauss reduction: the shortest, most nearly orthogonal basis of the same
+// lattice. Without it a torus of m×n cells is a long thin parallelogram.
+function reduceBasis(a, b) {
+  const dot = (p, q) => p[0] * q[0] + p[1] * q[1];
+  for (let i = 0; i < 40; i++) {
+    if (dot(a, a) > dot(b, b)) { const t = a; a = b; b = t; }
+    const mu = Math.round(dot(a, b) / dot(a, a));
+    if (!mu) break;
+    b = [b[0] - mu * a[0], b[1] - mu * a[1]];
+  }
+  return [a, b];
+}
+
+/* Pick the sublattice to wrap on. Every sublattice of index k has a basis in
+   Hermite form — a·v1 and b·v1 + c·v2 with k = a·c and 0 ≤ b < a — so running
+   over those covers all of them, not just the m×n ones. That matters for the
+   shape: on a triangular lattice the diagonal choices give a 60° rhombus,
+   while an off-diagonal one can come out very nearly square. */
+function wrapLattice(src, cellSize, target) {
+  const { v1, v2, pitch } = src;
+  const kMax = Math.ceil(target / cellSize * 2 + 6);
+  let best = null;
+  for (let a = 1; a <= kMax; a++) {
+    for (let c = 1; a * c <= kMax; c++) {
+      const k = a * c;
+      if (k * cellSize < 12) continue;
+      for (let b = 0; b < a; b++) {
+        const [r1, r2] = reduceBasis([a * v1[0], a * v1[1]],
+                                     [b * v1[0] + c * v2[0], b * v1[1] + c * v2[1]]);
+        const L1 = Math.hypot(r1[0], r1[1]), L2 = Math.hypot(r2[0], r2[1]);
+        // a period shorter than this and a tile starts wrapping onto itself
+        if (L1 < 1.8 * pitch) continue;
+        const sin = Math.abs(r1[0] * r2[1] - r1[1] * r2[0]) / (L1 * L2);
+        const score = 2 * Math.abs(Math.log(k * cellSize / target))
+                    + Math.abs(Math.log(L1 / L2)) + Math.abs(Math.log(sin));
+        if (!best || score < best.score) best = { r1, r2, k, score };
+      }
+    }
+  }
+  return best;
+}
+
+function wrapBoard(t, target, wrapBoth) {
+  const src = t.src;
+  if (!src.v1) return null;                          // aperiodic: nothing to wrap
+  const cellSize = Math.round(src.density * Math.abs(src.v1[0] * src.v2[1] -
+                                                     src.v1[1] * src.v2[0]));
+  const L = wrapLattice(src, cellSize, target);
+  if (!L) return null;
+  const { r1, r2 } = L;
+
+  // enough patch to cover the domain, centred on the origin, plus a margin so
+  // every tile that touches it across an edge is present too
+  const H = (Math.hypot(r1[0], r1[1]) + Math.hypot(r2[0], r2[1])) / 2 + 2 * src.pitch;
+  const all = src.raw(H);
+  const { faces, edgeMap, vertFaces } = topology(all);
+
+  const det = r1[0] * r2[1] - r1[1] * r2[0];
+
+  /* Which copy of a tile to keep. The parallelogram spanned by the basis is a
+     perfectly good fundamental domain but a slanted one, and half its bounding
+     box comes out empty. The set of tiles nearer the origin than any other
+     lattice point is just as valid a domain and comes out round, so the board
+     fills the view. Ties are broken on (i, j) so that exactly one copy of each
+     tile is ever chosen — picking by distance alone let a symmetric lattice
+     keep two copies, which is what made a 60-tile torus come out with 61. */
+  const shift = (cx, cy) => {
+    const s = (cx * r2[1] - cy * r2[0]) / det, u = (r1[0] * cy - r1[1] * cx) / det;
+    const si = Math.round(s), ui = Math.round(u);
+    let bi = 0, bj = 0, bd = Infinity;
+    for (let i = si - 1; i <= si + 1; i++) for (let j = ui - 1; j <= ui + 1; j++) {
+      const qx = cx - i * r1[0] - j * r2[0], qy = cy - i * r1[1] - j * r2[1];
+      const d = qx * qx + qy * qy;
+      if (d < bd - 1e-7 || (d < bd + 1e-7 && (i < bi || (i === bi && j < bj)))) {
+        bd = d; bi = i; bj = j;
+      }
+    }
+    return [bi, bj];
+  };
+
+  const shifts = faces.map(f => shift(f.cx, f.cy));
+  const board = [], homeOf = new Int32Array(faces.length).fill(-1);
+  const K = 0.25, bucket = new Map();
+  faces.forEach((f, i) => {
+    if (shifts[i][0] || shifts[i][1]) return;        // a copy, not the original
+    const n = board.length;
+    board.push(f); homeOf[i] = n;
+    const bk = Math.round(f.cx / K) + ',' + Math.round(f.cy / K);
+    if (!bucket.has(bk)) bucket.set(bk, []);
+    bucket.get(bk).push(n);
+  });
+  if (!board.length) return null;
+
+  // fold every other patch tile back onto the board tile it is a copy of
+  faces.forEach((f, i) => {
+    if (homeOf[i] >= 0) return;
+    const [bi, bj] = shifts[i];
+    // on a cylinder only the first pair of edges is a seam; a tile that had to
+    // move along r2 is across a real boundary and has no neighbour there
+    if (!wrapBoth && bj !== 0) return;
+    const x = f.cx - bi * r1[0] - bj * r2[0], y = f.cy - bi * r1[1] - bj * r2[1];
+    for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) {
+      for (const n of bucket.get((Math.round(x / K) + dx) + ',' +
+                                 (Math.round(y / K) + dy)) || []) {
+        if (Math.abs(board[n].cx - x) < 0.02 && Math.abs(board[n].cy - y) < 0.02) {
+          homeOf[i] = n; return;
+        }
+      }
+    }
+  });
+
+  const edgeNb = board.map(() => new Set());
+  const cornerNb = board.map(() => new Set());
+  for (const e of edgeMap.values()) {
+    if (e.length !== 2) continue;
+    const a = homeOf[e[0]], b = homeOf[e[1]];
+    // a tile is never its own neighbour: pressing already toggles it
+    if (a < 0 || b < 0 || a === b) continue;
+    edgeNb[a].add(b); edgeNb[b].add(a);
+  }
+  for (const w of vertFaces.values()) {
+    const u = [...new Set(w.map(i => homeOf[i]))].filter(i => i >= 0);
+    for (const a of u) for (const b of u) if (a !== b) cornerNb[a].add(b);
+  }
+
+  const cells = board.map((f, i) => ({
+    poly: f.poly, cx: f.cx, cy: f.cy,
+    edgeNb: [...edgeNb[i]], cornerNb: [...cornerNb[i]]
+  }));
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const c of cells) for (const p of c.poly) {
+    if (p[0] < x0) x0 = p[0]; if (p[0] > x1) x1 = p[0];
+    if (p[1] < y0) y0 = p[1]; if (p[1] > y1) y1 = p[1];
+  }
+  return { cells, bbox: [x0, y0, x1 - x0, y1 - y0], wrapped: true,
+           expected: L.k * cellSize };
+}
+
+/* =====================================================================
    7. SELF-CHECK
    Confirms each tiling really is what it claims: every interior edge is
    shared by exactly two tiles, every interior vertex closes to 360°, and
@@ -1167,6 +1331,9 @@ const state = {
   tiling: TILINGS[1],
   size: 4,                                   // index into BOARD_SIZES; set at boot
   mode: 'edge',
+  wrap: 'flat',                                // what the player asked for
+  wrapping: 'flat',                            // what this board actually does
+  canWrap: true,
   cornerDiffers: true,
   board: null,
   lit: null,
@@ -1184,7 +1351,16 @@ function neighbours(i) {
 }
 
 function rebuild() {
-  state.board = buildBoard(windowPatch(state.tiling, BOARD_SIZES[state.size], 1).polys);
+  const target = BOARD_SIZES[state.size];
+  state.canWrap = !!state.tiling.src.v1;
+  // state.wrap is what the player asked for and is kept even while an aperiodic
+  // tiling is selected, so it comes back when they move to one that can wrap
+  const want = state.canWrap ? state.wrap : 'flat';
+  state.board = want === 'flat' ? null
+              : wrapBoard(state.tiling, target, want === 'torus');
+  state.wrapping = state.board ? want : 'flat';
+  if (!state.board) state.board = buildBoard(windowPatch(state.tiling, target, 1).polys);
+  updateWrapUI();
   document.getElementById('sizeVal').textContent =
     '(' + state.board.cells.length + ' tiles)';
 
@@ -1435,6 +1611,28 @@ function setMode(m) {
   state.mode = m;
   updateModeUI();
   newGame();
+}
+
+function updateWrapUI() {
+  for (const [id, v] of [['wrapFlat', 'flat'], ['wrapCyl', 'cylinder'], ['wrapTorus', 'torus']]) {
+    const b = document.getElementById(id);
+    b.classList.toggle('sel', state.wrapping === v);
+    b.disabled = v !== 'flat' && !state.canWrap;
+  }
+  document.getElementById('wrapNote').textContent =
+    !state.canWrap
+      ? 'Wrapping needs a repeating tiling — an aperiodic one has no translation to wrap along.'
+      : state.wrapping === 'cylinder'
+        ? 'One pair of opposite edges is joined. Hover a tile at the seam to see where its neighbours are.'
+      : state.wrapping === 'torus'
+        ? 'Both pairs of opposite edges are joined, so every tile has a full set of neighbours and there is no corner to start from.'
+      : '';
+}
+
+function setWrap(w) {
+  if (w !== 'flat' && !state.canWrap) return;
+  state.wrap = w;
+  rebuild();
 }
 
 function setTiling(t) {
