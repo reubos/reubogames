@@ -1481,6 +1481,11 @@ function solve() {
     const p = pivotOf[c];
     if (p >= 0 && (M[p * W + aw] & ab)) x[c] = 1;
   }
+  /* Every free column is a press-set that changes nothing — a "quiet pattern" —
+     and adding any combination of them to x gives another solution, so there
+     are 2^(n − rank) of them in all. Bounded boards usually have none spare;
+     wrapping an edge is what tends to create them. */
+  x.free = n - row;
   return x;
 }
 
@@ -1575,9 +1580,17 @@ function refresh() {
   document.getElementById('solveBtn').classList.toggle('on', state.showSolution);
   document.getElementById('undoBtn').disabled = state.history.length === 0;
 
-  document.getElementById('optNote').textContent = opt
-    ? `A solution from here takes ${opt.reduce((a, b) => a + b, 0)} presses. Order doesn't matter.`
-    : 'This position has no solution.';
+  /* With free columns the solver's answer is one of 2^free solutions, not the
+     only one — and not necessarily the shortest, since picking the shortest
+     means minimising weight over a coset, which is syndrome decoding. So say
+     what it is rather than implying it is optimal. */
+  const presses = opt ? opt.reduce((a, b) => a + b, 0) : 0;
+  document.getElementById('optNote').textContent = !opt
+    ? 'This position has no solution.'
+    : presses === 0 ? 'Solved.'
+    : `A solution from here takes ${presses} presses. Order doesn't matter.` +
+      (opt.free ? ` Multiple solutions exist (2^${opt.free} of them); this is one,` +
+                  ` not necessarily the shortest.` : '');
 
   const win = document.getElementById('win');
   win.classList.toggle('show', litCount === 0);
