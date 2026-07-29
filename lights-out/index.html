@@ -195,7 +195,7 @@
 
       <div class="panel">
         <p class="label">Board size <span id="sizeVal" style="color:var(--text)"></span></p>
-        <input type="range" id="sizeSlider" min="3" max="8" value="5" oninput="onSize(this.value)">
+        <input type="range" id="sizeSlider" min="0" max="9" value="4" oninput="onSize(this.value)">
 
         <p class="label" style="margin-top:16px">Neighbours</p>
         <div class="seg">
@@ -325,6 +325,15 @@ function lattice(cellFn, v1, v2) {
   const A = Math.abs(v1[0] * v2[1] - v1[1] * v2[0]);
   const pitch = Math.sqrt(A);                       // normalises "size" across tilings
 
+  /* Tiles and vertices per unit area. Sizing a board to a tile count needs the
+     first, and the dual of this tiling has one tile per vertex of it, so it
+     needs the second. Both come straight off the cell — F, and V = E − F by
+     Euler on the torus — which saves generating a patch just to measure them. */
+  const cell0 = cellFn();
+  const F = cell0.length;
+  const E = cell0.reduce((s, p) => s + p.length, 0) / 2;
+  const density = F / A, vertexDensity = (E - F) / A;
+
   function raw(h) {
     const cell = cellFn();
     let rad = 0;
@@ -341,7 +350,8 @@ function lattice(cellFn, v1, v2) {
     return out;
   }
 
-  return { pitch, raw, gen: n => clipRect(raw(n * pitch / 2), n * pitch / 2) };
+  return { pitch, density, vertexDensity, raw,
+           gen: n => clipRect(raw(n * pitch / 2), n * pitch / 2) };
 }
 
 /* =====================================================================
@@ -426,6 +436,8 @@ function dualPolys(polys) {
 function dualOf(base) {
   return {
     pitch: base.pitch,
+    // one dual tile per parent vertex, and one dual vertex per parent tile
+    density: base.vertexDensity, vertexDensity: base.density,
     // dualPolys returns a face for every complete vertex of the parent, which
     // reaches well beyond h; trim it so callers get the region they asked for
     raw: h => clipRect(dualPolys(base.raw(h + 2.5 * base.pitch)), h),
@@ -458,64 +470,64 @@ function fromCells(d) {
 }
 
 const TWO_UNIFORM = [
-  { id: 'n18', name: '[3⁶; 3².4.3.4]', variant: '', def: 3, min: 2, max: 5,
+  { id: 'n18', name: '[3⁶; 3².4.3.4]', variant: '',
     v1: [-2.366,1.366], v2: [2.366,1.366],
     cell: [[3,0.1548,-1.4104,1.0472],[4,-0.2395,-0.7274,1.309],[4,-0.2395,0.6386,0.2618],[4,-1.4226,-0.0444,0.7854],[3,0.4435,-0.3331,0.5236],[3,-0.6339,-0.0444,0],[3,1.4435,0.2443,1.5708],[3,1.4435,-0.333,0.5236],[3,0.4435,0.2443,1.5708],[3,0.9435,0.533,0.5236],[3,0.9435,-0.6217,1.5708]] },
-  { id: 'n9', name: '[3.4.6.4; 3².4.3.4]', variant: '', def: 3, min: 2, max: 4,
+  { id: 'n9', name: '[3.4.6.4; 3².4.3.4]', variant: '',
     v1: [1.866,3.2321], v2: [-3.7321,0],
     cell: [[3,0.5986,-1.1753,0],[4,-0.8731,1.3738,1.309],[3,-2.8448,-0.6753,1.0472],[4,1.6759,2.0568,0.7854],[6,1.6759,0.6908,0],[3,-0.4788,0.6907,1.0472],[3,-0.1901,1.7681,0.5236],[4,-2.0561,-0.6753,0.7854],[4,0.4929,0.0077,1.309],[3,-0.1901,-0.3866,1.5708],[3,0.8872,2.0568,1.0472],[4,0.4929,1.3738,0.2618],[4,-0.8731,0.0077,0.2618],[3,0.0986,0.6907,0],[3,-1.2674,-0.6753,0]] },
-  { id: 'n8', name: '[3.4.6.4; 3³.4²]', variant: '', def: 3, min: 2, max: 4,
+  { id: 'n8', name: '[3.4.6.4; 3³.4²]', variant: '',
     v1: [3.2321,1.866], v2: [-3.2321,1.866],
     cell: [[3,-0.0342,-1.9428,2.0944],[4,0.3601,1.1063,1.309],[3,0.2545,-1.4428,1.0472],[4,2.4092,-0.0767,0.7854],[6,-0.8229,0.4233,0],[3,0.7545,0.4233,1.0472],[4,-2.0059,-0.2598,1.309],[3,-2.4002,0.4233,2.0944],[3,-0.0342,-0.9428,2.0944],[4,-0.8229,-0.9428,0.7854],[3,1.6205,-0.0767,1.0472],[4,1.2262,-0.7598,0.2618],[4,0.3601,-0.2598,0.2618],[3,1.3318,0.4233,0],[3,-1.6115,-0.9428,1.0472]] },
-  { id: 'n5', name: '[3.4.6.4; 3.4².6]', variant: '', def: 2, min: 2, max: 4,
+  { id: 'n5', name: '[3.4.6.4; 3.4².6]', variant: '',
     v1: [-2.366,4.0981], v2: [-4.7321,0],
     cell: [[4,3.0706,-1.5368,0.7854],[4,2.0706,-1.5368,0.7854],[3,0.7045,1.7726,0.5236],[6,-0.2955,-1.5368,0.5236],[3,-1.6615,-0.7481,1.5708],[6,2.0706,-0.1708,1.0472],[4,1.0706,-1.5368,0.7854],[6,-0.2955,1.1953,0],[4,1.3875,1.3783,0.2618],[4,0.3875,-0.3538,0.2618],[4,-0.9785,-0.3538,1.309],[4,-1.9785,1.3783,1.309],[4,0.8875,0.5123,0.2618],[3,1.0706,-0.7481,1.5708],[4,-1.4785,0.5123,1.309],[3,-2.6615,0.9839,1.5708],[3,-1.2955,1.7726,0.5236],[3,-0.2955,0.0406,0.5236]] },
-  { id: 'n1', name: '[4.6.12; 3.4.6.4]', variant: '', def: 3, min: 2, max: 4,
+  { id: 'n1', name: '[4.6.12; 3.4.6.4]', variant: '',
     v1: [5.4641,0], v2: [2.7321,4.7321],
     cell: [[4,-3.46,-1.9409,0.7854],[6,0.6381,-1.9409,0.5236],[12,-0.728,0.4251,0.2618],[6,-2.094,-1.9409,0.5236],[3,2.0041,-1.1523,1.5708],[4,1.3211,-0.7579,0.2618],[4,-0.728,-1.9409,0.7854],[4,2.6871,1.6081,0.2618],[6,2.0041,0.4251,0.5236],[4,-2.777,-0.7579,1.309],[4,1.3211,1.6081,1.309],[3,2.0041,2.0024,0.5236]] },
-  { id: 'n13', name: '[3⁶; 3².4.12]', variant: '', def: 3, min: 2, max: 4,
+  { id: 'n13', name: '[3⁶; 3².4.12]', variant: '',
     v1: [0,-4.7321], v2: [-4.0981,-2.3661],
     cell: [[3,1.828,2.9219,0],[12,-1.1927,-1.3102,0.2618],[3,-1.9813,-3.6762,1.0472],[3,1.2507,-1.8102,1.0472],[4,0.8563,2.2389,0.2618],[3,0.7507,1.0559,1.0472],[4,0.8564,-0.1271,1.309],[3,-2.27,-3.1762,0],[4,-1.1927,1.0559,0.7854],[3,-0.1153,1.5559,1.0472],[3,0.962,-1.3102,0],[3,-0.1153,0.5559,1.0472],[3,0.462,1.5559,0],[3,0.462,0.5559,0],[3,1.2507,-0.8102,1.0472],[3,-0.404,1.0559,0]] },
-  { id: 'n2', name: '[3.12²; 3.4.3.12]', variant: '', def: 4, min: 2, max: 6,
+  { id: 'n2', name: '[3.12²; 3.4.3.12]', variant: '',
     v1: [3.7321,-0.0009], v2: [0.0009,3.7321],
     cell: [[12,-1.6171,-1.3769,0.2616],[3,0.2492,-0.3,0.5234],[3,0.2496,1.2773,1.5705],[3,1.0381,0.4885,2.0941],[3,-0.5393,0.4888,1.047],[4,0.2494,0.4887,0.7852]] },
-  { id: 'n10', name: '[3⁶; 3².6²]', variant: '', def: 4, min: 3, max: 6,
+  { id: 'n10', name: '[3⁶; 3².6²]', variant: '',
     v1: [-3,0], v2: [1.5,2.5981],
     cell: [[6,1.276,-1.3305,0],[3,0.276,-0.7531,0.5236],[6,1.276,0.4016,0],[3,-0.224,0.1129,0.5236],[3,-0.724,-0.7531,0.5236],[3,0.276,-0.1758,1.5708],[3,-0.224,-1.0418,1.5708],[3,-0.724,-0.1758,1.5708]] },
-  { id: 'n19', name: '[3⁶; 3⁴.6]', variant: '13-tile unit', def: 3, min: 2, max: 5,
+  { id: 'n19', name: '[3⁶; 3⁴.6]', variant: '13-tile unit',
     v1: [-1.5,-2.5981], v2: [-3,0],
     cell: [[3,1.0852,1.2105,0.5236],[3,0.5852,0.9218,1.5708],[3,-1.4148,0.9218,1.5708],[3,-0.4148,-0.8102,1.5708],[3,0.0852,1.2105,0.5236],[3,0.5852,0.3445,0.5236],[6,-1.4148,-0.2329,0],[3,-2.4148,-1.3876,0.5236],[3,0.0852,-0.5215,0.5236],[3,-0.4148,0.9218,1.5708],[3,0.0852,0.0558,1.5708],[3,-2.4148,-0.8102,1.5708],[3,-0.4148,0.3445,0.5236]] },
-  { id: 'n20', name: '[3⁶; 3⁴.6]', variant: '21-tile unit', def: 2, min: 2, max: 4,
+  { id: 'n20', name: '[3⁶; 3⁴.6]', variant: '21-tile unit',
     v1: [-2.5,-2.5981], v2: [-3.5,0.866],
     cell: [[3,3.1149,1.3405,0.5236],[3,0.6149,-0.6803,1.5708],[3,2.6149,1.0518,1.5708],[6,0.6149,1.6291,0],[3,1.1149,-0.3916,0.5236],[3,0.1149,-0.3916,0.5236],[3,2.1149,1.3405,0.5236],[3,-0.8851,1.3405,0.5236],[3,-0.3851,1.0518,1.5708],[3,0.6149,0.4744,0.5236],[3,1.6149,1.0518,1.5708],[3,-0.8851,-0.3916,0.5236],[3,-1.8851,0.1858,1.5708],[3,1.1149,0.1858,1.5708],[3,0.1149,0.1858,1.5708],[3,-0.3851,-0.6803,1.5708],[3,-1.3851,1.0518,1.5708],[3,-0.3851,0.4744,0.5236],[3,1.6149,0.4744,0.5236],[3,-0.8851,0.1858,1.5708],[3,-1.3851,0.4744,0.5236]] },
-  { id: 'n12', name: '[3².6²; 3⁴.6]', variant: '', def: 4, min: 3, max: 6,
+  { id: 'n12', name: '[3².6²; 3⁴.6]', variant: '',
     v1: [1.7321,0], v2: [-0.866,-2.5],
     cell: [[3,0.0822,1.8851,1.0472],[3,-0.2065,-0.6149,0],[3,0.6595,-0.1149,2.0944],[6,1.2369,0.8851,0.5236],[3,0.0822,-0.1149,1.0472]] },
-  { id: 'n11', name: '[3.6.3.6; 3².6²]', variant: '', def: 5, min: 3, max: 8,
+  { id: 'n11', name: '[3.6.3.6; 3².6²]', variant: '',
     v1: [0,-1.7321], v2: [-2,0],
     cell: [[6,0.305,0.8526,0],[3,-0.695,-0.3021,0.5236],[3,-0.695,0.2752,1.5708]] },
-  { id: 'n6', name: '[3.4².6; 3.6.3.6]', variant: '15-tile unit', def: 3, min: 2, max: 4,
+  { id: 'n6', name: '[3.4².6; 3.6.3.6]', variant: '15-tile unit',
     v1: [-2,0], v2: [0,8.1962],
     cell: [[3,0.5,-3.5417,0.5236],[6,-0.5,4.0771,0],[4,0.5,-2.753,0.7854],[3,0.5,3.4998,1.5708],[4,-0.5,2.7111,0.7854],[4,-0.5,-2.753,0.7854],[3,0.5,-1.9643,1.5708],[4,0.5,2.7111,0.7854],[3,-0.5,1.9224,0.5236],[6,-0.5,-1.387,1.0472],[6,0.5,1.3451,1.0472],[3,0.5,-0.8096,0.5236],[4,-0.5,-0.0209,0.7854],[3,-0.5,0.7677,1.5708],[4,0.5,-0.0209,0.7854]] },
-  { id: 'n7', name: '[3.4².6; 3.6.3.6]', variant: '5-tile unit', def: 4, min: 3, max: 6,
+  { id: 'n7', name: '[3.4².6; 3.6.3.6]', variant: '5-tile unit',
     v1: [-2,0], v2: [0,-2.7321],
     cell: [[3,1.1124,0.6696,0.5236],[6,0.1124,0.0922,0],[4,-0.8875,-1.2738,0.7854],[4,0.1125,-1.2738,0.7854],[3,1.1125,-0.4851,1.5708]] },
-  { id: 'n16', name: '[3³.4²; 3².4.3.4]', variant: '18-tile unit', def: 2, min: 2, max: 4,
+  { id: 'n16', name: '[3³.4²; 3².4.3.4]', variant: '18-tile unit',
     v1: [-2.366,2.366], v2: [-2.366,-2.366],
     cell: [[3,1.9434,-0.1572,1.5708],[3,-2.2886,0.1314,0.5236],[4,1.2604,0.2371,0.2618],[4,-0.4226,1.4201,0.7854],[3,-1.7886,-0.1572,1.5708],[4,0.0774,-1.4459,0.7854],[3,-0.7113,-1.4459,1.0472],[3,0.5774,0.6314,0.5236],[3,0.8661,-0.4459,0],[3,-1.2113,1.4201,1.0472],[3,-0.4226,0.6314,0.5236],[4,-1.7886,-0.9459,0.7854],[4,-1.1056,0.2371,1.309],[3,-1.5,0.9201,2.0944],[4,0.0774,-0.4459,0.7854],[3,-1,-0.9459,2.0944],[3,0.0774,0.3428,1.5708],[3,-0.7113,-0.4459,1.0472]] },
-  { id: 'n17', name: '[3³.4²; 3².4.3.4]', variant: '12-tile unit', def: 3, min: 2, max: 4,
+  { id: 'n17', name: '[3³.4²; 3².4.3.4]', variant: '12-tile unit',
     v1: [-0.5,1.866], v2: [3.7321,1],
     cell: [[3,-1.5515,-1.1555,1.5708],[3,-1.0515,-0.8668,0.5236],[3,1.6806,0.1332,0.5236],[4,1.6806,0.9219,0.7854],[3,-1.0515,0.7105,1.5708],[4,-1.0515,-0.0781,0.7854],[4,0.9975,-0.2612,1.309],[3,0.8919,0.9219,1.0472],[4,-0.3685,1.1049,1.309],[3,-0.2628,-0.0781,2.0944],[3,0.6032,0.4219,0],[3,0.0259,0.4219,1.0472]] },
-  { id: 'n3', name: '[4⁴; 3³.4²]', variant: '5-tile unit', def: 4, min: 3, max: 6,
+  { id: 'n3', name: '[4⁴; 3³.4²]', variant: '5-tile unit',
     v1: [-1,0], v2: [0.5,3.866],
     cell: [[4,0.1149,-1.204,0.7854],[4,0.1149,-0.204,0.7854],[4,-0.3851,1.662,0.7854],[3,0.1149,0.5847,1.5708],[3,-0.3851,0.8733,0.5236]] },
-  { id: 'n4', name: '[4⁴; 3³.4²]', variant: '4-tile unit', def: 5, min: 3, max: 7,
+  { id: 'n4', name: '[4⁴; 3³.4²]', variant: '4-tile unit',
     v1: [1,0], v2: [-0.5,2.866],
     cell: [[4,0.1149,-1.0687,0.7854],[4,0.1149,-0.0687,0.7854],[3,0.6149,1.0087,0.5236],[3,0.1149,0.72,1.5708]] },
-  { id: 'n14', name: '[3⁶; 3³.4²]', variant: '5-tile unit', def: 4, min: 3, max: 6,
+  { id: 'n14', name: '[3⁶; 3³.4²]', variant: '5-tile unit',
     v1: [1,0], v2: [0,-2.7321],
     cell: [[3,-0.3851,0.6696,0.5236],[3,0.1149,0.3809,1.5708],[3,0.6149,-1.4851,1.5708],[4,0.1149,-0.4078,0.7854],[3,0.1149,-1.1965,0.5236]] },
-  { id: 'n15', name: '[3⁶; 3³.4²]', variant: '7-tile unit', def: 4, min: 3, max: 6,
+  { id: 'n15', name: '[3⁶; 3³.4²]', variant: '7-tile unit',
     v1: [1,0], v2: [-0.5,-3.5981],
     cell: [[3,-0.3851,1.8049,0.5236],[3,0.1149,1.5162,1.5708],[3,0.1149,-1.2158,1.5708],[4,0.1149,0.7275,0.7854],[3,-0.3851,-0.9272,0.5236],[3,0.1149,-0.0611,0.5236],[3,-0.3851,-0.3498,1.5708]] }
 ];
@@ -577,6 +589,10 @@ function multigrid(N, offsets) {
       }
       return pitch;
     },
+    // every tile is a rhombus, so one tile per unit area is 1/pitch², and each
+    // rhombus contributes 4 corners shared 4 ways, giving the same for vertices
+    get density() { return 1 / (src.pitch * src.pitch); },
+    get vertexDensity() { return 1 / (src.pitch * src.pitch); },
     raw: h => build(h * Math.SQRT2 + 3),
     gen(n) { const h = n * src.pitch / 2; return clipRect(build(h * Math.SQRT2 + 3), h); }
   };
@@ -658,55 +674,53 @@ const T_snubTrihex = lattice(() => {
 
 const TILINGS = [
   { id: 'triangle', group: 'regular', name: 'Triangular', cfg: '3.3.3.3.3.3',
-    src: T_triangle, min: 3, max: 9, def: 5 },
+    src: T_triangle },
   { id: 'square', group: 'regular', name: 'Square', cfg: '4.4.4.4',
-    src: T_square, min: 3, max: 10, def: 5 },
+    src: T_square },
   { id: 'hexagon', group: 'regular', name: 'Hexagonal', cfg: '6.6.6',
-    src: T_hexagon, min: 3, max: 9, def: 5 },
+    src: T_hexagon },
 
   { id: 'trihex', group: 'semi', name: 'Trihexagonal', cfg: '3.6.3.6',
-    src: T_trihex, min: 3, max: 7, def: 4 },
+    src: T_trihex },
   { id: 'truncSquare', group: 'semi', name: 'Truncated square', cfg: '4.8.8',
-    src: T_truncSquare, min: 3, max: 8, def: 5 },
+    src: T_truncSquare },
   { id: 'truncHex', group: 'semi', name: 'Truncated hexagonal', cfg: '3.12.12',
-    src: T_truncHex, min: 3, max: 7, def: 4 },
+    src: T_truncHex },
   { id: 'rhombitrihex', group: 'semi', name: 'Rhombitrihexagonal', cfg: '3.4.6.4',
-    src: T_rhombitrihex, min: 2, max: 6, def: 4 },
+    src: T_rhombitrihex },
   { id: 'truncTrihex', group: 'semi', name: 'Truncated trihexagonal', cfg: '4.6.12',
-    src: T_truncTrihex, min: 2, max: 6, def: 3 },
+    src: T_truncTrihex },
   { id: 'snubSquare', group: 'semi', name: 'Snub square', cfg: '3.3.4.3.4',
-    src: T_snubSquare, min: 2, max: 6, def: 4 },
+    src: T_snubSquare },
   { id: 'elongTri', group: 'semi', name: 'Elongated triangular', cfg: '3.3.3.4.4',
-    src: T_elongTri, min: 3, max: 8, def: 5 },
+    src: T_elongTri },
   { id: 'snubTrihex', group: 'semi', name: 'Snub trihexagonal', cfg: '3.3.3.3.6',
-    src: T_snubTrihex, min: 2, max: 5, def: 3 },
+    src: T_snubTrihex },
 
   // ordered by face: triangles, then quadrilaterals, then pentagons
   { id: 'tetrakis', group: 'dual', name: 'Tetrakis square', cfg: 'V4.8.8',
-    src: dualOf(T_truncSquare), min: 3, max: 8, def: 4, faces: 3 },
+    src: dualOf(T_truncSquare), faces: 3 },
   { id: 'triakis', group: 'dual', name: 'Triakis triangular', cfg: 'V3.12.12',
-    src: dualOf(T_truncHex), min: 2, max: 6, def: 4, faces: 3 },
+    src: dualOf(T_truncHex), faces: 3 },
   { id: 'kisrhombille', group: 'dual', name: 'Kisrhombille', cfg: 'V4.6.12',
-    src: dualOf(T_truncTrihex), min: 2, max: 5, def: 3, faces: 3 },
+    src: dualOf(T_truncTrihex), faces: 3 },
   { id: 'rhombille', group: 'dual', name: 'Rhombille', cfg: 'V3.6.3.6',
-    src: dualOf(T_trihex), min: 3, max: 7, def: 4, faces: 4 },
+    src: dualOf(T_trihex), faces: 4 },
   { id: 'deltoidal', group: 'dual', name: 'Deltoidal trihexagonal', cfg: 'V3.4.6.4',
-    src: dualOf(T_rhombitrihex), min: 2, max: 6, def: 4, faces: 4 },
+    src: dualOf(T_rhombitrihex), faces: 4 },
   { id: 'cairo', group: 'dual', name: 'Cairo pentagonal', cfg: 'V3.3.4.3.4',
-    src: dualOf(T_snubSquare), min: 3, max: 8, def: 4, faces: 5 },
+    src: dualOf(T_snubSquare), faces: 5 },
   { id: 'floret', group: 'dual', name: 'Floret pentagonal', cfg: 'V3.3.3.3.6',
-    src: dualOf(T_snubTrihex), min: 2, max: 5, def: 3, faces: 5 },
+    src: dualOf(T_snubTrihex), faces: 5 },
   { id: 'prismatic', group: 'dual', name: 'Prismatic pentagonal', cfg: 'V3.3.3.4.4',
-    src: dualOf(T_elongTri), min: 3, max: 8, def: 5, faces: 5 },
+    src: dualOf(T_elongTri), faces: 5 },
 
   // Offsets must be generic — three grid lines meeting at a point would break
   // the construction — and summing to zero is what makes N=5 a true Penrose.
   { id: 'penrose', group: 'aperiodic', name: 'Penrose rhombs', cfg: 'aperiodic · 5-fold',
-    src: multigrid(5, [0.1234, 0.2371, -0.3123, 0.4111, -0.4593]),
-    min: 4, max: 12, def: 8, aperiodic: true },
+    src: multigrid(5, [0.1234, 0.2371, -0.3123, 0.4111, -0.4593]), aperiodic: true },
   { id: 'ammann', group: 'aperiodic', name: 'Ammann–Beenker', cfg: 'aperiodic · 8-fold',
-    src: multigrid(4, [0.1913, -0.2671, 0.3319, -0.1237]),
-    min: 4, max: 12, def: 8, aperiodic: true }
+    src: multigrid(4, [0.1913, -0.2671, 0.3319, -0.1237]), aperiodic: true }
 ];
 
 /* The 2-uniform tilings have no common names, and their vertex notation is
@@ -746,8 +760,7 @@ function compositionName(cell) {
         name: list.length > 1 ? `${g} ${i + 1}` : g,
         cfg: d.name + (d.variant ? ' · ' + d.variant : ''),
         notation: d.name,
-        src: fromCells(d), min: d.min, max: d.max, def: d.def,
-        twoUniform: true
+        src: fromCells(d), twoUniform: true
       });
     });
   }
@@ -759,14 +772,13 @@ function compositionName(cell) {
    There are precisely two of those, both already above, so these come out of
    the existing dual operator rather than needing any new geometry. They are
    told apart by how many Cairo pentagons accompany each prismatic one. */
-for (const [id, ratio, min, max, def] of [['n16', '2:1', 2, 5, 3],
-                                          ['n17', '1:1', 2, 6, 4]]) {
+for (const [id, ratio] of [['n16', '2:1'], ['n17', '1:1']]) {
   const base = TILINGS.find(t => t.id === id);
   TILINGS.push({
     id: id + 'd', group: 'twodual',
     name: `Cairo and prismatic pentagons (${ratio})`,
     cfg: `dual of ${base.name}`,
-    src: dualOf(base.src), min, max, def, pentagons: 2, dualOfId: id
+    src: dualOf(base.src), pentagons: 2, dualOfId: id
   });
 }
 
@@ -778,28 +790,26 @@ for (const [id, ratio, min, max, def] of [['n16', '2:1', 2, 5, 3],
 
    Each is 2-isohedral: two tile shapes, edge to edge. The composition is the
    name, and verify() re-derives it from the geometry, so a name cannot quietly
-   go stale. Sizes are chosen to open at roughly 60-140 tiles and top out near
-   300, since the dual has one tile per vertex of its parent rather than one
-   per face. */
+   go stale. */
 const TWO_DUALS = [
-  ['n14', 'Hexagons and Pentagons',      3, 6, 10],
-  ['n15', 'Hexagons and Pentagons',      3, 5,  9],
-  ['n18', 'Hexagons and Pentagons',      2, 4,  7],
-  ['n19', 'Hexagons and Pentagons',      2, 4,  6],
-  ['n20', 'Hexagons and Pentagons',      2, 3,  5],
-  ['n4',  'Pentagons and Squares',       3, 5, 11],
-  ['n3',  'Pentagons and Squares',       3, 5,  9],
-  ['n8',  'Pentagons and Kites',         2, 3,  5],
-  ['n9',  'Pentagons and Kites',         2, 3,  5],
-  ['n12', 'Pentagons and Trapezoids',    3, 5,  9],
-  ['n10', 'Hexagons and Trapezoids',     2, 4,  7],
-  ['n13', 'Hexagons and Quadrilaterals', 2, 3,  5],
-  ['n11', 'Rhombi and Trapezoids',       3, 5, 11],
-  ['n7',  'Rhombi and Trapezoids',       3, 4,  8],
-  ['n6',  'Rhombi and Trapezoids',       2, 3,  4],
-  ['n5',  'Kites and Trapezoids',        2, 3,  4],
-  ['n2',  'Kites and Triangles',         2, 4,  6],
-  ['n1',  'Kites and Triangles',         2, 3,  4]
+  ['n14', 'Hexagons and Pentagons'],
+  ['n15', 'Hexagons and Pentagons'],
+  ['n18', 'Hexagons and Pentagons'],
+  ['n19', 'Hexagons and Pentagons'],
+  ['n20', 'Hexagons and Pentagons'],
+  ['n4',  'Pentagons and Squares'],
+  ['n3',  'Pentagons and Squares'],
+  ['n8',  'Pentagons and Kites'],
+  ['n9',  'Pentagons and Kites'],
+  ['n12', 'Pentagons and Trapezoids'],
+  ['n10', 'Hexagons and Trapezoids'],
+  ['n13', 'Hexagons and Quadrilaterals'],
+  ['n11', 'Rhombi and Trapezoids'],
+  ['n7',  'Rhombi and Trapezoids'],
+  ['n6',  'Rhombi and Trapezoids'],
+  ['n5',  'Kites and Trapezoids'],
+  ['n2',  'Kites and Triangles'],
+  ['n1',  'Kites and Triangles']
 ];
 
 (function addTwoDuals() {
@@ -813,13 +823,13 @@ const TWO_DUALS = [
   const cellArea = id => TWO_UNIFORM.find(d => d.id === id).area;
   for (const [name, list] of groups) {
     list.sort((p, q) => cellArea(p[0]) - cellArea(q[0]));
-    list.forEach(([id, , min, def, max], i) => {
+    list.forEach(([id], i) => {
       const base = TILINGS.find(t => t.id === id);
       TILINGS.push({
         id: id + 'd', group: 'twodual',
         name: list.length > 1 ? `${name} ${i + 1}` : name,
         cfg: `dual of ${base.name}`,
-        src: dualOf(base.src), min, max, def,
+        src: dualOf(base.src),
         shapes: name, dualOfId: id
       });
     });
@@ -853,13 +863,13 @@ const FCB = {
 TILINGS.push({
   id: 'fcb', group: 'three', name: 'Hexagons, Squares and Triangles',
   cfg: '[3⁴.6; 3³.4²; 3².4.3.4]', notation: '[3⁴.6; 3³.4²; 3².4.3.4]',
-  src: fromCells(FCB), min: 1, max: 3, def: 2
+  src: fromCells(FCB)
 });
 TILINGS.push({
   id: 'fcbd', group: 'threedual', name: 'Floret, Cairo and prismatic pentagons',
   cfg: 'dual of Hexagons, Squares and Triangles',
   src: dualOf(TILINGS[TILINGS.length - 1].src),
-  min: 2, max: 4, def: 3, pentagons: 3, dualOfId: 'fcb'
+  pentagons: 3, dualOfId: 'fcb'
 });
 
 /* Duals of the two aperiodic tilings. These are the odd ones out: with no
@@ -868,12 +878,12 @@ TILINGS.push({
    vertices of varying degree. That makes them the only boards here where the
    number of neighbours genuinely varies from tile to tile, so no composition
    name would be either short or stable, and they are named for their parent. */
-for (const [id, min, def, max] of [['penrose', 6, 9, 16], ['ammann', 6, 9, 16]]) {
+for (const id of ['penrose', 'ammann']) {
   const base = TILINGS.find(t => t.id === id);
   TILINGS.push({
     id: id + 'd', group: 'aperiodic', name: `${base.name} dual`,
     cfg: `dual of ${base.name}`,
-    src: dualOf(base.src), min, max, def, mixed: true, dualOfId: id
+    src: dualOf(base.src), mixed: true, dualOfId: id
   });
 }
 
@@ -1068,7 +1078,8 @@ function canonicalCfg(seq) {
 function verify() {
   const rows = [];
   for (const t of TILINGS) {
-    const polys = t.src.gen(t.def);
+    // a fixed tile count, so every tiling is checked at a comparable size
+    const polys = windowPatch(t, 140, 1).polys;
     const { pts, faces, edgeMap, vertFaces } = topology(polys);
 
     // interior vertices: those whose incident angles close to 360°
@@ -1154,7 +1165,7 @@ function verify() {
 
 const state = {
   tiling: TILINGS[1],
-  size: 5,
+  size: 4,                                   // index into BOARD_SIZES; set at boot
   mode: 'edge',
   cornerDiffers: true,
   board: null,
@@ -1173,7 +1184,9 @@ function neighbours(i) {
 }
 
 function rebuild() {
-  state.board = buildBoard(state.tiling.src.gen(state.size));
+  state.board = buildBoard(windowPatch(state.tiling, BOARD_SIZES[state.size], 1).polys);
+  document.getElementById('sizeVal').textContent =
+    '(' + state.board.cells.length + ' tiles)';
 
   // In some tilings (hexagons, 4.8.8) every pair of tiles meeting at a vertex
   // already shares an edge, so corner mode is the same game. Say so.
@@ -1413,8 +1426,8 @@ function updateModeUI() {
 
 function onSize(v) {
   state.size = +v;
-  document.getElementById('sizeVal').textContent = '(' + v + ')';
-  rebuild();
+  document.getElementById('sizeSlider').value = state.size;
+  rebuild();                                 // sets the label from the real count
 }
 
 function setMode(m) {
@@ -1427,12 +1440,9 @@ function setMode(m) {
 function setTiling(t) {
   const prev = state.tiling;
   state.tiling = t;
-  const s = document.getElementById('sizeSlider');
-  s.min = t.min; s.max = t.max;
-  // keep the player's size when it fits, otherwise fall back to the tiling's default
-  state.size = (prev && state.size >= t.min && state.size <= t.max) ? state.size : t.def;
-  s.value = state.size;
-  document.getElementById('sizeVal').textContent = '(' + state.size + ')';
+  // the size is a tile count now, so it means the same thing on every tiling
+  // and the player's choice carries across
+  document.getElementById('sizeSlider').value = state.size;
   document.getElementById('tilingName').textContent = t.name;
   document.getElementById('tilingCfg').textContent = t.cfg;
   // the 40px thumbnail needs far fewer tiles than a card to stay legible
@@ -1441,54 +1451,93 @@ function setTiling(t) {
   try { localStorage.setItem('lightsout.tiling', t.id); } catch (e) {}
 }
 
-/* A tiling's board size counts repeats, not tiles, so a fixed size would show
-   9 tiles for the square tiling and 190 for a 2-uniform one with a 21-tile
-   unit. Instead, search for the window that shows roughly `target` tiles, and
-   frame the swatch by that window rather than by the polygons' bounding box —
-   which makes the scale identical across every tiling by construction. */
+/* Boards and previews are both sized by a target number of tiles rather than
+   by a window width. A width is the wrong control: how many tiles it holds is
+   a step function of the tiling's unit cell and of where the lattice happens
+   to fall, so one slider position meant 4 tiles on the square tiling and 190
+   on a 2-uniform one, and whole steps did nothing — the square tiling's sizes
+   ran 4, 16, 16, 36, 36, 64, 64, 100.
 
+   A window centred on the lattice origin can also only ever reach one parity.
+   The square tiling's origin sits on a tile corner, so it produced 2×2 and
+   4×4 but 3×3 was not merely missing, it was unreachable. Offsetting the
+   window by half a pitch reaches the other parity, so the search tries both
+   in each axis and keeps whichever run lands nearest the target. */
+
+const BOARD_SIZES = [12, 20, 30, 45, 65, 90, 125, 170, 230, 300];
+const DEFAULT_SIZE = 4;                      // index into BOARD_SIZES → 65 tiles
 const PREVIEW_TILES = 50;                    // tiles shown in a picker card
 const THUMB_TILES = 16;                      // and in the 40px sidebar thumbnail
 const CARD_ASPECT = 1.44;                    // matches the card's svg box
-const previewCache = new Map();
-const densityCache = new Map();              // tiles per unit area, per tiling
+const patchCache = new Map();
+const colourCache = new Map();
+const workCache = new Map();                 // one growable working patch per tiling
 
-function previewPatch(t, target, aspect) {
+/* Generating the patch is nearly all of the cost — for a dual it means
+   building a parent patch and dualising it — and the window search itself is
+   a rounding error beside it. So the patch is generated per tiling rather
+   than per requested size, and kept: a later request for a bigger board grows
+   it, a smaller one reuses it as it stands. Its own tile density is measured
+   from it, which also does away with the separate probe generation that used
+   to size it. */
+function workPatch(t, H) {
+  const have = workCache.get(t.id);
+  if (have && have.H >= H) return have;
+  // raw() fills a disc, but every window is a rectangle inside it, so well
+  // over half of what comes back can never be used. Dropping it before
+  // topology is pure gain — topology is the expensive half for a dual.
+  const all = clipRect(t.src.raw(H), H);
+  const { faces, edgeMap } = topology(all);
+  const adj = faces.map(() => []);
+  for (const e of edgeMap.values()) {
+    if (e.length === 2) { adj[e[0]].push(e[1]); adj[e[1]].push(e[0]); }
+  }
+  // Tiles per unit area, taken from the tiles' own area rather than by
+  // counting them inside some test window. A window only sees whole tiles, so
+  // on a small patch it undercounts badly — rhombille's probe holds 12 tiles —
+  // and the bad estimate then forced several rounds of regenerating. This is
+  // exact at any patch size, which is what lets the probe stay small.
+  let area = 0;
+  for (const p of all) area += polyArea(p);
+  const fresh = { H, all, adj, seen: new Int32Array(all.length), pass: 0,
+                  density: area > 0 ? all.length / area : 1 };
+  workCache.set(t.id, fresh);
+  return fresh;
+}
+
+/* `exact` decides whether to try the half-pitch offsets. The board wants them:
+   its tile count is what the size control promises. A preview does not — it
+   only has to look like the tiling — and searching four times over for a
+   swatch was most of the cost of opening the picker. */
+function windowPatch(t, target, aspect, exact = true) {
   const key = t.id + ':' + target + ':' + aspect;
-  if (previewCache.has(key)) return previewCache.get(key);
+  if (patchCache.has(key)) return patchCache.get(key);
 
-  // Size the working patch to what the target actually needs. A fixed multiple
-  // of the pitch would generate ~100 unit cells every time, which for a tiling
-  // with 21 tiles per cell is thousands of polygons to find a 50-tile window.
-  //
-  // The probe is cached per tiling, not per target: it costs a full generation,
-  // which for a dual means building and dualising a parent patch, and that was
-  // the single largest item in the cold cost of the picker — paid twice over,
-  // once for the card and again for the sidebar thumbnail.
-  const pitch = t.src.pitch;
-  if (!densityCache.has(t.id))
-    densityCache.set(t.id, t.src.gen(2).length / (4 * pitch * pitch) || 1);
-  const density = densityCache.get(t.id);
-  const need = Math.sqrt(target / density * aspect) / 2;
-  const H = Math.max(1.2 * pitch, need * 1.4);
-  const all = t.src.raw(H);                  // generated once, then re-clipped
+  // The source knows its own tile density, so the patch is sized in one go —
+  // no probe generation. Growing overshoots, since regenerating starts from
+  // scratch and the size slider walks steadily upwards.
+  const pitch = t.src.pitch, half = pitch / 2;
+  // Only whole tiles count, so a window has to run wider than the ideal to
+  // hold `target` of them — and proportionally wider the smaller the board,
+  // since the part-tile fringe it loses is a bigger share of a small one.
+  const need = Math.sqrt(target / t.src.density * aspect) / 2;
+  const slack = 1.25 + 8 / target;
+  const room = (need * slack + half) * 1.04;
+  const have = workCache.get(t.id);
+  const w = workPatch(t, have && room > have.H ? Math.max(room, have.H * 1.7) : room);
+  const { all, adj } = w;
 
   // Keeping only whole tiles can strand small ones: drop a dodecagon for
   // crossing the edge and the triangles around it are left floating. So keep
   // only the largest connected group, inside the search so the tile count
   // reflects what actually gets drawn. Adjacency is computed once for the
   // whole patch; each candidate window only re-runs the component scan.
-  const { faces, edgeMap } = topology(all);
-  const adj = faces.map(() => []);
-  for (const e of edgeMap.values()) {
-    if (e.length === 2) { adj[e[0]].push(e[1]); adj[e[1]].push(e[0]); }
-  }
-  const seen = new Int32Array(all.length);
-  let pass = 0;
+  const seen = w.seen;
+  let pass = w.pass;
 
-  const inBox = (hx, hy) => {
+  const inBox = (hx, hy, ox, oy) => {
     const keep = all.map(p => p.every(q =>
-      q[0] >= -hx && q[0] <= hx && q[1] >= -hy && q[1] <= hy));
+      q[0] - ox >= -hx && q[0] - ox <= hx && q[1] - oy >= -hy && q[1] - oy <= hy));
     pass++;
     let best = [];
     for (let i = 0; i < all.length; i++) {
@@ -1504,17 +1553,34 @@ function previewPatch(t, target, aspect) {
     return best.map(i => all[i]);
   };
 
-  let lo = 0.2 * need, hi = Math.min(H * 0.98, 2.2 * need), best = null;
-  for (let i = 0; i < 16; i++) {
-    const hx = (lo + hi) / 2, hy = hx / aspect;
-    const polys = inBox(hx, hy);
-    if (!best || Math.abs(polys.length - target) < Math.abs(best.polys.length - target))
-      best = { polys, hx, hy };
-    if (polys.length < target) lo = hx; else hi = hx;
+  let best = null;
+  outer:
+  for (const [ox, oy] of exact ? [[0, 0], [half, 0], [0, half], [half, half]]
+                               : [[0, 0]]) {
+    // 8 halvings resolve the bracket to well under one tile; more only costs
+    let lo = 0.15 * need, hi = Math.min(w.H - half, need * slack);
+    for (let i = 0; i < 8; i++) {
+      const hx = (lo + hi) / 2, hy = hx / aspect;
+      const polys = inBox(hx, hy, ox, oy);
+      if (!best || Math.abs(polys.length - target) < Math.abs(best.count - target))
+        // recentre on the window, not the lattice, so the board sits square in view
+        best = { polys: polys.map(p => translate(p, -ox, -oy)), hx, hy, count: polys.length };
+      if (best.count === target) break outer;   // nothing left to improve on
+      if (polys.length < target) lo = hx; else hi = hx;
+    }
   }
-  best.colours = tileColours(best.polys);
-  previewCache.set(key, best);
+  w.pass = pass;                               // the patch is shared, so hand it back
+  patchCache.set(key, best);
   return best;
+}
+
+function previewPatch(t, target, aspect) {
+  const key = t.id + ':' + target + ':' + aspect;
+  if (colourCache.has(key)) return colourCache.get(key);
+  const p = windowPatch(t, target, aspect, false);
+  const out = { ...p, colours: tileColours(p.polys) };
+  colourCache.set(key, out);
+  return out;
 }
 
 /* Shading a preview by the tile's index in the generation order carried no
@@ -1678,7 +1744,7 @@ document.addEventListener('keydown', e => {
 let saved = null;
 try { saved = localStorage.getItem('lightsout.tiling'); } catch (e) {}
 const start = TILINGS.find(t => t.id === saved) || TILINGS[1];
-state.size = start.def;
+state.size = DEFAULT_SIZE;
 setTiling(start);
 </script>
 </body>
