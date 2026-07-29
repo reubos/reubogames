@@ -1831,11 +1831,12 @@ function refresh() {
      means minimising weight over a coset, which is syndrome decoding. So say
      what it is rather than implying it is optimal. */
   const presses = opt ? opt.reduce((a, b) => a + b, 0) : 0;
-  const many = opt && opt.free ? ` Multiple solutions exist — 2^${opt.free} of them.` : '';
   const fmt = k => `${k} press${k === 1 ? '' : 'es'}`;        // 2×2 boards need one
-  const order = presses > 1 ? " Order doesn't matter." : '';
+  const order = k => k > 1 ? " Order doesn't matter." : '';
+  // written out up to 2^10; past a thousand the exponent is the readable form
+  const howMany = k => k <= 10 ? String(2 ** k) : `2^${k}`;
 
-  /* `presses` counts the solution on screen, which after a few presses of the
+  /* `presses` counts the solution on screen, which after a few clicks of the
      button need not be the shortest, so the two are reported separately. */
   let text;
   if (!opt) text = 'This position has no solution.';
@@ -1843,21 +1844,24 @@ function refresh() {
   // patterns about, a solved board still has non-empty press-sets that do nothing
   else if (litCount === 0) text = 'Solved.';
   else if (!opt.minimal)
-    text = `A solution from here takes ${fmt(presses)}.` + order + many +
-           ' This is one of them, not necessarily the shortest — there are too many to search.';
+    // too many to search, so nothing here can be called the shortest
+    text = `There are ${howMany(opt.free)} solutions — this one takes ${fmt(presses)}.` +
+           order(presses) +
+           ' It is not necessarily the shortest; there are too many to search.';
+  else if (!opt.free)
+    text = `There is one unique solution, which takes ${fmt(presses)}.` + order(presses);
   else {
-    // a position with no quiet patterns never went through the search, so it
-    // carries no separate best count — the one solution is the shortest
-    const best = opt.bestPresses === undefined ? presses : opt.bestPresses;
-    text = `The shortest solution takes ${fmt(best)}.` + order + many;
-    if (opt.alts > 1) {
-      text += state.showSolution
-        ? ` Showing ${opt.rank + 1} of ${opt.alts}` +
-          (opt.rank === 0 ? ' — the shortest.'
-           : presses === best ? ' — also shortest.'
-           : ` — ${fmt(presses)}, ${presses - best} more.`)
-        : ' Show solution steps through the shortest few.';
-    }
+    const best = opt.bestPresses;
+    text = `There are ${howMany(opt.free)} solutions — the shortest takes ${fmt(best)}.` +
+           order(best);
+    text += state.showSolution
+      ? ` Showing ${opt.rank + 1} of ${opt.alts}` +
+        (opt.rank === 0 ? ' — the shortest.'
+         : presses === best ? ' — also shortest.'
+         : ` — ${fmt(presses)}, ${presses - best} more.`)
+      : opt.alts >= 2 ** opt.free
+        ? ' Show solution steps through all the solutions.'
+        : ' Show solution steps through the shortest few solutions.';
   }
   document.getElementById('optNote').textContent = text;
 
