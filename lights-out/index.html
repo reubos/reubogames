@@ -150,20 +150,12 @@
   .card.sel { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
   .card svg { width: 100%; height: 96px; display: block; background: #17301b; border-radius: 6px; }
   .card .cname { font-weight: 600; color: #fff; margin-top: 9px; font-size: 0.88rem; line-height: 1.25; }
-  .card .cmeta { font-size: 0.73rem; color: var(--muted); font-family: ui-monospace, monospace; margin-top: 2px; }
 
   .section-title {
     font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.09em;
     color: var(--muted); margin: 26px 0 0; padding-top: 18px; border-top: 1px solid var(--line);
   }
   .section-title:first-of-type { border-top: 0; padding-top: 0; margin-top: 20px; }
-
-  .chips { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 12px; }
-  .chip {
-    font-family: ui-monospace, monospace; font-size: 0.74rem;
-    background: var(--panel); border: 1px dashed var(--line); color: var(--muted);
-    border-radius: 20px; padding: 4px 11px;
-  }
 
   .backlink { display: inline-block; margin-top: 30px; color: var(--muted); font-size: 0.85rem; }
 </style>
@@ -614,18 +606,19 @@ const TILINGS = [
   { id: 'snubTrihex', group: 'semi', name: 'Snub trihexagonal', cfg: '3.3.3.3.6',
     src: T_snubTrihex, min: 2, max: 5, def: 3 },
 
+  // ordered by face: triangles, then quadrilaterals, then pentagons
   { id: 'tetrakis', group: 'dual', name: 'Tetrakis square', cfg: 'V4.8.8',
     src: dualOf(T_truncSquare), min: 3, max: 8, def: 4, faces: 3 },
-  { id: 'cairo', group: 'dual', name: 'Cairo pentagonal', cfg: 'V3.3.4.3.4',
-    src: dualOf(T_snubSquare), min: 3, max: 8, def: 4, faces: 5 },
-  { id: 'rhombille', group: 'dual', name: 'Rhombille', cfg: 'V3.6.3.6',
-    src: dualOf(T_trihex), min: 3, max: 7, def: 4, faces: 4 },
   { id: 'triakis', group: 'dual', name: 'Triakis triangular', cfg: 'V3.12.12',
     src: dualOf(T_truncHex), min: 2, max: 6, def: 4, faces: 3 },
-  { id: 'deltoidal', group: 'dual', name: 'Deltoidal trihexagonal', cfg: 'V3.4.6.4',
-    src: dualOf(T_rhombitrihex), min: 2, max: 6, def: 4, faces: 4 },
   { id: 'kisrhombille', group: 'dual', name: 'Kisrhombille', cfg: 'V4.6.12',
     src: dualOf(T_truncTrihex), min: 2, max: 5, def: 3, faces: 3 },
+  { id: 'rhombille', group: 'dual', name: 'Rhombille', cfg: 'V3.6.3.6',
+    src: dualOf(T_trihex), min: 3, max: 7, def: 4, faces: 4 },
+  { id: 'deltoidal', group: 'dual', name: 'Deltoidal trihexagonal', cfg: 'V3.4.6.4',
+    src: dualOf(T_rhombitrihex), min: 2, max: 6, def: 4, faces: 4 },
+  { id: 'cairo', group: 'dual', name: 'Cairo pentagonal', cfg: 'V3.3.4.3.4',
+    src: dualOf(T_snubSquare), min: 3, max: 8, def: 4, faces: 5 },
   { id: 'floret', group: 'dual', name: 'Floret pentagonal', cfg: 'V3.3.3.3.6',
     src: dualOf(T_snubTrihex), min: 2, max: 5, def: 3, faces: 5 },
   { id: 'prismatic', group: 'dual', name: 'Prismatic pentagonal', cfg: 'V3.3.3.4.4',
@@ -1248,6 +1241,8 @@ function drawPreview(svg, patch) {
        stroke="#17301b" stroke-width="0.05"/>`).join('');
 }
 
+// Cards carry the preview and the name only; the vertex configuration is left
+// to the sidebar, where there is room for it once a tiling is chosen.
 function buildCards() {
   for (const g of ['regular', 'semi', 'dual', 'two']) {
     const box = document.getElementById('grp-' + g);
@@ -1256,7 +1251,7 @@ function buildCards() {
       const el = document.createElement('div');
       el.className = 'card' + (t.id === state.tiling.id ? ' sel' : '');
       el.innerHTML = `<svg viewBox="0 0 100 100"></svg>
-        <div class="cname">${t.name}</div><div class="cmeta">${t.cfg}</div>`;
+        <div class="cname">${t.name}</div>`;
       drawPreview(el.querySelector('svg'), previewPatch(t, PREVIEW_TILES, CARD_ASPECT));
       el.onclick = () => { setTiling(t); buildCards(); closePicker(); };
       box.appendChild(el);
