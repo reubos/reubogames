@@ -1463,6 +1463,7 @@ const state = {
   moves: 0,
   history: [],
   showSolution: false,
+  solIndex: 0,                                 // which of the offered solutions
   hintCell: -1,
   nodes: []
 };
@@ -1517,6 +1518,7 @@ function newGame() {
   state.moves = 0;
   state.history = [];
   state.showSolution = false;
+  state.solIndex = 0;
   state.hintCell = -1;
   refresh();
 }
@@ -1554,7 +1556,35 @@ function undo() {
 // Rows are packed bitsets in one flat Uint32Array: n coefficient columns
 // plus one augmented column. This runs on every move, so it avoids the
 // per-operation allocation that a BigInt representation incurs.
+/* Memoised on the position. Both toggleSolution and refresh ask for the
+   solution on the same click, and the search behind it costs over 100ms on the
+   largest board of the worst tiling, so computing it twice was plain waste. The
+   answer depends only on the lit pattern, the board and the neighbour rule. */
+let solveMemo = null;
+
 function solve() {
+  const key = state.tiling.id + '|' + state.wrapping + '|' + state.mode + '|' +
+              state.board.cells.length + '|' + state.lit.join('');
+  if (solveMemo && solveMemo.key === key) return pickSolution(solveMemo);
+
+  const found = solveFrom();
+  solveMemo = { key, found };
+  return pickSolution(solveMemo);
+}
+
+// the offered solutions are shared; which one is on show is not
+function pickSolution(memo) {
+  const f = memo.found;
+  if (!f) return null;
+  if (!f.alts) return f.one;                      // nothing to choose between
+  const i = Math.min(Math.max(state.solIndex, 0), f.alts.length - 1);
+  const pick = f.alts[i];
+  pick.free = f.free; pick.minimal = true;
+  pick.alts = f.alts.length; pick.rank = i; pick.bestPresses = f.alts[0].presses;
+  return pick;
+}
+
+function solveFrom() {
   const n = state.board.cells.length;
   const W = (n + 32) >> 5;                        // words per row
   const M = new Uint32Array(n * W);
@@ -1610,7 +1640,10 @@ function solve() {
      zero, which is rarely the shortest. Where there are few enough of them to
      walk the lot, do that and return the shortest instead. */
   const free = n - row;
-  if (free === 0 || free > MIN_SEARCH_BITS) { x.free = free; x.minimal = free === 0; return x; }
+  if (free === 0 || free > MIN_SEARCH_BITS) {
+    x.free = free; x.minimal = free === 0;
+    return { one: x, free };
+  }
 
   const basis = [];
   for (let f = 0; f < n; f++) {
@@ -1623,9 +1656,7 @@ function solve() {
     }
     basis.push(v);
   }
-  const best = shortestSolution(x, basis, n);
-  best.free = free; best.minimal = true;
-  return best;
+  return { alts: shortestSolutions(x, basis, n), free };
 }
 
 /* Picking the shortest solution means finding the lightest member of a coset of
@@ -1634,8 +1665,17 @@ function solve() {
    XOR and an incremental popcount each, which is a few milliseconds up to about
    2^18. Beyond that the arbitrary solution stands and the note says so. */
 const MIN_SEARCH_BITS = 18;
+const ALT_COUNT = 8;                           // how many solutions to offer
 
-function shortestSolution(x0, basis, n) {
+/* The lightest few members of the coset, shortest first, so the Show solution
+   button can step through them. Keeping several costs no more walking than
+   keeping one: a candidate is only copied when it beats the worst one held, and
+   after the first few hundred steps that almost never happens.
+
+   Several usually tie for shortest and the rest run longer — every quiet pattern
+   has even weight, so all solutions to a position share a parity and the next
+   length up is always at least two presses more, never one. */
+function shortestSolutions(x0, basis, n) {
   const W = (n + 31) >> 5;
   const pc = x => {                            // popcount of one word
     x = x - ((x >>> 1) & 0x55555555);
@@ -1654,31 +1694,54 @@ function shortestSolution(x0, basis, n) {
   const cur = pack(x0);
   let w = 0;
   for (let i = 0; i < W; i++) w += pc(cur[i]);
-  let best = cur.slice(), bestW = w;
+
+  const keep = [];                             // ascending by weight
+  const offer = weight => {
+    if (keep.length === ALT_COUNT && weight >= keep[ALT_COUNT - 1].w) return;
+    const rec = { w: weight, v: cur.slice() };
+    let i = keep.length - 1;
+    keep.push(rec);
+    while (i >= 0 && keep[i].w > weight) { keep[i + 1] = keep[i]; i--; }
+    keep[i + 1] = rec;
+    if (keep.length > ALT_COUNT) keep.length = ALT_COUNT;
+  };
+  offer(w);
 
   for (let g = 1; g < (1 << k); g++) {
-    const b = B[31 - Math.clz32(g & -g)];       // the one basis vector that flips
+    const j = 31 - Math.clz32(g & -g);          // the one basis vector that flips
+    const b = B[j];
     let overlap = 0;
     for (let t = 0; t < W; t++) {
       overlap += pc(cur[t] & b[t]);
       cur[t] ^= b[t];
     }
-    w += bw[31 - Math.clz32(g & -g)] - 2 * overlap;
-    if (w < bestW) { bestW = w; best.set(cur); }
+    w += bw[j] - 2 * overlap;
+    offer(w);
   }
 
-  const out = new Uint8Array(n);
-  for (let i = 0; i < n; i++) if (best[i >> 5] >>> (i & 31) & 1) out[i] = 1;
-  return out;
+  return keep.map(rec => {
+    const out = new Uint8Array(n);
+    for (let i = 0; i < n; i++) if (rec.v[i >> 5] >>> (i & 31) & 1) out[i] = 1;
+    out.presses = rec.w;
+    return out;
+  });
 }
 
+/* Off, then each solution in turn shortest first, then off again. */
 function toggleSolution() {
-  state.showSolution = !state.showSolution;
+  const s = solve();
+  const many = s && s.alts ? s.alts : 1;
+  if (!state.showSolution) { state.showSolution = true; state.solIndex = 0; }
+  else if (state.solIndex + 1 < many) state.solIndex++;
+  else { state.showSolution = false; state.solIndex = 0; }
   state.hintCell = -1;
   refresh();
 }
 
 function hint() {
+  // back to the shortest first: a hint should not follow whichever alternative
+  // the Show solution button was left on
+  state.solIndex = 0;
   const s = solve();
   if (!s) return;
   const idx = [...s.keys()].filter(i => s[i]);
@@ -1769,15 +1832,34 @@ function refresh() {
      what it is rather than implying it is optimal. */
   const presses = opt ? opt.reduce((a, b) => a + b, 0) : 0;
   const many = opt && opt.free ? ` Multiple solutions exist — 2^${opt.free} of them.` : '';
-  const p = `${presses} press${presses === 1 ? '' : 'es'}`;   // 2×2 boards need one
+  const fmt = k => `${k} press${k === 1 ? '' : 'es'}`;        // 2×2 boards need one
   const order = presses > 1 ? " Order doesn't matter." : '';
-  document.getElementById('optNote').textContent = !opt
-    ? 'This position has no solution.'
-    : presses === 0 ? 'Solved.'
-    : opt.minimal
-      ? `The shortest solution takes ${p}.` + order + many
-      : `A solution from here takes ${p}.` + order + many +
-        ' This is one of them, not necessarily the shortest — there are too many to search.';
+
+  /* `presses` counts the solution on screen, which after a few presses of the
+     button need not be the shortest, so the two are reported separately. */
+  let text;
+  if (!opt) text = 'This position has no solution.';
+  // on the board being out, not on the chosen solution being empty: with quiet
+  // patterns about, a solved board still has non-empty press-sets that do nothing
+  else if (litCount === 0) text = 'Solved.';
+  else if (!opt.minimal)
+    text = `A solution from here takes ${fmt(presses)}.` + order + many +
+           ' This is one of them, not necessarily the shortest — there are too many to search.';
+  else {
+    // a position with no quiet patterns never went through the search, so it
+    // carries no separate best count — the one solution is the shortest
+    const best = opt.bestPresses === undefined ? presses : opt.bestPresses;
+    text = `The shortest solution takes ${fmt(best)}.` + order + many;
+    if (opt.alts > 1) {
+      text += state.showSolution
+        ? ` Showing ${opt.rank + 1} of ${opt.alts}` +
+          (opt.rank === 0 ? ' — the shortest.'
+           : presses === best ? ' — also shortest.'
+           : ` — ${fmt(presses)}, ${presses - best} more.`)
+        : ' Show solution steps through the shortest few.';
+    }
+  }
+  document.getElementById('optNote').textContent = text;
 
   const win = document.getElementById('win');
   win.classList.toggle('show', litCount === 0);
