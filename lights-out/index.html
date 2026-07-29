@@ -257,6 +257,12 @@
     <p class="section-title">2-uniform duals &mdash; all 20</p>
     <div class="cards" id="grp-twodual"></div>
 
+    <p class="section-title">3-uniform</p>
+    <div class="cards" id="grp-three"></div>
+
+    <p class="section-title">3-uniform dual</p>
+    <div class="cards" id="grp-threedual"></div>
+
     <p class="section-title">Aperiodic</p>
     <div class="cards" id="grp-aperiodic"></div>
   </div>
@@ -760,7 +766,7 @@ for (const [id, ratio, min, max, def] of [['n16', '2:1', 2, 5, 3],
     id: id + 'd', group: 'twodual',
     name: `Cairo and prismatic pentagons (${ratio})`,
     cfg: `dual of ${base.name}`,
-    src: dualOf(base.src), min, max, def, pentagonal: true, dualOfId: id
+    src: dualOf(base.src), min, max, def, pentagons: 2, dualOfId: id
   });
 }
 
@@ -819,6 +825,42 @@ const TWO_DUALS = [
     });
   }
 })();
+
+/* A 3-uniform tiling and its dual — the one pentagonal tiling carrying the
+   floret, Cairo and prismatic pentagons together. Each pentagon is the dual of
+   one vertex type (floret of 3⁴.6, Cairo of 3².4.3.4, prismatic of 3³.4²), so
+   the tiling that holds all three is the dual of a 3-uniform tiling with
+   exactly those vertices. Wikipedia labels the pair FCB. The three pentagons
+   turn out to appear in equal numbers: 6 of each per unit cell, 18 in all,
+   which is what Euler gives for a 5-valent tiling of 27 tiles per cell.
+
+   The cell was recovered from the Wikimedia drawing the same way as the
+   2-uniform ones — trace the faces, fit exact regular polygons, rebuild from
+   the cell — so these coordinates carry none of the drawing's rounding. */
+const FCB = {
+  v1: [3.866, 2.2321], v2: [-3.866, 2.2321],
+  cell: [[6,0,0.4111,0],[3,0,1.5657,1.5708],[3,-0.5,1.8544,0.5236],
+    [3,0.5,1.8544,0.5236],[3,1,1.5657,1.5708],[3,1,0.9883,0.5236],
+    [3,-1,1.5657,1.5708],[3,-1,0.9883,0.5236],[3,-2.366,2.9318,1.5708],
+    [3,2.366,2.9318,1.5708],[3,-0.5,3.4317,1.5708],[3,0,3.7204,0.5236],
+    [3,0.5,3.4317,1.5708],[3,1,3.7204,0.5236],[3,-2.866,2.0657,1.5708],
+    [3,-2.366,2.3544,0.5236],[3,-1,3.7204,0.5236],[3,2.866,2.0657,1.5708],
+    [3,2.366,2.3544,0.5236],[3,-1.2887,2.6431,1.0472],[3,1.2887,2.6431,0],
+    [4,-0.5,2.6431,0.7854],[4,0.5,2.6431,0.7854],[4,-1.683,1.9601,0.2618],
+    [4,1.683,3.3261,0.2618],[4,1.683,1.9601,1.309],[4,-1.683,3.3261,1.309]]
+};
+
+TILINGS.push({
+  id: 'fcb', group: 'three', name: 'Hexagons, Squares and Triangles',
+  cfg: '[3⁴.6; 3³.4²; 3².4.3.4]', notation: '[3⁴.6; 3³.4²; 3².4.3.4]',
+  src: fromCells(FCB), min: 1, max: 3, def: 2
+});
+TILINGS.push({
+  id: 'fcbd', group: 'threedual', name: 'Floret, Cairo and prismatic pentagons',
+  cfg: 'dual of Hexagons, Squares and Triangles',
+  src: dualOf(TILINGS[TILINGS.length - 1].src),
+  min: 2, max: 4, def: 3, pentagons: 3, dualOfId: 'fcb'
+});
 
 /* Duals of the two aperiodic tilings. These are the odd ones out: with no
    repeating cell there is no bound on how many faces meet at a vertex, so the
@@ -1051,14 +1093,16 @@ function verify() {
 
     const sides = new Set(faces.map(f => f.poly.length));
     let ok, detail;
-    if (t.pentagonal) {
-      // Pentagons throughout, in exactly two shapes. Area cannot tell these
-      // two apart — both are duals of a vertex with three triangles and two
-      // squares, so they have equal area — hence the edge lengths.
-      const kinds = new Set(faces.map(f => edgeSig(f.poly)));
+    if (t.pentagons) {
+      // Pentagons throughout, in exactly the stated number of shapes. Area
+      // cannot separate them: the Cairo and prismatic pentagons are both duals
+      // of a vertex with three triangles and two squares, so their areas are
+      // equal. Hence shapeClasses, which matches on edges and angles.
+      const { reps } = shapeClasses(polys);
       ok = badEdge === 0 && closed > 0 && sides.size === 1 && [...sides][0] === 5 &&
-           kinds.size === 2;
-      detail = `pentagons=${[...kinds].sort().join('  ')}`;
+           reps.length === t.pentagons;
+      detail = `pentagons=${reps.length} shapes: ` +
+               reps.map(r => r.sig.e.map(x => x.toFixed(3)).join(',')).sort().join('  ');
     } else if (t.aperiodic) {
       // no vertex or face uniformity to lean on: check it is a sound tiling and
       // that both rhombus shapes are present
@@ -1082,12 +1126,14 @@ function verify() {
       const { reps } = shapeClasses(polys);
       ok = badEdge === 0 && closed > 0 && reps.length > 2;
       detail = `shapes=${composition(polys)}`;
-    } else if (t.twoUniform) {
-      // must show exactly the two vertex types its notation declares
+    } else if (t.notation) {
+      // k-uniform: must show exactly the vertex types its notation declares,
+      // however many that is — two for the 2-uniform tilings, three for the
+      // 3-uniform one below them
       const want = t.notation.replace(/[\[\]]/g, '').split(';')
         .map(s => canonicalCfg(expandCfg(s.trim()))).sort();
       const got = [...configs].sort();
-      ok = got.length === 2 && got.join() === want.join() && badEdge === 0;
+      ok = got.length === want.length && got.join() === want.join() && badEdge === 0;
       detail = `vertices=${got.join(' | ') || 'none'}`;
     } else if (t.faces) {
       ok = sides.size === 1 && [...sides][0] === t.faces && badEdge === 0 && closed > 0;
@@ -1590,7 +1636,8 @@ function drawVisibleCards() {
 
 function buildCards() {
   drawQueue = [];                            // abandon any pass still running
-  for (const g of ['regular', 'semi', 'dual', 'two', 'twodual', 'aperiodic']) {
+  for (const g of ['regular', 'semi', 'dual', 'two', 'twodual',
+                   'three', 'threedual', 'aperiodic']) {
     const box = document.getElementById('grp-' + g);
     box.innerHTML = '';
     for (const t of TILINGS.filter(x => x.group === g)) {
