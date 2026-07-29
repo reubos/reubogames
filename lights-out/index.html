@@ -1472,6 +1472,7 @@ const CARD_ASPECT = 1.44;                    // matches the card's svg box
 const patchCache = new Map();
 const colourCache = new Map();
 const workCache = new Map();                 // one growable working patch per tiling
+const SQUEEZE = 1.45;                        // how far the window may stretch off square
 
 /* Generating the patch is nearly all of the cost — for a dual it means
    building a parent patch and dualising it — and the window search itself is
@@ -1522,7 +1523,9 @@ function windowPatch(t, target, aspect, exact = true) {
   // since the part-tile fringe it loses is a bigger share of a small one.
   const need = Math.sqrt(target / t.src.density * aspect) / 2;
   const slack = 1.25 + 8 / target;
-  const room = (need * slack + half) * 1.04;
+  // room for the window to be stretched a little off `aspect` while hunting
+  // for a square board — at the SQUEEZE limit one side grows by √1.45
+  const room = (need * slack * Math.sqrt(SQUEEZE) + half) * 1.04;
   const have = workCache.get(t.id);
   const w = workPatch(t, have && room > have.H ? Math.max(room, have.H * 1.7) : room);
   const { all, adj } = w;
@@ -1553,25 +1556,74 @@ function windowPatch(t, target, aspect, exact = true) {
     return best.map(i => all[i]);
   };
 
-  let best = null;
-  outer:
-  for (const [ox, oy] of exact ? [[0, 0], [half, 0], [0, half], [half, half]]
-                               : [[0, 0]]) {
-    // 8 halvings resolve the bracket to well under one tile; more only costs
-    let lo = 0.15 * need, hi = Math.min(w.H - half, need * slack);
-    for (let i = 0; i < 8; i++) {
-      const hx = (lo + hi) / 2, hy = hx / aspect;
-      const polys = inBox(hx, hy, ox, oy);
-      if (!best || Math.abs(polys.length - target) < Math.abs(best.count - target))
-        // recentre on the window, not the lattice, so the board sits square in view
-        best = { polys: polys.map(p => translate(p, -ox, -oy)), hx, hy, count: polys.length };
-      if (best.count === target) break outer;   // nothing left to improve on
-      if (polys.length < target) lo = hx; else hi = hx;
+  /* A tile or two off the requested count is worth trading for a squarer
+     board, but not much more than that. The offsets matter here as much as
+     the aspect does: several of them reach the same tile count in quite
+     different shapes, so taking the first one that hit the count — which is
+     what this used to do — threw away the choice. */
+  const score = c => Math.abs(c.count - target) * 4 / target +
+                     Math.abs(Math.log(c.ratio / aspect));
+
+  const searchAt = a => {
+    let found = null;
+    for (const [ox, oy] of exact ? [[0, 0], [half, 0], [0, half], [half, half]]
+                                 : [[0, 0]]) {
+      // 8 halvings resolve the bracket to well under one tile; more only costs
+      let lo = 0.15 * need;
+      let hi = Math.min((w.H - half) * Math.min(1, a), need * slack * Math.sqrt(a));
+      for (let i = 0; i < 8; i++) {
+        const hx = (lo + hi) / 2, hy = hx / a;
+        const polys = inBox(hx, hy, ox, oy);
+        if (polys.length) {
+          // recentre on the window, not the lattice, so the board sits central
+          // a preview is framed by its window, not by the tiles, so it has no
+          // use for the board's shape — don't pay to measure it
+          const cand = { polys: polys.map(p => translate(p, -ox, -oy)), hx, hy,
+                         count: polys.length,
+                         ratio: exact ? boardRatio(polys) : aspect };
+          if (!found || score(cand) < score(found)) found = cand;
+        }
+        if (polys.length < target) lo = hx; else hi = hx;
+      }
     }
+    return found;
+  };
+
+  /* A square window does not give a square board. Whole-tile clipping bites
+     unevenly on the two axes — triakis came out 1.73:1, and 41 of the 65
+     tilings passed 1.15:1 somewhere in their range — which both looks wrong
+     and wastes the view, since the board is scaled to fit a square area.
+
+     So the window's own aspect is searched as well: measure what the board
+     actually came out as, divide it back out, and search again. Two rounds is
+     enough, because the correction is close to exact. Previews keep the aspect
+     they were asked for, which is what holds every swatch to one scale. */
+  let best = null;
+  if (exact) {
+    let a = aspect;
+    for (let round = 0; round < 3; round++) {
+      const cand = searchAt(a);
+      if (!cand) break;
+      if (!best || score(cand) < score(best)) best = cand;
+      if (Math.abs(Math.log(cand.ratio / aspect)) < 0.02) break;
+      a = Math.min(aspect * SQUEEZE, Math.max(aspect / SQUEEZE, a * aspect / cand.ratio));
+    }
+  } else {
+    best = searchAt(aspect);
   }
   w.pass = pass;                               // the patch is shared, so hand it back
   patchCache.set(key, best);
   return best;
+}
+
+// width : height of what the board will actually occupy
+function boardRatio(polys) {
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const p of polys) for (const q of p) {
+    if (q[0] < x0) x0 = q[0]; if (q[0] > x1) x1 = q[0];
+    if (q[1] < y0) y0 = q[1]; if (q[1] > y1) y1 = q[1];
+  }
+  return (x1 - x0) / (y1 - y0) || 1;
 }
 
 function previewPatch(t, target, aspect) {
