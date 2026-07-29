@@ -254,7 +254,7 @@
     <p class="section-title">2-uniform &mdash; all 20</p>
     <div class="cards" id="grp-two"></div>
 
-    <p class="section-title">2-uniform duals</p>
+    <p class="section-title">2-uniform duals &mdash; all 20</p>
     <div class="cards" id="grp-twodual"></div>
 
     <p class="section-title">Aperiodic</p>
@@ -759,8 +759,79 @@ for (const [id, ratio, min, max, def] of [['n16', '2:1', 2, 5, 3],
   TILINGS.push({
     id: id + 'd', group: 'twodual',
     name: `Cairo and prismatic pentagons (${ratio})`,
-    cfg: `dual of ${base.notation}`,
-    src: dualOf(base.src), min, max, def, pentagonal: true
+    cfg: `dual of ${base.name}`,
+    src: dualOf(base.src), min, max, def, pentagonal: true, dualOfId: id
+  });
+}
+
+/* The remaining eighteen 2-uniform duals. Every 2-uniform tiling is built from
+   regular polygons, so each face centre is also its circumcentre and dualOf
+   lands on the exact dual — the angles come out on whole degrees. Switching it
+   to circumcentres would buy nothing here and could not work for the aperiodic
+   duals below, whose parent rhombi have no circumcentre at all.
+
+   Each is 2-isohedral: two tile shapes, edge to edge. The composition is the
+   name, and verify() re-derives it from the geometry, so a name cannot quietly
+   go stale. Sizes are chosen to open at roughly 60-140 tiles and top out near
+   300, since the dual has one tile per vertex of its parent rather than one
+   per face. */
+const TWO_DUALS = [
+  ['n14', 'Hexagons and Pentagons',      3, 6, 10],
+  ['n15', 'Hexagons and Pentagons',      3, 5,  9],
+  ['n18', 'Hexagons and Pentagons',      2, 4,  7],
+  ['n19', 'Hexagons and Pentagons',      2, 4,  6],
+  ['n20', 'Hexagons and Pentagons',      2, 3,  5],
+  ['n4',  'Pentagons and Squares',       3, 5, 11],
+  ['n3',  'Pentagons and Squares',       3, 5,  9],
+  ['n8',  'Pentagons and Kites',         2, 3,  5],
+  ['n9',  'Pentagons and Kites',         2, 3,  5],
+  ['n12', 'Pentagons and Trapezoids',    3, 5,  9],
+  ['n10', 'Hexagons and Trapezoids',     2, 4,  7],
+  ['n13', 'Hexagons and Quadrilaterals', 2, 3,  5],
+  ['n11', 'Rhombi and Trapezoids',       3, 5, 11],
+  ['n7',  'Rhombi and Trapezoids',       3, 4,  8],
+  ['n6',  'Rhombi and Trapezoids',       2, 3,  4],
+  ['n5',  'Kites and Trapezoids',        2, 3,  4],
+  ['n2',  'Kites and Triangles',         2, 4,  6],
+  ['n1',  'Kites and Triangles',         2, 3,  4]
+];
+
+(function addTwoDuals() {
+  const groups = new Map();
+  for (const d of TWO_DUALS) {
+    let a = groups.get(d[1]); if (!a) groups.set(d[1], a = []);
+    a.push(d);
+  }
+  // numbered by unit-cell area of the parent, the same rule the 2-uniform
+  // names use, so both lists run simplest-repeat-first
+  const cellArea = id => TWO_UNIFORM.find(d => d.id === id).area;
+  for (const [name, list] of groups) {
+    list.sort((p, q) => cellArea(p[0]) - cellArea(q[0]));
+    list.forEach(([id, , min, def, max], i) => {
+      const base = TILINGS.find(t => t.id === id);
+      TILINGS.push({
+        id: id + 'd', group: 'twodual',
+        name: list.length > 1 ? `${name} ${i + 1}` : name,
+        cfg: `dual of ${base.name}`,
+        src: dualOf(base.src), min, max, def,
+        shapes: name, dualOfId: id
+      });
+    });
+  }
+})();
+
+/* Duals of the two aperiodic tilings. These are the odd ones out: with no
+   repeating cell there is no bound on how many faces meet at a vertex, so the
+   dual has tiles of many shapes and sizes — triangles through octagons — and
+   vertices of varying degree. That makes them the only boards here where the
+   number of neighbours genuinely varies from tile to tile, so no composition
+   name would be either short or stable, and they are named for their parent. */
+for (const [id, min, def, max] of [['penrose', 6, 9, 16], ['ammann', 6, 9, 16]]) {
+  const base = TILINGS.find(t => t.id === id);
+  TILINGS.push({
+    id: id + 'd', group: 'aperiodic', name: `${base.name} dual`,
+    cfg: `dual of ${base.name}`,
+    src: dualOf(base.src), min, max, def, mixed: true, dualOfId: id
   });
 }
 
@@ -847,6 +918,100 @@ function edgeSig(p) {
   return e.sort().join(',');
 }
 
+function polyArea(p) {
+  let s = 0;
+  for (let i = 0; i < p.length; i++) {
+    const a = p[i], b = p[(i + 1) % p.length];
+    s += a[0] * b[1] - b[0] * a[1];
+  }
+  return Math.abs(s) / 2;
+}
+
+/* Congruence classes, matched against a tolerance rather than by rounding a
+   key. Rounding was splitting one shape in two: the triangles in the dual of
+   "Dodecagons, Squares and Triangles 1" agree to four decimal places on every
+   edge but straddle a rounding boundary in area, so they were coming out as
+   two shapes and taking two different shades in the preview.
+
+   Sorted edge lengths and sorted angles together separate every shape here.
+   Both halves earn their place — the Cairo and prismatic pentagons have equal
+   angles and are told apart only by their edges, while Penrose's thin and
+   thick rhombi share all four edge lengths and differ only in angle. */
+
+function shapeSig(p) {
+  const n = p.length, edges = [], angles = [];
+  for (let i = 0; i < n; i++) {
+    const q = p[(i - 1 + n) % n], c = p[i], r = p[(i + 1) % n];
+    edges.push(Math.hypot(r[0] - c[0], r[1] - c[1]));
+    const u = [q[0] - c[0], q[1] - c[1]], v = [r[0] - c[0], r[1] - c[1]];
+    const cos = (u[0] * v[0] + u[1] * v[1]) /
+                (Math.hypot(u[0], u[1]) * Math.hypot(v[0], v[1]));
+    angles.push(Math.acos(Math.max(-1, Math.min(1, cos))) * 180 / Math.PI);
+  }
+  return { n, edges, angles, area: polyArea(p),
+           e: [...edges].sort((a, b) => a - b),
+           a: [...angles].sort((a, b) => a - b) };
+}
+
+function sameShape(x, y) {
+  if (x.n !== y.n) return false;
+  for (let i = 0; i < x.n; i++) {
+    if (Math.abs(x.e[i] - y.e[i]) > 0.01) return false;   // edge lengths are ~1
+    if (Math.abs(x.a[i] - y.a[i]) > 0.5) return false;    // degrees
+  }
+  return true;
+}
+
+// Congruence class of every polygon, plus one representative each, ordered
+// largest tile first so a colour ramp reads from big to small.
+function shapeClasses(polys) {
+  const reps = [], idx = [];
+  for (const p of polys) {
+    const sig = shapeSig(p);
+    let k = reps.findIndex(r => sameShape(r.sig, sig));
+    if (k < 0) { k = reps.length; reps.push({ sig, count: 0 }); }
+    reps[k].count++;
+    idx.push(k);
+  }
+  const order = reps.map((r, i) => i)
+    .sort((i, j) => reps[j].sig.area - reps[i].sig.area);
+  const rank = new Map(order.map((i, r) => [i, r]));
+  return { reps: order.map(i => reps[i]), idx: idx.map(i => rank.get(i)) };
+}
+
+/* Names for the shapes a dual is made of. The quadrilaterals need telling
+   apart by more than side count — a tiling of rhombi and one of kites look
+   nothing alike — so they carry a sub-rank that also fixes the word order. */
+const NGON_NAME = { 3: 'Triangles', 5: 'Pentagons', 6: 'Hexagons',
+                    7: 'Heptagons', 8: 'Octagons', 9: 'Nonagons',
+                    10: 'Decagons', 12: 'Dodecagons' };
+const QUAD_NAME = ['Squares', 'Rhombi', 'Kites', 'Trapezoids', 'Quadrilaterals'];
+
+function shapeName(sig) {
+  const near = (x, y, tol) => Math.abs(x - y) < tol;
+  if (sig.n !== 4) return { label: NGON_NAME[sig.n] || sig.n + '-gons', sides: sig.n, sub: 0 };
+  const e = sig.edges, a = sig.angles;
+  let sub;
+  if (near(e[0], e[1], 0.01) && near(e[1], e[2], 0.01) && near(e[2], e[3], 0.01))
+    sub = a.every(x => near(x, 90, 0.5)) ? 0 : 1;                       // square / rhombus
+  else if ([0, 1, 2, 3].some(i => near(e[i], e[(i + 1) % 4], 0.01) &&
+                                  near(e[(i + 2) % 4], e[(i + 3) % 4], 0.01)))
+    sub = 2;                                                            // adjacent equal pairs
+  else if ([0, 1, 2, 3].some(i => near(a[i] + a[(i + 1) % 4], 180, 0.5)))
+    sub = 3;                                                            // one parallel pair
+  else sub = 4;
+  return { label: QUAD_NAME[sub], sides: 4, sub };
+}
+
+// "Hexagons and Pentagons" — the distinct shape names, largest polygon first.
+function composition(polys) {
+  const named = shapeClasses(polys).reps.map(r => ({ ...shapeName(r.sig), area: r.sig.area }));
+  named.sort((x, y) => y.sides - x.sides || x.sub - y.sub || y.area - x.area);
+  const w = [];
+  for (const r of named) if (!w.includes(r.label)) w.push(r.label);
+  return w.length === 1 ? w[0] : w.slice(0, -1).join(', ') + ' and ' + w[w.length - 1];
+}
+
 function canonicalCfg(seq) {
   let best = null;
   for (const dir of [seq, [...seq].reverse()]) {
@@ -905,6 +1070,18 @@ function verify() {
       ok = badEdge === 0 && closed > 0 && sides.size === 1 && [...sides][0] === 4 &&
            areas.size === 2;
       detail = `rhombi=${[...areas].sort((a,b)=>a-b).map(a=>(a/1000).toFixed(3)).join('/')}`;
+    } else if (t.shapes) {
+      // 2-isohedral: exactly two congruence classes, and the name must be the
+      // composition the geometry actually shows
+      const { reps } = shapeClasses(polys);
+      const got = composition(polys);
+      ok = badEdge === 0 && closed > 0 && reps.length === 2 && got === t.shapes;
+      detail = `shapes=${got} (${reps.length} classes)`;
+    } else if (t.mixed) {
+      // no uniformity of any kind to lean on — only that it is a sound tiling
+      const { reps } = shapeClasses(polys);
+      ok = badEdge === 0 && closed > 0 && reps.length > 2;
+      detail = `shapes=${composition(polys)}`;
     } else if (t.twoUniform) {
       // must show exactly the two vertex types its notation declares
       const want = t.notation.replace(/[\[\]]/g, '').split(';')
@@ -1297,27 +1474,11 @@ const SHADES = ['#a7f3c4', '#4ade80', '#2f8a52', '#245c34'];
 function tileColours(polys) {
   const pick = (i, k) => SHADES[Math.round(i * (SHADES.length - 1) / Math.max(1, k - 1))];
 
-  // Key on side count, edge lengths *and* area. Each is needed: Penrose's thin
-  // and thick rhombi share all four edge lengths and differ only in area, while
-  // the Cairo and prismatic pentagons have equal area and differ only in edges.
-  const area = p => {
-    let s = 0;
-    for (let i = 0; i < p.length; i++) {
-      const a = p[i], b = p[(i + 1) % p.length];
-      s += a[0] * b[1] - b[0] * a[1];
-    }
-    return Math.abs(s) / 2;
-  };
-  const key = p => p.length + '|' + edgeSig(p) + '|' + Math.round(area(p) * 1000);
-  const size = new Map();                      // keys are strings, so rank by area
-  for (const p of polys) size.set(key(p), area(p));
-  const shapes = [...size.keys()].sort((a, b) => size.get(b) - size.get(a) ||
-                                                 (a < b ? -1 : a > b ? 1 : 0));
-
-  if (shapes.length > 1) {                     // biggest tile brightest
-    const rank = new Map(shapes.map((s, i) => [s, i]));
-    return polys.map(p => pick(rank.get(key(p)), shapes.length));
-  }
+  // Shade by congruence class, biggest tile brightest. shapeClasses already
+  // returns them ordered by area and matches with a tolerance, which matters:
+  // several duals below hold two shapes of exactly equal area.
+  const { reps, idx } = shapeClasses(polys);
+  if (reps.length > 1) return polys.map((p, i) => pick(idx[i], reps.length));
 
   // One shape throughout — the regular tilings and every Laves dual.
   const { faces, edgeMap } = topology(polys);
@@ -1382,9 +1543,46 @@ function drawPreview(svg, patch) {
        stroke="#17301b" stroke-width="0.05"/>`).join('');
 }
 
-// Cards carry the preview and the name only; the vertex configuration is left
-// to the sidebar, where there is room for it once a tiling is chosen.
+/* Cards carry the preview and the name only; the vertex configuration is left
+   to the sidebar, where there is room for it once a tiling is chosen.
+
+   Building every preview up front cost two seconds on the first open: a
+   preview searches for the window that shows the right number of tiles, and
+   the duals are the dear ones, since each must build and then dualise a parent
+   patch before it can start. So only what is on screen is drawn straight away,
+   the rest trickling in behind it in document order. previewPatch caches, so
+   this is a one-off price per card however the drawing gets triggered. */
+
+let drawQueue = [];
+
+// A timer rather than requestAnimationFrame: the queue must keep draining even
+// while the picker is closed, so that reopening it finds the cache already warm.
+function pumpCards() {
+  const el = drawQueue.shift();
+  if (!el) return;
+  el.draw();
+  setTimeout(pumpCards, 16);
+}
+
+/* Scrolling takes priority over the background pass. Without this a fast scroll
+   can outrun the queue and reach cards that are still blank, and how far it can
+   outrun it depends on how much the browser is throttling timers — so draw what
+   is actually on screen rather than trusting the pump to have kept up. */
+function drawVisibleCards() {
+  // Measure every card before drawing any of them. Interleaving the two forces
+  // a reflow per card, which cost more than the drawing did.
+  const due = [];
+  for (const el of drawQueue) {
+    const r = el.getBoundingClientRect();
+    if (r.bottom >= -200 && r.top <= innerHeight + 200) due.push(el);
+  }
+  if (!due.length) return;
+  drawQueue = drawQueue.filter(el => !due.includes(el));
+  for (const el of due) el.draw();
+}
+
 function buildCards() {
+  drawQueue = [];                            // abandon any pass still running
   for (const g of ['regular', 'semi', 'dual', 'two', 'twodual', 'aperiodic']) {
     const box = document.getElementById('grp-' + g);
     box.innerHTML = '';
@@ -1393,15 +1591,27 @@ function buildCards() {
       el.className = 'card' + (t.id === state.tiling.id ? ' sel' : '');
       el.innerHTML = `<svg viewBox="0 0 100 100"></svg>
         <div class="cname">${t.name}</div>`;
-      drawPreview(el.querySelector('svg'), previewPatch(t, PREVIEW_TILES, CARD_ASPECT));
+      el.draw = () => drawPreview(el.querySelector('svg'),
+                                  previewPatch(t, PREVIEW_TILES, CARD_ASPECT));
       el.onclick = () => { setTiling(t); buildCards(); closePicker(); };
       box.appendChild(el);
+      drawQueue.push(el);
     }
   }
+  setTimeout(pumpCards, 16);
 }
 
-function openPicker() { buildCards(); document.getElementById('picker').classList.add('show'); }
+// shown before the cards are built, so they are laid out when drawVisibleCards
+// measures them
+function openPicker() {
+  document.getElementById('picker').classList.add('show');
+  buildCards();
+  drawVisibleCards();
+}
 function closePicker() { document.getElementById('picker').classList.remove('show'); }
+
+document.getElementById('picker').addEventListener('scroll', drawVisibleCards, { passive: true });
+addEventListener('resize', drawVisibleCards);
 
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') closePicker();
