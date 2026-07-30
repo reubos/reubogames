@@ -712,42 +712,42 @@ const TILINGS = [
 
   { id: 'trihex', group: 'semi', name: 'Trihexagonal', cfg: '3.6.3.6',
     src: T_trihex },
-  { id: 'truncSquare', group: 'semi', name: 'Truncated square', cfg: '4.8.8',
+  { id: 'truncSquare', group: 'semi', name: 'Truncated Square', cfg: '4.8.8',
     src: T_truncSquare },
-  { id: 'truncHex', group: 'semi', name: 'Truncated hexagonal', cfg: '3.12.12',
+  { id: 'truncHex', group: 'semi', name: 'Truncated Hexagonal', cfg: '3.12.12',
     src: T_truncHex },
   { id: 'rhombitrihex', group: 'semi', name: 'Rhombitrihexagonal', cfg: '3.4.6.4',
     src: T_rhombitrihex },
-  { id: 'truncTrihex', group: 'semi', name: 'Truncated trihexagonal', cfg: '4.6.12',
+  { id: 'truncTrihex', group: 'semi', name: 'Truncated Trihexagonal', cfg: '4.6.12',
     src: T_truncTrihex },
-  { id: 'snubSquare', group: 'semi', name: 'Snub square', cfg: '3.3.4.3.4',
+  { id: 'snubSquare', group: 'semi', name: 'Snub Square', cfg: '3.3.4.3.4',
     src: T_snubSquare },
-  { id: 'elongTri', group: 'semi', name: 'Elongated triangular', cfg: '3.3.3.4.4',
+  { id: 'elongTri', group: 'semi', name: 'Elongated Triangular', cfg: '3.3.3.4.4',
     src: T_elongTri },
-  { id: 'snubTrihex', group: 'semi', name: 'Snub trihexagonal', cfg: '3.3.3.3.6',
+  { id: 'snubTrihex', group: 'semi', name: 'Snub Trihexagonal', cfg: '3.3.3.3.6',
     src: T_snubTrihex },
 
   // ordered by face: triangles, then quadrilaterals, then pentagons
-  { id: 'tetrakis', group: 'dual', name: 'Tetrakis square', cfg: 'V4.8.8',
+  { id: 'tetrakis', group: 'dual', name: 'Tetrakis Square', cfg: 'V4.8.8',
     src: dualOf(T_truncSquare), faces: 3 },
-  { id: 'triakis', group: 'dual', name: 'Triakis triangular', cfg: 'V3.12.12',
+  { id: 'triakis', group: 'dual', name: 'Triakis Triangular', cfg: 'V3.12.12',
     src: dualOf(T_truncHex), faces: 3 },
   { id: 'kisrhombille', group: 'dual', name: 'Kisrhombille', cfg: 'V4.6.12',
     src: dualOf(T_truncTrihex), faces: 3 },
   { id: 'rhombille', group: 'dual', name: 'Rhombille', cfg: 'V3.6.3.6',
     src: dualOf(T_trihex), faces: 4 },
-  { id: 'deltoidal', group: 'dual', name: 'Deltoidal trihexagonal', cfg: 'V3.4.6.4',
+  { id: 'deltoidal', group: 'dual', name: 'Deltoidal Trihexagonal', cfg: 'V3.4.6.4',
     src: dualOf(T_rhombitrihex), faces: 4 },
-  { id: 'cairo', group: 'dual', name: 'Cairo pentagonal', cfg: 'V3.3.4.3.4',
+  { id: 'cairo', group: 'dual', name: 'Cairo Pentagonal', cfg: 'V3.3.4.3.4',
     src: dualOf(T_snubSquare), faces: 5 },
-  { id: 'floret', group: 'dual', name: 'Floret pentagonal', cfg: 'V3.3.3.3.6',
+  { id: 'floret', group: 'dual', name: 'Floret Pentagonal', cfg: 'V3.3.3.3.6',
     src: dualOf(T_snubTrihex), faces: 5 },
-  { id: 'prismatic', group: 'dual', name: 'Prismatic pentagonal', cfg: 'V3.3.3.4.4',
+  { id: 'prismatic', group: 'dual', name: 'Prismatic Pentagonal', cfg: 'V3.3.3.4.4',
     src: dualOf(T_elongTri), faces: 5 },
 
   // Offsets must be generic — three grid lines meeting at a point would break
   // the construction — and summing to zero is what makes N=5 a true Penrose.
-  { id: 'penrose', group: 'aperiodic', name: 'Penrose rhombs', cfg: 'aperiodic · 5-fold',
+  { id: 'penrose', group: 'aperiodic', name: 'Penrose Rhombs', cfg: 'aperiodic · 5-fold',
     src: multigrid(5, [0.1234, 0.2371, -0.3123, 0.4111, -0.4593]), aperiodic: true },
   { id: 'ammann', group: 'aperiodic', name: 'Ammann–Beenker', cfg: 'aperiodic · 8-fold',
     src: multigrid(4, [0.1913, -0.2671, 0.3319, -0.1237]), aperiodic: true }
@@ -806,7 +806,7 @@ for (const [id, ratio] of [['n16', '2:1'], ['n17', '1:1']]) {
   const base = TILINGS.find(t => t.id === id);
   TILINGS.push({
     id: id + 'd', group: 'twodual',
-    name: `Cairo and prismatic pentagons (${ratio})`,
+    name: `Cairo and Prismatic Pentagons (${ratio})`,
     cfg: `dual of ${base.name}`,
     src: dualOf(base.src), pentagons: 2, dualOfId: id
   });
@@ -822,22 +822,22 @@ for (const [id, ratio] of [['n16', '2:1'], ['n17', '1:1']]) {
    name, and verify() re-derives it from the geometry, so a name cannot quietly
    go stale. */
 const TWO_DUALS = [
-  ['n14', 'Hexagons and Pentagons'],
-  ['n15', 'Hexagons and Pentagons'],
-  ['n18', 'Hexagons and Pentagons'],
-  ['n19', 'Hexagons and Pentagons'],
-  ['n20', 'Hexagons and Pentagons'],
-  ['n4',  'Pentagons and Squares'],
-  ['n3',  'Pentagons and Squares'],
-  ['n8',  'Pentagons and Kites'],
-  ['n9',  'Pentagons and Kites'],
-  ['n12', 'Pentagons and Trapezoids'],
-  ['n10', 'Hexagons and Trapezoids'],
+  ['n14', 'Hexagons and Prismatic Pentagons'],
+  ['n15', 'Hexagons and Prismatic Pentagons'],
+  ['n18', 'Hexagons and Cairo Pentagons'],
+  ['n19', 'Hexagons and Floret Pentagons'],
+  ['n20', 'Hexagons and Floret Pentagons'],
+  ['n4',  'Prismatic Pentagons and Squares'],
+  ['n3',  'Prismatic Pentagons and Squares'],
+  ['n8',  'Prismatic Pentagons and Kites'],
+  ['n9',  'Cairo Pentagons and Kites'],
+  ['n12', 'Floret Pentagons and Trapeziums'],
+  ['n10', 'Hexagons and Trapeziums'],
   ['n13', 'Hexagons and Quadrilaterals'],
-  ['n11', 'Rhombi and Trapezoids'],
-  ['n7',  'Rhombi and Trapezoids'],
-  ['n6',  'Rhombi and Trapezoids'],
-  ['n5',  'Kites and Trapezoids'],
+  ['n11', 'Rhombi and Trapeziums'],
+  ['n7',  'Rhombi and Trapeziums'],
+  ['n6',  'Rhombi and Trapeziums'],
+  ['n5',  'Kites and Trapeziums'],
   ['n2',  'Kites and Triangles'],
   ['n1',  'Kites and Triangles']
 ];
@@ -896,7 +896,7 @@ TILINGS.push({
   src: fromCells(FCB)
 });
 TILINGS.push({
-  id: 'fcbd', group: 'threedual', name: 'Floret, Cairo and prismatic pentagons',
+  id: 'fcbd', group: 'threedual', name: 'Floret, Cairo and Prismatic Pentagons',
   cfg: 'dual of Hexagons, Squares and Triangles',
   src: dualOf(TILINGS[TILINGS.length - 1].src),
   pentagons: 3, dualOfId: 'fcb'
@@ -911,7 +911,7 @@ TILINGS.push({
 for (const id of ['penrose', 'ammann']) {
   const base = TILINGS.find(t => t.id === id);
   TILINGS.push({
-    id: id + 'd', group: 'aperiodic', name: `${base.name} dual`,
+    id: id + 'd', group: 'aperiodic', name: `${base.name} Dual`,
     cfg: `dual of ${base.name}`,
     src: dualOf(base.src), mixed: true, dualOfId: id
   });
@@ -1341,10 +1341,30 @@ function shapeClasses(polys) {
 const NGON_NAME = { 3: 'Triangles', 5: 'Pentagons', 6: 'Hexagons',
                     7: 'Heptagons', 8: 'Octagons', 9: 'Nonagons',
                     10: 'Decagons', 12: 'Dodecagons' };
-const QUAD_NAME = ['Squares', 'Rhombi', 'Kites', 'Trapezoids', 'Quadrilaterals'];
+const QUAD_NAME = ['Squares', 'Rhombi', 'Kites', 'Trapeziums', 'Quadrilaterals'];
+
+/* Only three convex pentagons appear in any of these duals, and each has a name:
+   the dual of a 3⁴.6 vertex is the floret, of 3².4.3.4 the Cairo, of 3³.4² the
+   prismatic. They are worth naming rather than all reading "Pentagons", and the
+   references come off the three Laves duals already in the registry rather than
+   being typed in. Cairo and prismatic have equal area and are told apart by
+   their edges, which is why this goes through sameShape. */
+let pentagonRefs = null;
+function pentagonName(sig) {
+  if (!pentagonRefs) {
+    pentagonRefs = [['floret', 'Floret'], ['cairo', 'Cairo'], ['prismatic', 'Prismatic']]
+      .map(([id, label]) => {
+        const t = TILINGS.find(x => x.id === id);
+        return { label, sig: shapeClasses(t.src.gen(3)).reps[0].sig };
+      });
+  }
+  const hit = pentagonRefs.find(r => sameShape(r.sig, sig));
+  return hit ? `${hit.label} Pentagons` : 'Pentagons';
+}
 
 function shapeName(sig) {
   const near = (x, y, tol) => Math.abs(x - y) < tol;
+  if (sig.n === 5) return { label: pentagonName(sig), sides: 5, sub: 0 };
   if (sig.n !== 4) return { label: NGON_NAME[sig.n] || sig.n + '-gons', sides: sig.n, sub: 0 };
   const e = sig.edges, a = sig.angles;
   let sub;
