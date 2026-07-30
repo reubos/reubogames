@@ -328,7 +328,6 @@
         <input class="fsearch" id="fsearch" placeholder="Search name or notation…"
                oninput="setSearch(this.value)">
         <button id="fonly" onclick="toggleOnly()" title="Show only tilings made of nothing but the ticked shapes">Nothing else</button>
-        <button id="freg" onclick="toggleReg()" title="Only tilings whose every tile is a regular polygon">All tiles regular</button>
         <button id="fclear" onclick="clearFilters()">Clear</button>
         <span class="fcount" id="fcount"></span>
       </div>
@@ -2668,16 +2667,14 @@ function shapeInfo(t) {
   if (shapeTagCache.has(t.id)) return shapeTagCache.get(t.id);
   const polys = shapePolys(t);
   const tags = new Set(), leaves = new Set();
-  let regular = true;
   for (const r of shapeClasses(polys).reps) {
     const tag = shapeTag(r.sig);
     if (!tag) continue;
     tags.add(tag.cat);
     if (tag.sub) tags.add(tag.cat + '.' + tag.sub);
     leaves.add(leafKey(tag));
-    if (!isRegularShape(r.sig)) regular = false;
   }
-  const out = { tags, leaves, regular,
+  const out = { tags, leaves,
                 text: (t.name + ' ' + cardConfig(t)).toLowerCase() };
   shapeTagCache.set(t.id, out);
   return out;
@@ -2699,7 +2696,7 @@ function scanShapes() {
 /* Chip states: 1 must include, −1 must not. "Nothing else" turns the ticked
    set into an exact match by ruling out everything not ticked, which would
    otherwise take a click on all thirteen categories. */
-const filters = { shape: new Map(), only: false, regular: false,
+const filters = { shape: new Map(), only: false,
                   search: '', cls: new Set(), open: new Set() };
 
 // Ticking a category permits any of its members; ticking a member permits
@@ -2723,7 +2720,6 @@ function matches(t, skip) {
     }
     if (allowed.size) for (const leaf of info.leaves) if (!allowed.has(leaf)) return false;
   }
-  if (filters.regular && !info.regular) return false;
   if (filters.cls.size && !filters.cls.has(t.group)) return false;
   if (filters.search && !info.text.includes(filters.search)) return false;
   return true;
@@ -2806,8 +2802,7 @@ function renderFilters() {
   }
 
   document.getElementById('fonly').classList.toggle('on', filters.only);
-  document.getElementById('freg').classList.toggle('on', filters.regular);
-  const active = filters.shape.size || filters.only || filters.regular ||
+  const active = filters.shape.size || filters.only ||
                  filters.search || filters.cls.size;
   document.getElementById('fclear').disabled = !active;
   document.getElementById('fnote').textContent = filters.only
@@ -2842,10 +2837,9 @@ function cycleChip(key) {
 
 function setSearch(v) { filters.search = v.trim().toLowerCase(); refilter(); }
 function toggleOnly() { filters.only = !filters.only; refilter(); }
-function toggleReg() { filters.regular = !filters.regular; refilter(); }
 function clearFilters() {
   filters.shape.clear(); filters.cls.clear(); filters.open.clear();
-  filters.only = filters.regular = false; filters.search = '';
+  filters.only = false; filters.search = '';
   document.getElementById('fsearch').value = '';
   refilter();
 }
