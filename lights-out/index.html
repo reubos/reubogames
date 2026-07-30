@@ -171,7 +171,62 @@
     font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.09em;
     color: var(--muted); margin: 26px 0 0; padding-top: 18px; border-top: 1px solid var(--line);
   }
-  .section-title:first-of-type { border-top: 0; padding-top: 0; margin-top: 20px; }
+  .section-title.first { border-top: 0; padding-top: 0; margin-top: 20px; }
+  .section-title.gone, .cards.gone { display: none; }
+
+  /* ---------- filter bar ---------- */
+  /* Sticky inside the scrolling modal, with negative side margins so the
+     backdrop covers the modal box's own padding as cards slide under it. */
+  .filters {
+    position: sticky; top: -40px; z-index: 2;
+    margin: 14px -24px 0; padding: 12px 24px 14px;
+    background: var(--panel-2); border-bottom: 1px solid var(--line);
+    /* several families expanded at once runs to 570px, which on a phone would
+       be the whole screen — so the bar scrolls within itself rather than
+       pushing the cards it is meant to be filtering out of sight */
+    max-height: 46vh; overflow-y: auto;
+  }
+  /* on a phone the chips wrap to more rows than a sticky bar can justify
+     holding on screen, so there it scrolls away with the cards instead */
+  @media (max-width: 620px) {
+    .filters { position: static; max-height: none; overflow: visible; }
+  }
+  .frow { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .fsearch {
+    flex: 1 1 180px; min-width: 140px;
+    font-family: inherit; font-size: 0.85rem;
+    background: var(--panel); color: var(--text);
+    border: 1px solid var(--line); border-radius: 7px; padding: 8px 10px;
+  }
+  .fsearch::placeholder { color: var(--muted); }
+  .frow button { font-size: 0.8rem; padding: 8px 10px; }
+  .fcount { font-size: 0.78rem; color: var(--muted); margin-left: auto; }
+
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+  .chip {
+    font-family: inherit; font-size: 0.78rem; padding: 5px 9px;
+    border-radius: 999px; background: var(--panel);
+    border: 1px solid var(--line); color: var(--text); cursor: pointer;
+  }
+  .chip .n { color: var(--muted); font-size: 0.72rem; margin-left: 4px; }
+  .chip.part { border-color: #6b8f74; }
+  .chip.yes { background: #2c6b3c; border-color: #3d8a51; color: #fff; }
+  .chip.no  { border-color: #8a4b4b; color: #e0a9a9; text-decoration: line-through; }
+  .chip.yes .n, .chip.no .n { color: inherit; opacity: 0.7; }
+  .chip .exp {
+    margin-left: 6px; padding-left: 6px; font-size: 0.7rem;
+    border-left: 1px solid currentColor; opacity: 0.55;
+  }
+  .chip .exp:hover { opacity: 1; }
+  .chip.zero { opacity: 0.35; }
+  /* the sub-chips of one category, indented under it on their own line */
+  .subs {
+    display: flex; flex-wrap: wrap; gap: 6px;
+    flex-basis: 100%; margin: 2px 0 4px 16px;
+  }
+  .subs .chip { font-size: 0.74rem; padding: 4px 8px; }
+  .fnote { font-size: 0.78rem; color: var(--muted); margin: 10px 0 0; }
+  .empty { color: var(--muted); font-size: 0.9rem; padding: 30px 0 10px; text-align: center; }
 
   .backlink { display: inline-block; margin-top: 30px; color: var(--muted); font-size: 0.85rem; }
 </style>
@@ -268,29 +323,45 @@
       <button onclick="closePicker()">Close</button>
     </div>
 
-    <p class="section-title">Regular</p>
+    <div class="filters">
+      <div class="frow">
+        <input class="fsearch" id="fsearch" placeholder="Search name or notation…"
+               oninput="setSearch(this.value)">
+        <button id="fonly" onclick="toggleOnly()" title="Show only tilings made of nothing but the ticked shapes">Nothing else</button>
+        <button id="freg" onclick="toggleReg()" title="Only tilings whose every tile is a regular polygon">All tiles regular</button>
+        <button id="fclear" onclick="clearFilters()">Clear</button>
+        <span class="fcount" id="fcount"></span>
+      </div>
+      <div class="chips" id="fshapes"></div>
+      <div class="chips" id="fclasses"></div>
+      <p class="fnote" id="fnote"></p>
+    </div>
+
+    <p class="section-title first" id="sec-regular">Regular</p>
     <div class="cards" id="grp-regular"></div>
 
-    <p class="section-title">Semiregular &mdash; Archimedean</p>
+    <p class="section-title" id="sec-semi">Semiregular &mdash; Archimedean</p>
     <div class="cards" id="grp-semi"></div>
 
-    <p class="section-title">Laves duals</p>
+    <p class="section-title" id="sec-dual">Laves duals</p>
     <div class="cards" id="grp-dual"></div>
 
-    <p class="section-title">2-uniform &mdash; all 20</p>
+    <p class="section-title" id="sec-two">2-uniform</p>
     <div class="cards" id="grp-two"></div>
 
-    <p class="section-title">2-uniform duals &mdash; all 20</p>
+    <p class="section-title" id="sec-twodual">2-uniform duals</p>
     <div class="cards" id="grp-twodual"></div>
 
-    <p class="section-title">3-uniform</p>
+    <p class="section-title" id="sec-three">3-uniform</p>
     <div class="cards" id="grp-three"></div>
 
-    <p class="section-title">3-uniform dual</p>
+    <p class="section-title" id="sec-threedual">3-uniform dual</p>
     <div class="cards" id="grp-threedual"></div>
 
-    <p class="section-title">Aperiodic</p>
+    <p class="section-title" id="sec-aperiodic">Aperiodic</p>
     <div class="cards" id="grp-aperiodic"></div>
+
+    <p class="empty" id="noneFound" style="display:none">No tiling matches those filters.</p>
   </div>
 </div>
 
@@ -1489,7 +1560,20 @@ function verify() {
       ok = configs.size === 1 && [...configs][0] === want && badEdge === 0;
       detail = `vertex=${[...configs].join(' | ') || 'none'}`;
     }
-    rows.push({ id: t.id, tiles: polys.length, closed, badEdge, detail, ok });
+    /* The shape filter reads its tags off the patch drawn on a picker card,
+       which is only sound if that patch already shows every shape the tiling
+       has. Check it against this larger one. An aperiodic tiling is exempt:
+       its dual keeps finding new shapes as the patch grows, and its chips are
+       honestly "shapes seen". */
+    let tags = 'exempt';
+    if (!isAperiodic(t)) {
+      const here = [...new Set(shapeClasses(polys).reps
+        .map(r => shapeTag(r.sig)).filter(Boolean).map(leafKey))].sort().join(' ');
+      const card = [...shapeInfo(t).leaves].sort().join(' ');
+      tags = here === card ? 'ok' : `card="${card}" vs patch="${here}"`;
+      if (tags !== 'ok') ok = false;
+    }
+    rows.push({ id: t.id, tiles: polys.length, closed, badEdge, detail, tags, ok });
   }
   return rows;
 }
@@ -2448,13 +2532,342 @@ function cardConfig(t) {
   return t.notation || t.cfg;                // Laves duals already carry V-notation
 }
 
+/* =====================================================================
+   10b. FILTERING THE PICKER
+
+   Filtering is by what a tiling is made of, in two levels: a category for
+   the shape family, and where it helps, a subcategory. The categories fall
+   out of shapeName(), so the chips and the card titles can never disagree
+   about what a Cairo pentagon or a right trapezium is.
+
+   Triangles are the awkward family. Right and isosceles trapeziums
+   partition theirs — both at once would be a rectangle, which is caught
+   earlier as a square or a rhombus — but a triangle can be right and
+   isosceles together (the 45-45-90 of the tetrakis square), and every
+   equilateral is isosceles besides. So triangles are partitioned as
+   equilateral / right / other instead, which keeps the counts additive and
+   loses only the scalene query, whose answer is the two 30-60-90 tilings.
+   ===================================================================== */
+
+const SHAPE_CATS = [
+  { key: 'tri',     label: 'Triangles',
+    subs: [['eq', 'Equilateral'], ['right', 'Right'], ['other', 'Other']] },
+  { key: 'square',  label: 'Squares' },
+  { key: 'rhombus', label: 'Rhombi' },
+  { key: 'kite',    label: 'Kites' },
+  { key: 'trap',    label: 'Trapeziums',
+    subs: [['right', 'Right'], ['iso', 'Isosceles'], ['other', 'Other']] },
+  { key: 'quad',    label: 'Other quadrilaterals' },
+  { key: 'pent',    label: 'Pentagons',
+    subs: [['prismatic', 'Prismatic'], ['cairo', 'Cairo'],
+           ['floret', 'Floret'], ['other', 'Other']] },
+  { key: 'hex',     label: 'Hexagons',
+    subs: [['reg', 'Regular'], ['irreg', 'Irregular']] },
+  { key: 'hept',    label: 'Heptagons' },
+  { key: 'oct',     label: 'Octagons',
+    subs: [['reg', 'Regular'], ['irreg', 'Irregular']] },
+  { key: 'nonagon', label: 'Nonagons' },
+  { key: 'decagon', label: 'Decagons' },
+  { key: 'dodec',   label: 'Dodecagons' }
+];
+
+const CLASS_LABEL = { regular: 'Regular', semi: 'Semiregular', dual: 'Laves duals',
+                      two: '2-uniform', twodual: '2-uniform duals',
+                      three: '3-uniform', threedual: '3-uniform dual',
+                      aperiodic: 'Aperiodic' };
+
+const catOf = k => SHAPE_CATS.find(c => c.key === k);
+
+// Equilateral, square, regular hexagon: all edges and all angles alike.
+function isRegularShape(sig) {
+  for (let i = 1; i < sig.n; i++) {
+    if (Math.abs(sig.e[i] - sig.e[0]) > 0.01) return false;
+    if (Math.abs(sig.a[i] - sig.a[0]) > 0.5) return false;
+  }
+  return true;
+}
+
+/* Category and subcategory for one shape. The quadrilaterals and pentagons
+   come through shapeName() rather than being measured again here. */
+function shapeTag(sig) {
+  const nm = shapeName(sig);
+  if (sig.n === 3) {
+    return { cat: 'tri', sub: isRegularShape(sig) ? 'eq'
+      : sig.a.some(x => Math.abs(x - 90) < 0.5) ? 'right' : 'other' };
+  }
+  if (sig.n === 4) {
+    return [{ cat: 'square' }, { cat: 'rhombus' }, { cat: 'kite' },
+            { cat: 'trap', sub: 'right' }, { cat: 'trap', sub: 'iso' },
+            { cat: 'trap', sub: 'other' }, { cat: 'quad' }][nm.sub];
+  }
+  if (sig.n === 5) {
+    const kind = nm.label.split(' ')[0].toLowerCase();
+    return { cat: 'pent',
+             sub: ['prismatic', 'cairo', 'floret'].includes(kind) ? kind : 'other' };
+  }
+  if (sig.n === 6) return { cat: 'hex', sub: isRegularShape(sig) ? 'reg' : 'irreg' };
+  if (sig.n === 8) return { cat: 'oct', sub: isRegularShape(sig) ? 'reg' : 'irreg' };
+  const cat = { 7: 'hept', 9: 'nonagon', 10: 'decagon', 12: 'dodec' }[sig.n];
+  return cat ? { cat } : null;
+}
+
+// The chip a shape answers to: a subcategory where its family has them.
+const leafKey = tag => catOf(tag.cat).subs ? tag.cat + '.' + tag.sub : tag.cat;
+
+/* A periodic tiling shows every shape it has in any patch holding a whole unit
+   cell, so the tags come off the smallest patch raw() will give — checked in
+   verify() against a patch of 140 tiles.
+
+   Going through raw() rather than gen() matters for the duals. gen() carries a
+   margin of 2½ lattice pitches so that the dual it returns is complete out to
+   the edge of the window, and that margin dominates the cost at this size:
+   kisrhombille took 3.6s through gen() and 7ms through its parent. Since
+   dualPolys() only ever emits fully surrounded vertices, dualising a small
+   parent patch needs no margin and no clipping.
+
+   An aperiodic tiling has unboundedly many local configurations, so its dual
+   keeps turning up new shapes as the patch grows and no patch settles the
+   question. The two duals below want a far bigger one than the periodic
+   tilings: nine shapes for the Penrose dual and six for the Ammann–Beenker,
+   unchanged from around 700 tiles up to 1665. Their chips are therefore
+   "shapes seen", not "all the shapes there are". */
+const SHAPE_H = 2;
+const APERIODIC_SHAPE_TILES = 90;             // nominal; the disc comes out larger
+const shapeTagCache = new Map();
+
+// A Laves dual carries its parent's vertex configuration with a V in front,
+// which is enough to find the parent; the rest name it outright.
+function dualParent(t) {
+  if (t.dualOfId) return TILINGS.find(x => x.id === t.dualOfId);
+  if (/^V[\d.]+$/.test(t.cfg)) return TILINGS.find(x => x.cfg === t.cfg.slice(1)) || null;
+  return null;
+}
+
+function isAperiodic(t) {
+  const p = dualParent(t);
+  return !!(t.aperiodic || (p && p.aperiodic));
+}
+
+/* Enough of an aperiodic tiling to have seen its recurring configurations.
+   raw() fills a disc of radius about h·√2, and density is tiles per unit area,
+   so this asks for a tile count rather than a radius — gen()'s argument is a
+   window width, which at these sizes would have built a patch of thousands. */
+function aperiodicH(density) {
+  return Math.sqrt(APERIODIC_SHAPE_TILES / (TAU * density)) / Math.SQRT2;
+}
+
+function shapePolys(t) {
+  const p = dualParent(t);
+  // one dual tile per parent vertex, so it is the parent's vertices to count
+  if (p) return dualPolys(p.src.raw(
+    p.aperiodic ? aperiodicH(p.src.vertexDensity) : SHAPE_H));
+  return t.src.raw(t.aperiodic ? aperiodicH(t.src.density) : SHAPE_H);
+}
+
+function shapeInfo(t) {
+  if (shapeTagCache.has(t.id)) return shapeTagCache.get(t.id);
+  const polys = shapePolys(t);
+  const tags = new Set(), leaves = new Set();
+  let regular = true;
+  for (const r of shapeClasses(polys).reps) {
+    const tag = shapeTag(r.sig);
+    if (!tag) continue;
+    tags.add(tag.cat);
+    if (tag.sub) tags.add(tag.cat + '.' + tag.sub);
+    leaves.add(leafKey(tag));
+    if (!isRegularShape(r.sig)) regular = false;
+  }
+  const out = { tags, leaves, regular,
+                text: (t.name + ' ' + cardConfig(t)).toLowerCase() };
+  shapeTagCache.set(t.id, out);
+  return out;
+}
+
+/* Indexing runs a few tilings per tick rather than in one go, so that a slow
+   one cannot hold up the first paint. Opening the picker before it finishes
+   finds the chips saying as much. */
+let shapeQueue = null, shapesReady = false;
+function scanShapes() {
+  if (!shapeQueue) shapeQueue = TILINGS.slice();
+  const until = performance.now() + 20;
+  while (shapeQueue.length && performance.now() < until) shapeInfo(shapeQueue.shift());
+  if (shapeQueue.length) { setTimeout(scanShapes, 0); return; }
+  shapesReady = true;
+  if (pickerOpen()) refilter();
+}
+
+/* Chip states: 1 must include, −1 must not. "Nothing else" turns the ticked
+   set into an exact match by ruling out everything not ticked, which would
+   otherwise take a click on all thirteen categories. */
+const filters = { shape: new Map(), only: false, regular: false,
+                  search: '', cls: new Set(), open: new Set() };
+
+// Ticking a category permits any of its members; ticking a member permits
+// just that one.
+function leavesUnder(key) {
+  const cat = catOf(key);
+  if (!cat) return [key];                              // already a subcategory
+  return cat.subs ? cat.subs.map(([s]) => key + '.' + s) : [key];
+}
+
+function matches(t, skip) {
+  const info = shapeInfo(t);
+  for (const [k, v] of filters.shape) {
+    if (k === skip) continue;
+    if ((v > 0) !== info.tags.has(k)) return false;
+  }
+  if (filters.only) {
+    const allowed = new Set();
+    for (const [k, v] of filters.shape) {
+      if (v > 0 && k !== skip) for (const leaf of leavesUnder(k)) allowed.add(leaf);
+    }
+    if (allowed.size) for (const leaf of info.leaves) if (!allowed.has(leaf)) return false;
+  }
+  if (filters.regular && !info.regular) return false;
+  if (filters.cls.size && !filters.cls.has(t.group)) return false;
+  if (filters.search && !info.text.includes(filters.search)) return false;
+  return true;
+}
+
+// What ticking a chip would leave, with the other filters still on, so the
+// numbers say where there is something to find rather than restating the
+// registry.
+function chipCount(key) {
+  return TILINGS.filter(t => matches(t, key) && shapeInfo(t).tags.has(key)).length;
+}
+
+/* One chip, with the count on it and — for a family that subdivides — a
+   trailing arrow that opens its members. The arrow is a click zone within the
+   chip rather than a chip of its own, so that opening a family and requiring
+   one are two gestures on the same control rather than two controls. */
+function chipHTML(key, label, state, count, extra, arrow) {
+  const cls = state > 0 ? 'yes' : state < 0 ? 'no' : count ? '' : 'zero';
+  return `<button class="chip ${cls} ${extra || ''}" data-key="${key}">` +
+         `${state > 0 ? '✓ ' : state < 0 ? '✗ ' : ''}${label}` +
+         `<span class="n">${count}</span>` +
+         (arrow ? `<span class="exp">${arrow}</span>` : '') + '</button>';
+}
+
+function renderFilters() {
+  const box = document.getElementById('fshapes');
+  if (!shapesReady) { box.innerHTML = '<span class="fnote">Indexing shapes…</span>'; }
+  else {
+    let html = '';
+    for (const cat of SHAPE_CATS) {
+      const total = TILINGS.filter(t => shapeInfo(t).tags.has(cat.key)).length;
+      if (!total) continue;                          // nonagons, plain trapeziums
+      const st = filters.shape.get(cat.key) || 0;
+      const subs = (cat.subs || []).filter(([s]) =>
+        TILINGS.some(t => shapeInfo(t).tags.has(cat.key + '.' + s)));
+      const kids = subs.filter(([s]) => filters.shape.get(cat.key + '.' + s));
+      const open = filters.open.has(cat.key);
+      const part = !st && kids.length ? 'part' : '';
+      html += chipHTML(cat.key, cat.label, st, chipCount(cat.key), part,
+                       subs.length > 1 ? (open ? '▾' : '▸') : '');
+      if (subs.length > 1 && open) {
+        html += '<span class="subs">' + subs.map(([s, lbl]) =>
+          chipHTML(cat.key + '.' + s, lbl,
+                   filters.shape.get(cat.key + '.' + s) || 0,
+                   chipCount(cat.key + '.' + s))).join('') + '</span>';
+      }
+    }
+    box.innerHTML = html;
+    for (const el of box.querySelectorAll('.chip')) {
+      el.onclick = e => {
+        const key = el.dataset.key;
+        if (e.target.classList.contains('exp')) {
+          filters.open.has(key) ? filters.open.delete(key) : filters.open.add(key);
+          renderFilters();
+        } else cycleChip(key);
+      };
+    }
+  }
+
+  /* Class counts ignore the class filter itself — as the shape counts do —
+     so each chip says how many it would show, not how many are showing. */
+  const cbox = document.getElementById('fclasses');
+  const held = filters.cls;
+  filters.cls = new Set();
+  const classCount = {};
+  for (const g of Object.keys(CLASS_LABEL)) {
+    classCount[g] = TILINGS.filter(t => t.group === g && matches(t)).length;
+  }
+  filters.cls = held;
+  cbox.innerHTML = Object.keys(CLASS_LABEL).map(g =>
+    `<button class="chip ${filters.cls.has(g) ? 'yes' : classCount[g] ? '' : 'zero'}" ` +
+    `data-g="${g}">${CLASS_LABEL[g]}<span class="n">${classCount[g]}</span></button>`
+  ).join('');
+  for (const el of cbox.querySelectorAll('.chip')) {
+    el.onclick = () => {
+      filters.cls.has(el.dataset.g) ? filters.cls.delete(el.dataset.g)
+                                    : filters.cls.add(el.dataset.g);
+      refilter();
+    };
+  }
+
+  document.getElementById('fonly').classList.toggle('on', filters.only);
+  document.getElementById('freg').classList.toggle('on', filters.regular);
+  const active = filters.shape.size || filters.only || filters.regular ||
+                 filters.search || filters.cls.size;
+  document.getElementById('fclear').disabled = !active;
+  document.getElementById('fnote').textContent = filters.only
+    ? 'Showing tilings made of nothing but the ticked shapes.'
+    : filters.shape.size
+      ? 'Click a shape again to rule it out, and once more to forget it.'
+      : '';
+}
+
+/* Cycles none → must → must not. A category ruled out takes its members with
+   it, so a required member under a ruled-out family cannot be expressed. */
+function cycleChip(key) {
+  const now = filters.shape.get(key) || 0;
+  const next = now === 0 ? 1 : now === 1 ? -1 : 0;
+  if (next === 0) filters.shape.delete(key); else filters.shape.set(key, next);
+  const cat = catOf(key);
+  if (cat) {
+    if (next < 0) {
+      // its members, not the family itself — leavesUnder() answers with the
+      // family where it has no members, and that would undo the click
+      for (const [s] of cat.subs || []) filters.shape.delete(key + '.' + s);
+      filters.open.delete(key);
+    } else if (now === 0 && (cat.subs || []).length > 1) {
+      filters.open.add(key);                 // ticking a family offers its members
+    }
+  } else if (next !== 0) {
+    const parent = key.split('.')[0];
+    if ((filters.shape.get(parent) || 0) < 0) filters.shape.delete(parent);
+  }
+  refilter();
+}
+
+function setSearch(v) { filters.search = v.trim().toLowerCase(); refilter(); }
+function toggleOnly() { filters.only = !filters.only; refilter(); }
+function toggleReg() { filters.regular = !filters.regular; refilter(); }
+function clearFilters() {
+  filters.shape.clear(); filters.cls.clear(); filters.open.clear();
+  filters.only = filters.regular = false; filters.search = '';
+  document.getElementById('fsearch').value = '';
+  refilter();
+}
+function refilter() { renderFilters(); buildCards(); drawVisibleCards(); }
+
+const pickerOpen = () => document.getElementById('picker').classList.contains('show');
+
 function buildCards() {
   drawQueue = [];                            // abandon any pass still running
+  let shown = 0, first = null;
   for (const g of ['regular', 'semi', 'dual', 'two', 'twodual',
                    'three', 'threedual', 'aperiodic']) {
     const box = document.getElementById('grp-' + g);
+    const title = document.getElementById('sec-' + g);
     box.innerHTML = '';
-    for (const t of TILINGS.filter(x => x.group === g)) {
+    const list = TILINGS.filter(x => x.group === g && (!shapesReady || matches(x)));
+    // A section with nothing left in it says nothing worth the vertical space.
+    title.classList.toggle('gone', list.length === 0);
+    box.classList.toggle('gone', list.length === 0);
+    title.classList.remove('first');
+    if (list.length) { shown += list.length; if (!first) first = title; }
+    for (const t of list) {
       const el = document.createElement('div');
       el.className = 'card' + (t.id === state.tiling.id ? ' sel' : '');
       el.innerHTML = `<svg viewBox="0 0 100 100"></svg>
@@ -2467,6 +2880,11 @@ function buildCards() {
       drawQueue.push(el);
     }
   }
+  // whichever section survives filtering goes without the rule above it
+  if (first) first.classList.add('first');
+  document.getElementById('noneFound').style.display = shown ? 'none' : '';
+  document.getElementById('fcount').textContent =
+    shown === TILINGS.length ? `${shown} tilings` : `${shown} of ${TILINGS.length}`;
   setTimeout(pumpCards, 16);
 }
 
@@ -2474,6 +2892,7 @@ function buildCards() {
 // measures them
 function openPicker() {
   document.getElementById('picker').classList.add('show');
+  renderFilters();
   buildCards();
   drawVisibleCards();
 }
@@ -2495,6 +2914,7 @@ try { saved = localStorage.getItem('lightsout.tiling'); } catch (e) {}
 const start = TILINGS.find(t => t.id === saved) || TILINGS[1];
 state.size = DEFAULT_SIZE;
 setTiling(start);
+setTimeout(scanShapes, 200);           // indexes the shapes, warming the previews
 </script>
 </body>
 </html>
