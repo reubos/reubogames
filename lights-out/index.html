@@ -3386,20 +3386,27 @@ function refilter() { renderFilters(); buildCards(); drawVisibleCards(); }
 
 const pickerOpen = () => document.getElementById('picker').classList.contains('show');
 
-/* The three derived lines under the configuration. Aperiodic tilings have no
-   translation lattice, so no wallpaper group and no finite orbit counts —
-   they say so rather than showing an empty row. */
+/* The derived lines under the configuration. An aperiodic tiling has no
+   translation lattice, so it says what it has instead of a group rather than
+   showing an empty row — that is a fact about the tiling. The build recipe is
+   different: GomJau-Hogg notation places regular polygons edge to edge, so it
+   does not exist for a dual or for the aperiodic pair, and a row explaining
+   its own absence on half the cards is just noise. It is left off. */
 function cardFacts(t) {
   const s = symReady ? symInfo(t) : undefined;
   const rows = [];
-  rows.push(['Group', s === undefined ? null
-    : s ? `${s.group} <span class="orb">${ORBIFOLD[s.group]}</span>` : 'aperiodic']);
-  rows.push(['Orbits', s === undefined ? null
-    : s ? `v=${s.v} t=${s.t} e=${s.e}` : 'infinitely many']);
-  rows.push(['Build', BUILD[t.id] || (dualParent(t) ? 'dual — not built this way' : '—')]);
-  return '<dl class="cfacts">' + rows.map(([k, v]) =>
-    `<dt>${k}</dt><dd class="${v && /^[a-z0-9]/.test(v) ? '' : 'none'}">${v === null ? '…' : v}</dd>`
-  ).join('') + '</dl>';
+  if (s === undefined) {
+    rows.push(['Group', '…', true], ['Orbits', '…', true]);
+  } else if (s) {
+    rows.push(['Group', `${s.group} <span class="orb">${ORBIFOLD[s.group]}</span>`, false]);
+    rows.push(['Orbits', `v=${s.v} t=${s.t} e=${s.e}`, false]);
+  } else {
+    rows.push(['Group', 'none — aperiodic', true]);
+    rows.push(['Orbits', 'infinitely many', true]);
+  }
+  if (BUILD[t.id]) rows.push(['Build', BUILD[t.id], false]);
+  return '<dl class="cfacts">' + rows.map(([k, v, prose]) =>
+    `<dt>${k}</dt><dd class="${prose ? 'none' : ''}">${v}</dd>`).join('') + '</dl>';
 }
 
 function buildCards() {
