@@ -617,10 +617,21 @@ const TWO_UNIFORM = [
   { id: 'n11', name: '[3.6.3.6; 3².6²]', variant: '',
     v1: [0,-1.7321], v2: [-2,0],
     cell: [[6,0.305,0.8526,0],[3,-0.695,-0.3021,0.5236],[3,-0.695,0.2752,1.5708]] },
-  { id: 'n6', name: '[3.4².6; 3.6.3.6]', variant: '15-tile unit',
-    v1: [-2,0], v2: [0,8.1962],
-    cell: [[3,0.5,-3.5417,0.5236],[6,-0.5,4.0771,0],[4,0.5,-2.753,0.7854],[3,0.5,3.4998,1.5708],[4,-0.5,2.7111,0.7854],[4,-0.5,-2.753,0.7854],[3,0.5,-1.9643,1.5708],[4,0.5,2.7111,0.7854],[3,-0.5,1.9224,0.5236],[6,-0.5,-1.387,1.0472],[6,0.5,1.3451,1.0472],[3,0.5,-0.8096,0.5236],[4,-0.5,-0.0209,0.7854],[3,-0.5,0.7677,1.5708],[4,0.5,-0.0209,0.7854]] },
-  { id: 'n7', name: '[3.4².6; 3.6.3.6]', variant: '5-tile unit',
+  /* These two are the same layer of hexagons, squares and triangles stacked two
+     different ways, which is all that separates them: n7 stacks each layer
+     directly on the last, n6 offsets every layer by half a period, centring the
+     lattice. That is exactly the difference between Chavey's (3.4².6; 3.6.3.6)₁,
+     pmm with t=4, and ₂, cmm with t=3, and section 5d derives both.
+
+     n6 previously carried a 15-tile cell — a three-layer stacking that is a
+     perfectly good tiling of these two vertex types but is not 2-uniform at all,
+     coming out with five vertex orbits. A vertex-configuration pair does not
+     determine a tiling, and verify() cannot catch it, since it checks which
+     vertex types occur and never how many orbits they fall into. */
+  { id: 'n6', name: '[3.4².6; 3.6.3.6]', variant: 'offset layers',
+    v1: [-2,0], v2: [-1,-2.7321],
+    cell: [[3,1.1124,0.6696,0.5236],[6,0.1124,0.0922,0],[4,-0.8875,-1.2738,0.7854],[4,0.1125,-1.2738,0.7854],[3,1.1125,-0.4851,1.5708]] },
+  { id: 'n7', name: '[3.4².6; 3.6.3.6]', variant: 'stacked layers',
     v1: [-2,0], v2: [0,-2.7321],
     cell: [[3,1.1124,0.6696,0.5236],[6,0.1124,0.0922,0],[4,-0.8875,-1.2738,0.7854],[4,0.1125,-1.2738,0.7854],[3,1.1125,-0.4851,1.5708]] },
   { id: 'n16', name: '[3³.4²; 3².4.3.4]', variant: '18-tile unit',
@@ -863,8 +874,10 @@ function compositionName(cell) {
     Math.min(...a[1].map(d => d.area)) - Math.min(...b[1].map(d => d.area)));
 
   for (const [g, list] of ordered) {
+    // n6 and n7 are the same cell on two lattices of equal area, so the sort
+    // needs a last resort or their numbering would depend on the engine
     list.sort((p, q) => p.area - q.area || p.cell.length - q.cell.length
-                        || p.name.localeCompare(q.name));
+                        || p.name.localeCompare(q.name) || p.id.localeCompare(q.id));
     list.forEach((d, i) => {
       TILINGS.push({
         id: d.id, group: 'two',
@@ -1321,8 +1334,10 @@ function orbitCounts(polys, S) {
    n20  derived e=6, Chavey prints e=7; v, t and the group all agree. Small
         enough to be either a miscount here or the scan, and unresolved.
 
-   n6 is left out entirely: it does not appear to be the 2-uniform tiling it
-   claims to be. See its note in the registry. */
+   This check is what found n6: it derived five vertex orbits where a 2-uniform
+   tiling must have two, and the cell it now carries was arrived at by asking
+   which stacking would give Chavey's cmm with t=3. See its note in the
+   registry. */
 const CHAVEY = {
   triangle: ['p6m', 1, 1, 1], square: ['p4m', 1, 1, 1], hexagon: ['p6m', 1, 1, 1],
   trihex: ['p6m', 1, 2, 1], truncSquare: ['p4m', 1, 2, 2], truncHex: ['p6m', 1, 2, 2],
@@ -1332,7 +1347,8 @@ const CHAVEY = {
   n18: ['p6m', 2, 3, 3], n16: ['p4g', 2, 4, 5], n17: ['pgg', 2, 6, 6],
   n11: ['pmm', 2, 2, 3], n12: ['cmm', 2, 2, 4], n10: ['p6m', 2, 2, 3],
   n19: ['p6m', 2, 3, 3], n20: ['p6', 2, 5, 7],
-  n7: ['pmm', 2, 4, 4], n8: ['p6m', 2, 4, 4], n9: ['p6m', 2, 4, 4], n5: ['p6m', 2, 5, 5],
+  n7: ['pmm', 2, 4, 4], n6: ['cmm', 2, 3, 4],
+  n8: ['p6m', 2, 4, 4], n9: ['p6m', 2, 4, 4], n5: ['p6m', 2, 5, 5],
   n2: ['p4m', 2, 3, 3], n13: ['p6m', 2, 4, 4], n1: ['p6m', 2, 4, 4],
   fcb: ['p6m', 3, 5, 6]
 };
