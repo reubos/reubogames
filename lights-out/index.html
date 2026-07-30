@@ -831,13 +831,13 @@ const TWO_DUALS = [
   ['n3',  'Prismatic Pentagons and Squares'],
   ['n8',  'Prismatic Pentagons and Kites'],
   ['n9',  'Cairo Pentagons and Kites'],
-  ['n12', 'Floret Pentagons and Trapeziums'],
-  ['n10', 'Hexagons and Trapeziums'],
+  ['n12', 'Floret Pentagons and Isosceles Trapeziums'],
+  ['n10', 'Hexagons and Isosceles Trapeziums'],
   ['n13', 'Hexagons and Quadrilaterals'],
-  ['n11', 'Rhombi and Trapeziums'],
-  ['n7',  'Rhombi and Trapeziums'],
-  ['n6',  'Rhombi and Trapeziums'],
-  ['n5',  'Kites and Trapeziums'],
+  ['n11', 'Rhombi and Isosceles Trapeziums'],
+  ['n7',  'Rhombi and Right Trapeziums'],
+  ['n6',  'Rhombi and Right Trapeziums'],
+  ['n5',  'Kites and Right Trapeziums'],
   ['n2',  'Kites and Triangles'],
   ['n1',  'Kites and Triangles']
 ];
@@ -1341,7 +1341,9 @@ function shapeClasses(polys) {
 const NGON_NAME = { 3: 'Triangles', 5: 'Pentagons', 6: 'Hexagons',
                     7: 'Heptagons', 8: 'Octagons', 9: 'Nonagons',
                     10: 'Decagons', 12: 'Dodecagons' };
-const QUAD_NAME = ['Squares', 'Rhombi', 'Kites', 'Trapeziums', 'Quadrilaterals'];
+const QUAD_NAME = ['Squares', 'Rhombi', 'Kites',
+                   'Right Trapeziums', 'Isosceles Trapeziums', 'Trapeziums',
+                   'Quadrilaterals'];
 
 /* Only three convex pentagons appear in any of these duals, and each has a name:
    the dual of a 3⁴.6 vertex is the floret, of 3².4.3.4 the Cairo, of 3³.4² the
@@ -1373,9 +1375,18 @@ function shapeName(sig) {
   else if ([0, 1, 2, 3].some(i => near(e[i], e[(i + 1) % 4], 0.01) &&
                                   near(e[(i + 2) % 4], e[(i + 3) % 4], 0.01)))
     sub = 2;                                                            // adjacent equal pairs
-  else if ([0, 1, 2, 3].some(i => near(a[i] + a[(i + 1) % 4], 180, 0.5)))
-    sub = 3;                                                            // one parallel pair
-  else sub = 4;
+  else {
+    /* Co-interior angles down a leg sum to 180, so a[i] + a[i+1] = 180 marks
+       e[i−1] ∥ e[i+1] and leaves e[i] and e[i+2] as the legs. Equal legs make it
+       isosceles, a right angle makes it right — and it cannot be both, since
+       that would be a rectangle, which has two parallel pairs and would have
+       been caught above as a square or a rhombus. */
+    const i = [0, 1, 2, 3].findIndex(k => near(a[k] + a[(k + 1) % 4], 180, 0.5));
+    if (i < 0) sub = 6;                                                 // no parallel sides
+    else if (a.some(x => near(x, 90, 0.5))) sub = 3;                    // right
+    else if (near(e[i], e[(i + 2) % 4], 0.01)) sub = 4;                 // isosceles
+    else sub = 5;
+  }
   return { label: QUAD_NAME[sub], sides: 4, sub };
 }
 
