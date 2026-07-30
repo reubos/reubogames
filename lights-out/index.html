@@ -150,7 +150,10 @@
   .modal-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
   .modal-head h2 { margin: 0; font-size: 1.3rem; color: #fff; }
 
-  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(158px, 1fr)); gap: 12px; margin-top: 14px; }
+  /* wider than the 158px the name alone needed: the build recipe is up to 37
+     characters and would otherwise wrap to three lines and drag the whole row
+     down with it */
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 12px; margin-top: 14px; }
   .card {
     background: var(--panel); border: 1px solid var(--line);
     border-radius: 10px; padding: 10px; cursor: pointer; position: relative;
@@ -166,6 +169,21 @@
     color: var(--muted); font-size: 0.72rem; line-height: 1.3; margin-top: 3px;
     font-family: ui-monospace, monospace; overflow-wrap: anywhere;
   }
+  /* the facts under the configuration: symmetry group, orbit counts, recipe.
+     A dash stands where a tiling has none, so the rows stay in step across
+     cards and a blank never reads as a missing value. */
+  .card .cfacts {
+    margin-top: 7px; padding-top: 6px; border-top: 1px solid var(--line);
+    display: grid; grid-template-columns: auto 1fr; gap: 2px 8px;
+    font-size: 0.68rem; line-height: 1.35;
+  }
+  .card .cfacts dt { color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+  .card .cfacts dd {
+    margin: 0; color: var(--text); font-family: ui-monospace, monospace;
+    overflow-wrap: anywhere;
+  }
+  .card .cfacts dd.none { color: var(--muted); font-family: inherit; }
+  .card .cfacts dd .orb { color: var(--muted); }
 
   .section-title {
     font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.09em;
@@ -230,6 +248,18 @@
     flex-basis: 100%; margin: 2px 0 4px 16px;
   }
   .subs .chip { font-size: 0.74rem; padding: 4px 8px; }
+  /* Two more facets, each around fifteen chips. Open by default they would
+     double the bar, so they fold on their own. */
+  .fmore { margin-top: 10px; }
+  .fmore summary {
+    cursor: pointer; font-size: 0.72rem; text-transform: uppercase;
+    letter-spacing: 0.09em; color: var(--muted); list-style: none;
+  }
+  .fmore summary::-webkit-details-marker { display: none; }
+  .fmore summary::before { content: '▸ '; font-size: 0.7rem; }
+  .fmore[open] summary::before { content: '▾ '; }
+  .fmore summary:hover { color: var(--text); }
+  .fmore .chips { margin-top: 7px; }
   .fnote { font-size: 0.78rem; color: var(--muted); margin: 10px 0 0; }
   .empty { color: var(--muted); font-size: 0.9rem; padding: 30px 0 10px; text-align: center; }
 
@@ -343,6 +373,10 @@
         </div>
         <div class="chips" id="fshapes"></div>
         <div class="chips" id="fclasses"></div>
+        <details class="fmore"><summary>Vertex and face types</summary>
+          <div class="chips" id="ftypes"></div></details>
+        <details class="fmore"><summary>Wallpaper groups</summary>
+          <div class="chips" id="fgroups"></div></details>
         <p class="fnote" id="fnote"></p>
       </div>
     </div>
@@ -1374,6 +1408,91 @@ function checkSymmetry(patch = 9) {
 }
 
 /* =====================================================================
+   5e. WHAT EACH TILING CARRIES ON ITS CARD
+
+   Three things beyond the configuration: the wallpaper group, the orbit
+   counts, and the recipe that builds it.
+
+   Only the last is typed in. GomJau-Hogg notation places a run of regular
+   polygons edge to edge and then mirrors and rotates the result, so it
+   exists only for a tiling made of regular polygons — no dual has one, and
+   neither do the aperiodic pair. The strings come from the ANTWERP authors'
+   own table; which of a subscripted pair is ours was settled by the
+   symmetry derivation rather than guessed.
+   ===================================================================== */
+
+const BUILD = {
+  triangle: '3/r60/r(h2)', square: '4/m45/r(h1)', hexagon: '6/r60/r(h1)',
+  truncHex: '12-3/r60/r(h3)', rhombitrihex: '6-4-3/r60/r(c2)',
+  truncTrihex: '12-6,4/r60/r(c2)', trihex: '6-3-6/r60/r(v4)',
+  truncSquare: '8-4/m90/r(h4)', snubSquare: '4-3-3,4/r90/r(h2)',
+  elongTri: '4-3/m90/r(h2)', snubTrihex: '6-3-3/r60/r(h5)',
+  n18: '3-4-3/r60/r(c3)', n9: '6-4-3,3/r60/r(h1)', n8: '6-4-3-3/r60/r(h5)',
+  n5: '6-4-3,4-6/r60/r(c4)', n1: '12-4,6-3/r60/r(c3)', n13: '12-3,4-3/r60/r(c3)',
+  n2: '12-0,3,3-0,4/m45/m(h1)', n10: '3-6/r60/r(c2)',
+  n19: '6-3,3-3/r60/r(h1)', n20: '6-3-3,3-3/r60/r(h8)',
+  n12: '6-3/m90/r(h1)', n11: '6-3,6/m90/r(h3)',
+  n7: '6-3,4-6-3,4-6,4/m90/r(c6)', n6: '6-3,4/m90/r(h4)',
+  n16: '4-3,3-4,3/r90/m(h3)', n17: '4-3,3,3-4,3/r(c2)/r(h13)/r(h45)',
+  n4: '4-3/m(h4)/m(h3)/r(h2)', n3: '4-4-3-3/m90/r(h3)',
+  n14: '4-3,4-3,3/m90/r(h3)', n15: '4-3-3-3/m90/r(h7)/r(h5)',
+  fcb: '6-3-3-4-3,3/r60/r(h10)'
+};
+
+/* A tiling and its dual have the same symmetries, since the dual is built
+   from the tiling and nothing else. Duality trades faces for vertices, so it
+   swaps v and t and leaves e alone — meaning no dual needs deriving. */
+const symCache = new Map();
+const SYM_VERSION = 2;                       // bump to discard a stale cache
+const SYM_PATCH = 9;                         // agrees with 14 and 20 on all 32
+
+function symInfo(t) {
+  if (symCache.has(t.id)) return symCache.get(t.id);
+  let out = null;
+  const parent = dualParent(t);
+  if (t.aperiodic || (parent && parent.aperiodic)) {
+    out = null;                              // no lattice, so no group and no orbits
+  } else if (parent) {
+    const p = symInfo(parent);
+    out = p && { group: p.group, v: p.t, t: p.v, e: p.e };
+  } else {
+    const polys = t.src.gen(SYM_PATCH);
+    const S = symmetriesOf(polys);
+    const o = orbitCounts(polys, S);
+    out = { group: classifyGroup(S.syms), v: o.v, t: o.t, e: o.e };
+  }
+  symCache.set(t.id, out);
+  return out;
+}
+
+// Deriving all 32 costs about fifteen seconds, so it survives a reload.
+function loadSymCache() {
+  try {
+    const raw = JSON.parse(localStorage.getItem('lightsout.sym') || 'null');
+    if (raw && raw.version === SYM_VERSION) {
+      for (const [k, v] of Object.entries(raw.data)) symCache.set(k, v);
+    }
+  } catch (e) {}
+}
+function saveSymCache() {
+  try {
+    localStorage.setItem('lightsout.sym', JSON.stringify(
+      { version: SYM_VERSION, data: Object.fromEntries(symCache) }));
+  } catch (e) {}
+}
+
+let symQueue = null, symReady = false;
+function scanSymmetry() {
+  if (!symQueue) symQueue = TILINGS.filter(t => !symCache.has(t.id));
+  const until = performance.now() + 25;
+  while (symQueue.length && performance.now() < until) symInfo(symQueue.shift());
+  if (symQueue.length) { setTimeout(scanSymmetry, 0); return; }
+  symReady = true;
+  saveSymCache();
+  if (pickerOpen()) refilter(); else buildCards();
+}
+
+/* =====================================================================
    6. BOARD  (adjacency derived from shared edges / shared vertices)
    ===================================================================== */
 
@@ -1771,6 +1890,25 @@ function composition(polys) {
   const w = [];
   for (const r of named) if (!w.includes(r.label)) w.push(r.label);
   return w.length === 1 ? w[0] : w.slice(0, -1).join(', ') + ' and ' + w[w.length - 1];
+}
+
+/* canonicalCfg compares the joined strings, which is fine for matching one
+   configuration against another but names a vertex 12.12.3 where everyone
+   writes 3.12.12 — '1' sorts before '3'. This picks the same rotation by
+   comparing the numbers, so the chips read the way the literature does. */
+function prettyCfg(seq) {
+  const lower = (a, b) => {                  // a < b as a sequence of numbers
+    for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return a[i] < b[i];
+    return false;
+  };
+  let best = null;
+  for (const dir of [seq, [...seq].reverse()]) {
+    for (let r = 0; r < dir.length; r++) {
+      const s = dir.slice(r).concat(dir.slice(0, r));
+      if (!best || lower(s, best)) best = s;
+    }
+  }
+  return best.join('.');
 }
 
 function canonicalCfg(seq) {
@@ -2978,8 +3116,24 @@ function shapeInfo(t) {
     if (tag.sub) tags.add(tag.cat + '.' + tag.sub);
     leaves.add(leafKey(tag));
   }
-  const out = { tags, leaves,
-                text: (t.name + ' ' + cardConfig(t)).toLowerCase() };
+  /* The types the card shows: vertex configurations for a tiling, face
+     configurations for a dual. Splitting the notation is what makes "has a
+     3.4.6.4 vertex" a filter, and verify() has already checked that notation
+     against the geometry. */
+  /* Written out rather than left as printed: the triangular tiling says
+     3.3.3.3.3.3 while a 2-uniform notation says 3⁶, and unless those become
+     one string the chip for that vertex splits in two. */
+  const types = cardConfig(t).replace(/[\[\]]/g, '').split(';')
+    .map(s => s.trim())
+    .filter(s => /^V?[\d.¹²³⁴⁵⁶]+$/.test(s))
+    .map(s => {
+      const dual = s.startsWith('V');
+      const seq = expandCfg(dual ? s.slice(1) : s);
+      return seq.length ? (dual ? 'V' : '') + prettyCfg(seq) : null;
+    })
+    .filter(Boolean);
+  const out = { tags, leaves, types,
+                text: (t.name + ' ' + cardConfig(t) + ' ' + (BUILD[t.id] || '')).toLowerCase() };
   shapeTagCache.set(t.id, out);
   return out;
 }
@@ -3006,6 +3160,7 @@ const filters = { shape: new Map(), only: false,
                      row's 40 — so they fold away. They start folded only where
                      the height actually hurts, since a filter nobody can see is
                      a filter nobody uses. */
+                  types: new Set(), groups: new Set(),
                   shown: innerWidth > 620 };
 
 // Ticking a category permits any of its members; ticking a member permits
@@ -3030,8 +3185,28 @@ function matches(t, skip) {
     if (allowed.size) for (const leaf of info.leaves) if (!allowed.has(leaf)) return false;
   }
   if (filters.cls.size && !filters.cls.has(t.group)) return false;
+  if (filters.types.size && !info.types.some(x => filters.types.has(x))) return false;
+  if (filters.groups.size) {
+    const s = symInfo(t);
+    if (!s || !filters.groups.has(s.group)) return false;
+  }
   if (filters.search && !info.text.includes(filters.search)) return false;
   return true;
+}
+
+// The vertex and face configurations that actually occur, commonest first.
+function allTypes() {
+  const n = new Map();
+  for (const t of TILINGS) for (const x of shapeInfo(t).types) n.set(x, (n.get(x) || 0) + 1);
+  return [...n.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+}
+function allGroups() {
+  const n = new Map();
+  for (const t of TILINGS) {
+    const s = symInfo(t);
+    if (s) n.set(s.group, (n.get(s.group) || 0) + 1);
+  }
+  return [...n.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
 }
 
 // What ticking a chip would leave, with the other filters still on, so the
@@ -3115,6 +3290,23 @@ function renderFilters() {
     };
   }
 
+  /* These two are plain multi-select: pick any number and a tiling matching
+     one of them shows. There is no "must not" here — ruling out a single
+     vertex type is not a question anyone asks of a picker. */
+  const pickList = (el, entries, set, ready) => {
+    const box = document.getElementById(el);
+    if (!ready) { box.innerHTML = '<span class="fnote">Working it out…</span>'; return; }
+    box.innerHTML = entries.map(([k, n]) =>
+      `<button class="chip ${set.has(k) ? 'yes' : ''}" data-k="${k}">` +
+      `${k}<span class="n">${n}</span></button>`).join('');
+    for (const b of box.querySelectorAll('.chip')) b.onclick = () => {
+      set.has(b.dataset.k) ? set.delete(b.dataset.k) : set.add(b.dataset.k);
+      refilter();
+    };
+  };
+  pickList('ftypes', shapesReady ? allTypes() : [], filters.types, shapesReady);
+  pickList('fgroups', symReady ? allGroups() : [], filters.groups, symReady);
+
   document.getElementById('fonly').classList.toggle('on', filters.only);
   document.getElementById('fnote').textContent = filters.only
     ? 'Showing tilings made of nothing but the ticked shapes.'
@@ -3126,8 +3318,8 @@ function renderFilters() {
 
 // The always-visible row, which stands alone when the chips are folded away.
 function renderFilterBar() {
-  const active = filters.shape.size || filters.only ||
-                 filters.search || filters.cls.size;
+  const active = filters.shape.size || filters.only || filters.search ||
+                 filters.cls.size || filters.types.size || filters.groups.size;
   document.getElementById('fclear').disabled = !active;
   document.getElementById('fbody').classList.toggle('gone', !filters.shown);
   const tog = document.getElementById('ftoggle');
@@ -3150,6 +3342,8 @@ function summarise() {
   const parts = [];
   for (const [k, v] of filters.shape) parts.push((v > 0 ? '' : 'not ') + label(k));
   for (const g of filters.cls) parts.push(CLASS_LABEL[g]);
+  for (const x of filters.types) parts.push(x);
+  for (const g of filters.groups) parts.push(g);
   if (filters.only) parts.push('nothing else');
   return parts.join(' · ');
 }
@@ -3183,6 +3377,7 @@ function setSearch(v) { filters.search = v.trim().toLowerCase(); refilter(); }
 function toggleOnly() { filters.only = !filters.only; refilter(); }
 function clearFilters() {
   filters.shape.clear(); filters.cls.clear(); filters.open.clear();
+  filters.types.clear(); filters.groups.clear();
   filters.only = false; filters.search = '';
   document.getElementById('fsearch').value = '';
   refilter();
@@ -3190,6 +3385,22 @@ function clearFilters() {
 function refilter() { renderFilters(); buildCards(); drawVisibleCards(); }
 
 const pickerOpen = () => document.getElementById('picker').classList.contains('show');
+
+/* The three derived lines under the configuration. Aperiodic tilings have no
+   translation lattice, so no wallpaper group and no finite orbit counts —
+   they say so rather than showing an empty row. */
+function cardFacts(t) {
+  const s = symReady ? symInfo(t) : undefined;
+  const rows = [];
+  rows.push(['Group', s === undefined ? null
+    : s ? `${s.group} <span class="orb">${ORBIFOLD[s.group]}</span>` : 'aperiodic']);
+  rows.push(['Orbits', s === undefined ? null
+    : s ? `v=${s.v} t=${s.t} e=${s.e}` : 'infinitely many']);
+  rows.push(['Build', BUILD[t.id] || (dualParent(t) ? 'dual — not built this way' : '—')]);
+  return '<dl class="cfacts">' + rows.map(([k, v]) =>
+    `<dt>${k}</dt><dd class="${v && /^[a-z0-9]/.test(v) ? '' : 'none'}">${v === null ? '…' : v}</dd>`
+  ).join('') + '</dl>';
+}
 
 function buildCards() {
   drawQueue = [];                            // abandon any pass still running
@@ -3210,7 +3421,8 @@ function buildCards() {
       el.className = 'card' + (t.id === state.tiling.id ? ' sel' : '');
       el.innerHTML = `<svg viewBox="0 0 100 100"></svg>
         <div class="cname">${t.name}</div>
-        <div class="csub">${cardConfig(t)}</div>`;
+        <div class="csub">${cardConfig(t)}</div>
+        ${cardFacts(t)}`;
       el.draw = () => drawPreview(el.querySelector('svg'),
                                   previewPatch(t, PREVIEW_TILES, CARD_ASPECT));
       el.onclick = () => { setTiling(t); buildCards(); closePicker(); };
@@ -3253,6 +3465,8 @@ const start = TILINGS.find(t => t.id === saved) || TILINGS[1];
 state.size = DEFAULT_SIZE;
 setTiling(start);
 setTimeout(scanShapes, 200);           // indexes the shapes, warming the previews
+loadSymCache();
+setTimeout(scanSymmetry, 400);         // derives the groups and orbits, once per browser
 </script>
 </body>
 </html>
