@@ -1081,6 +1081,279 @@ for (const t of TILINGS) {
 }
 
 /* =====================================================================
+   5d. SYMMETRY  →  the wallpaper group and the orbit counts v, t, e.
+
+   Chavey's catalog lists all of these, but its labels cannot simply be
+   copied across: five pairs of the 2-uniform tilings share a vertex-type
+   label and are told apart only by a subscript, and nothing in this
+   registry says which of a pair is which. Deriving the values settles that
+   — every one of those pairs has a distinct (group, t, e) — and it reaches
+   the duals and fcb, which no table here covers. Chavey then becomes the
+   check rather than the source: see CHAVEY below.
+
+   An isometry of the plane is stored as a 2x2 linear part and an offset.
+   ===================================================================== */
+
+const ISO_EPS = 0.02;
+
+// The crystallographic restriction: only these rotations can fix a lattice.
+// Reflections are searched at every 15 degrees, which covers all of them.
+function candidateLinears() {
+  const out = [];
+  for (const k of [0, 1, 2, 3, 4, 6, 8, 9, 10]) {       // multiples of 30 degrees
+    const a = k * Math.PI / 6, c = Math.cos(a), s = Math.sin(a);
+    out.push({ m: [c, -s, s, c], det: 1 });
+  }
+  for (let k = 0; k < 12; k++) {                        // mirrors every 15 degrees
+    const a = k * Math.PI / 12, c = Math.cos(2 * a), s = Math.sin(2 * a);
+    out.push({ m: [c, s, s, -c], det: -1 });
+  }
+  return out;
+}
+
+const applyIso = (g, p) => [g.m[0] * p[0] + g.m[1] * p[1] + g.t[0],
+                            g.m[2] * p[0] + g.m[3] * p[1] + g.t[1]];
+
+/* Every symmetry permutes the tiles, so it is found by sending one tile to
+   another of its own shape and checking the rest follows. Only tiles well
+   inside the patch are checked, since those near the rim have their images
+   cut off by the edge of the patch rather than by the tiling. */
+function symmetriesOf(polys) {
+  const { idx } = shapeClasses(polys);
+  const cent = polys.map(p => {
+    let x = 0, y = 0;
+    for (const q of p) { x += q[0]; y += q[1]; }
+    return [x / p.length, y / p.length];
+  });
+  let R = 0;
+  for (const c of cent) R = Math.max(R, Math.hypot(c[0], c[1]));
+  const inner = R * 0.45;                    // tested region, well clear of the rim
+  const reach = R * 0.9;                     // images must land inside this
+
+  const key = p => Math.round(p[0] / ISO_EPS) + ',' + Math.round(p[1] / ISO_EPS);
+  const at = new Map();
+  cent.forEach((c, i) => at.set(key(c), i));
+  const lookup = c => {
+    for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) {
+      const hit = at.get((Math.round(c[0] / ISO_EPS) + dx) + ',' +
+                         (Math.round(c[1] / ISO_EPS) + dy));
+      if (hit !== undefined &&
+          Math.hypot(cent[hit][0] - c[0], cent[hit][1] - c[1]) < ISO_EPS) return hit;
+    }
+    return -1;
+  };
+
+  const core = [];
+  cent.forEach((c, i) => { if (Math.hypot(c[0], c[1]) < inner) core.push(i); });
+  // seed on the rarest shape, which keeps the candidate list short
+  const tally = {};
+  for (const i of core) tally[idx[i]] = (tally[idx[i]] || 0) + 1;
+  const rare = Object.keys(tally).sort((a, b) => tally[a] - tally[b])[0] | 0;
+  const seed = core.find(i => idx[i] === rare);
+  const targets = [];
+  cent.forEach((c, i) => { if (idx[i] === rare && Math.hypot(c[0], c[1]) < reach) targets.push(i); });
+
+  const found = [];
+  for (const L of candidateLinears()) {
+    const im = p => [L.m[0] * p[0] + L.m[1] * p[1], L.m[2] * p[0] + L.m[3] * p[1]];
+    const s0 = im(cent[seed]);
+    for (const j of targets) {
+      const g = { m: L.m, det: L.det,
+                  t: [cent[j][0] - s0[0], cent[j][1] - s0[1]] };
+      let ok = true, tested = 0;
+      for (const i of core) {
+        const c = applyIso(g, cent[i]);
+        if (Math.hypot(c[0], c[1]) > reach) continue;   // image outside the patch
+        const hit = lookup(c);
+        if (hit < 0 || idx[hit] !== idx[i]) { ok = false; break; }
+        /* Centroid and shape class alone would let a tile land on a differently
+           turned copy of itself — the two orientations of a triangle share a
+           centroid lattice — and the spurious symmetries that admits merge
+           orbits that should stay apart. So the corners must land on corners. */
+        const dst = polys[hit];
+        for (const q of polys[i]) {
+          const w = applyIso(g, q);
+          if (!dst.some(z => Math.hypot(z[0] - w[0], z[1] - w[1]) < ISO_EPS)) {
+            ok = false; break;
+          }
+        }
+        if (!ok) break;
+        tested++;
+      }
+      /* A candidate that throws the whole core off the edge of the patch would
+         otherwise pass without a single tile being checked — which is how the
+         square tiling first came out with 12-fold rotations. Demand that most
+         of the core actually landed somewhere it could be verified. */
+      if (ok && tested >= core.length * 0.5) found.push(g);
+    }
+  }
+  return { syms: found, cent, idx, core, lookup, reach };
+}
+
+/* A rotation's centre is its fixed point; a reflection's axis is its fixed
+   line. A det=-1 element with no fixed point is a glide. */
+function isoKind(g) {
+  if (g.det > 0) {
+    const [a, b, c, d] = g.m;
+    if (Math.abs(a - 1) < 1e-6 && Math.abs(d - 1) < 1e-6 &&
+        Math.abs(b) < 1e-6 && Math.abs(c) < 1e-6) {
+      return { kind: 'translation', v: g.t };
+    }
+    // (I - M) p = t
+    const A = 1 - a, B = -b, C = -c, D = 1 - d, det = A * D - B * C;
+    const p = [(D * g.t[0] - B * g.t[1]) / det, (A * g.t[1] - C * g.t[0]) / det];
+    const ang = Math.atan2(c, a);
+    const order = Math.round(TAU / ((ang + TAU) % TAU || TAU));
+    return { kind: 'rotation', centre: p, order };
+  }
+  // g² is a translation along the axis; zero means it is a plain reflection
+  const t2 = [g.m[0] * g.t[0] + g.m[1] * g.t[1] + g.t[0],
+              g.m[2] * g.t[0] + g.m[3] * g.t[1] + g.t[1]];
+  const slide = Math.hypot(t2[0], t2[1]);
+  const axisAng = Math.atan2(g.m[2], g.m[0] + 1e-15) / 2;
+  const u = [Math.cos(axisAng), Math.sin(axisAng)];
+  // a point on the axis: halfway between p and its image, for any p off-axis
+  const p0 = [g.t[0] / 2, g.t[1] / 2];
+  return { kind: slide < ISO_EPS ? 'mirror' : 'glide', axis: { p: p0, u }, slide };
+}
+
+const onLine = (line, p) =>
+  Math.abs((p[0] - line.p[0]) * line.u[1] - (p[1] - line.p[1]) * line.u[0]) < ISO_EPS;
+
+function classifyGroup(syms) {
+  const kinds = syms.map(isoKind);
+  const rots = kinds.filter(k => k.kind === 'rotation');
+  const mirrors = kinds.filter(k => k.kind === 'mirror');
+  const glides = kinds.filter(k => k.kind === 'glide');
+  const n = rots.length ? Math.max(...rots.map(r => r.order)) : 1;
+  const hasM = mirrors.length > 0, hasG = glides.length > 0;
+
+  // do the highest-order rotation centres all sit on a mirror?
+  const tops = rots.filter(r => r.order === n);
+  const allOn = tops.length > 0 &&
+                tops.every(r => mirrors.some(m => onLine(m.axis, r.centre)));
+
+  if (n === 6) return hasM ? 'p6m' : 'p6';
+  if (n === 4) return !hasM ? 'p4' : allOn ? 'p4m' : 'p4g';
+  if (n === 3) return !hasM ? 'p3' : allOn ? 'p3m1' : 'p31m';
+  if (n === 2) {
+    if (!hasM) return hasG ? 'pgg' : 'p2';
+    // two mirror directions or one?
+    const dirs = new Set(mirrors.map(m =>
+      Math.round(((Math.atan2(m.axis.u[1], m.axis.u[0]) + Math.PI) % Math.PI) * 180 / Math.PI)));
+    if (dirs.size < 2) return 'pmg';
+    return allOn ? 'pmm' : 'cmm';
+  }
+  if (!hasM) return hasG ? 'pg' : 'p1';
+  return hasG ? 'cm' : 'pm';
+}
+
+const ORBIFOLD = { p1: 'o', p2: '2222', pm: '**', pg: 'xx', cm: '*x',
+                   pmm: '*2222', pmg: '22*', pgg: '22x', cmm: '2*22',
+                   p3: '333', p3m1: '*333', p31m: '3*3', p4: '442',
+                   p4m: '*442', p4g: '4*2', p6: '632', p6m: '*632' };
+
+/* Orbit counts. The group acts on the patch, so two elements of the tiling
+   share an orbit when some symmetry carries one to the other; counting the
+   classes among the tiles well inside the patch gives t, and the same walk
+   over vertices and edges gives v and e. */
+function orbitCounts(polys, S) {
+  const uf = n => { const p = [...Array(n).keys()];
+    const find = i => p[i] === i ? i : (p[i] = find(p[i]));
+    return { find, join: (a, b) => { const x = find(a), y = find(b); if (x !== y) p[x] = y; } };
+  };
+  const count = (pts, members) => {
+    const key = q => Math.round(q[0] / ISO_EPS) + ',' + Math.round(q[1] / ISO_EPS);
+    const at = new Map();
+    pts.forEach((q, i) => at.set(key(q), i));
+    const near = q => {
+      for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) {
+        const h = at.get((Math.round(q[0] / ISO_EPS) + dx) + ',' +
+                         (Math.round(q[1] / ISO_EPS) + dy));
+        if (h !== undefined && Math.hypot(pts[h][0] - q[0], pts[h][1] - q[1]) < ISO_EPS) return h;
+      }
+      return -1;
+    };
+    const u = uf(pts.length);
+    for (const g of S.syms) for (const i of members) {
+      const j = near(applyIso(g, pts[i]));
+      if (j >= 0) u.join(i, j);
+    }
+    return new Set(members.map(i => u.find(i))).size;
+  };
+
+  const { faces, pts } = topology(polys);
+  // one midpoint per side of every tile; the two copies of a shared edge land
+  // on the same point and collapse together in the lookup, which is right
+  const emids = [];
+  for (const f of faces) {
+    const p = f.poly;
+    for (let i = 0; i < p.length; i++) {
+      const a = p[i], b = p[(i + 1) % p.length];
+      emids.push([(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]);
+    }
+  }
+  const inner = q => Math.hypot(q[0], q[1]) < S.reach * 0.5;
+  const pick = arr => arr.map((q, i) => i).filter(i => inner(arr[i]));
+
+  const cent = S.cent;
+  const vpts = pts.map(v => [v.x, v.y]);
+  // duplicate edge midpoints collapse in the map, which is what we want
+  return { t: count(cent, pick(cent)),
+           v: count(vpts, pick(vpts)),
+           e: count(emids, pick(emids)) };
+}
+
+/* Chavey's published values, as a check on the above rather than a source.
+   Keyed by tiling id, which is only possible because the derivation settles
+   which of a subscripted pair each of ours is: (3⁶; 3³.4²)₁ is pmm with
+   t=3, ₂ is cmm with t=4, and nothing else here could tell them apart.
+
+   Run checkSymmetry() from the console. Two entries disagree, both recorded
+   as they stand rather than quietly adjusted:
+
+   n17  derived t=3, Chavey prints t=6. The tiling has 12 tiles per unit cell
+        and a point group of order 4, and no tile is fixed by any non-identity
+        symmetry — the triangles cannot be, since a 180° turn does not fix an
+        equilateral triangle — so the orbits have size 4 and t=3. t=6 would
+        need every tile stabilised. Euler agrees with the rest: 20 edges and
+        8 vertices per cell, 8 vertices of degree 5 against 2·20.
+   n20  derived e=6, Chavey prints e=7; v, t and the group all agree. Small
+        enough to be either a miscount here or the scan, and unresolved.
+
+   n6 is left out entirely: it does not appear to be the 2-uniform tiling it
+   claims to be. See its note in the registry. */
+const CHAVEY = {
+  triangle: ['p6m', 1, 1, 1], square: ['p4m', 1, 1, 1], hexagon: ['p6m', 1, 1, 1],
+  trihex: ['p6m', 1, 2, 1], truncSquare: ['p4m', 1, 2, 2], truncHex: ['p6m', 1, 2, 2],
+  rhombitrihex: ['p6m', 1, 3, 2], truncTrihex: ['p6m', 1, 3, 3],
+  snubSquare: ['p4g', 1, 2, 2], elongTri: ['cmm', 1, 2, 3], snubTrihex: ['p6', 1, 3, 3],
+  n14: ['pmm', 2, 3, 4], n15: ['cmm', 2, 4, 5], n4: ['cmm', 2, 2, 4], n3: ['cmm', 2, 3, 5],
+  n18: ['p6m', 2, 3, 3], n16: ['p4g', 2, 4, 5], n17: ['pgg', 2, 6, 6],
+  n11: ['pmm', 2, 2, 3], n12: ['cmm', 2, 2, 4], n10: ['p6m', 2, 2, 3],
+  n19: ['p6m', 2, 3, 3], n20: ['p6', 2, 5, 7],
+  n7: ['pmm', 2, 4, 4], n8: ['p6m', 2, 4, 4], n9: ['p6m', 2, 4, 4], n5: ['p6m', 2, 5, 5],
+  n2: ['p4m', 2, 3, 3], n13: ['p6m', 2, 4, 4], n1: ['p6m', 2, 4, 4],
+  fcb: ['p6m', 3, 5, 6]
+};
+
+function checkSymmetry(patch = 9) {
+  const rows = [];
+  for (const id of Object.keys(CHAVEY)) {
+    const t = TILINGS.find(x => x.id === id);
+    const polys = t.src.gen(patch);
+    const S = symmetriesOf(polys);
+    const got = [classifyGroup(S.syms), 0, 0, 0];
+    const o = orbitCounts(polys, S);
+    got[1] = o.v; got[2] = o.t; got[3] = o.e;
+    const want = CHAVEY[id];
+    rows.push({ id, got: got.join('/'), want: want.join('/'),
+                ok: got.join('/') === want.join('/') });
+  }
+  return rows;
+}
+
+/* =====================================================================
    6. BOARD  (adjacency derived from shared edges / shared vertices)
    ===================================================================== */
 
