@@ -117,7 +117,17 @@
   .stat .v { font-size: 1.25rem; color: #fff; font-weight: 600; line-height: 1.2; }
   .stat .k { font-size: 0.7rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
 
-  input[type=range] { width: 100%; accent-color: var(--accent); }
+  /* margin zeroed so the marks below can share its left edge */
+  input[type=range] { width: 100%; margin: 0; accent-color: var(--accent); }
+  /* One mark per slider step. The inset is half the thumb less half a mark, so
+     the mark centres land on the thumb centres at both ends. */
+  .ticks {
+    display: flex; justify-content: space-between;
+    padding: 0 7px; margin: -2px 0 2px; height: 7px;
+  }
+  .ticks span { width: 2px; height: 100%; border-radius: 1px; background: #2a4430; }
+  .ticks span.uniq { background: var(--accent); }
+  .ticks span.pending { background: #22331f; }
 
   .seg { display: flex; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; }
   .seg button { border: 0; border-radius: 0; flex: 1; font-size: 0.8rem; padding: 8px 4px; }
@@ -196,6 +206,8 @@
       <div class="panel">
         <p class="label">Board size <span id="sizeVal" style="color:var(--text)"></span></p>
         <input type="range" id="sizeSlider" min="0" max="15" value="6" oninput="onSize(this.value)">
+        <div class="ticks" id="sizeTicks"></div>
+        <p class="note" id="kernelNote"></p>
 
         <p class="label" style="margin-top:16px">Neighbours</p>
         <div class="seg">
@@ -1496,6 +1508,7 @@ function rebuild() {
 
   document.getElementById('tileCount').textContent =
     `${state.board.cells.length} tiles on the board.`;
+  scanKernels();
   render();
   newGame();
 }
@@ -1776,6 +1789,99 @@ function hint() {
 }
 
 /* =====================================================================
+   9b. HOW MANY SOLUTIONS EACH SIZE HAS
+
+   The number of solutions a position has is a property of the board, not of the
+   position: it is 2^(cells − rank), the same for every solvable pattern. So it
+   can be reported for the size on show, and worked out ahead for the other
+   sizes to mark the slider.
+
+   Working the whole slider out costs a board build and an elimination per size —
+   about 300ms for flat boards and over a second for wrapped ones — so it runs
+   one size per timer tick in the background, marks appearing as they land, and
+   is cached per tiling, wrapping and neighbour rule. Changing any of those
+   abandons the scan in progress rather than racing it. */
+
+// written out up to 2^10; past a thousand the exponent is the readable form
+const howMany = k => k <= 10 ? String(2 ** k) : `2^${k}`;
+
+function kernelDim(cells, mode) {
+  const N = cells.length, W = (N + 31) >> 5, M = new Uint32Array(N * W);
+  for (let i = 0; i < N; i++) {
+    M[i * W + (i >> 5)] ^= 1 << (i & 31);
+    for (const j of (mode === 'edge' ? cells[i].edgeNb : cells[i].cornerNb))
+      M[i * W + (j >> 5)] ^= 1 << (j & 31);
+  }
+  let rank = 0;
+  for (let c = 0; c < N && rank < N; c++) {
+    let p = -1;
+    for (let r = rank; r < N; r++) if (M[r * W + (c >> 5)] >>> (c & 31) & 1) { p = r; break; }
+    if (p < 0) continue;
+    if (p !== rank) for (let w = 0; w < W; w++) {
+      const x = M[p * W + w]; M[p * W + w] = M[rank * W + w]; M[rank * W + w] = x;
+    }
+    for (let r = 0; r < N; r++) {
+      if (r === rank) continue;
+      if (M[r * W + (c >> 5)] >>> (c & 31) & 1)
+        for (let w = 0; w < W; w++) M[r * W + w] ^= M[rank * W + w];
+    }
+    rank++;
+  }
+  return N - rank;
+}
+
+const kernelCache = new Map();
+let scanTimer = 0;
+
+const configKey = () => state.tiling.id + '|' + state.wrapping + '|' + state.mode;
+
+function kernelAt(sizeIndex) {
+  const t = state.tiling, target = BOARD_SIZES[sizeIndex];
+  const b = state.wrapping === 'flat'
+    ? buildBoard(windowPatch(t, target, 1).polys)
+    : wrapBoard(t, target, state.wrapping === 'torus');
+  return b ? kernelDim(b.cells, state.mode) : -1;
+}
+
+function scanKernels() {
+  const key = configKey();
+  if (!kernelCache.has(key)) kernelCache.set(key, BOARD_SIZES.map(() => null));
+  drawSizeTicks();
+  clearTimeout(scanTimer);
+  const arr = kernelCache.get(key);
+  if (arr.every(v => v !== null)) return;
+  scanTimer = setTimeout(function step() {
+    if (key !== configKey()) return;             // moved on; let the new scan run
+    const i = arr.indexOf(null);
+    if (i < 0) return;
+    arr[i] = kernelAt(i);
+    drawSizeTicks();
+    scanTimer = setTimeout(step, 0);
+  }, 40);
+}
+
+function drawSizeTicks() {
+  const box = document.getElementById('sizeTicks');
+  const arr = kernelCache.get(configKey()) || BOARD_SIZES.map(() => null);
+  if (box.children.length !== BOARD_SIZES.length) {
+    box.innerHTML = BOARD_SIZES.map(() => '<span></span>').join('');
+  }
+  BOARD_SIZES.forEach((s, i) => {
+    const el = box.children[i], side = Math.round(Math.sqrt(s));
+    el.className = arr[i] === null ? 'pending' : arr[i] === 0 ? 'uniq' : '';
+    el.title = arr[i] === null ? `${side}×${side} — working it out`
+             : arr[i] === 0 ? `${side}×${side} — unique solution`
+             : `${side}×${side} — ${howMany(arr[i])} solutions`;
+  });
+  const here = arr[state.size];
+  document.getElementById('kernelNote').textContent =
+    here === null ? 'Counting the solutions each size has…'
+    : here === 0 ? 'Every position on this board has a unique solution.'
+    : `Every position on this board has ${howMany(here)} solutions.` +
+      ' Marks show the sizes that are unique.';
+}
+
+/* =====================================================================
    10. RENDERING
    ===================================================================== */
 
@@ -1870,8 +1976,6 @@ function refresh() {
   const presses = opt ? opt.reduce((a, b) => a + b, 0) : 0;
   const fmt = k => `${k} press${k === 1 ? '' : 'es'}`;        // 2×2 boards need one
   const order = k => k > 1 ? " Order doesn't matter." : '';
-  // written out up to 2^10; past a thousand the exponent is the readable form
-  const howMany = k => k <= 10 ? String(2 ** k) : `2^${k}`;
 
   /* `presses` counts the solution on screen, which after a few clicks of the
      button need not be the shortest, so the two are reported separately. */
@@ -1938,6 +2042,7 @@ function setMode(m) {
   if (m === 'corner' && !state.cornerDiffers) return;
   state.mode = m;
   updateModeUI();
+  scanKernels();                               // a different rule, a different count
   newGame();
 }
 
