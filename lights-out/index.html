@@ -201,6 +201,11 @@
   .fsearch::placeholder { color: var(--muted); }
   .frow button { font-size: 0.8rem; padding: 8px 10px; }
   .fcount { font-size: 0.78rem; color: var(--muted); margin-left: auto; }
+  #ftoggle::after { content: ' ▾'; font-size: 0.7rem; opacity: 0.7; }
+  #ftoggle.shut::after { content: ' ▸'; }
+  #fbody.gone { display: none; }
+  /* the summary only earns its line when the chips are hidden and set */
+  #fsummary:empty { display: none; }
 
   .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
   .chip {
@@ -325,15 +330,21 @@
 
     <div class="filters">
       <div class="frow">
+        <button id="ftoggle" onclick="toggleFilters()" aria-expanded="true">Filters</button>
         <input class="fsearch" id="fsearch" placeholder="Search name or notation…"
                oninput="setSearch(this.value)">
-        <button id="fonly" onclick="toggleOnly()" title="Show only tilings made of nothing but the ticked shapes">Nothing else</button>
         <button id="fclear" onclick="clearFilters()">Clear</button>
         <span class="fcount" id="fcount"></span>
       </div>
-      <div class="chips" id="fshapes"></div>
-      <div class="chips" id="fclasses"></div>
-      <p class="fnote" id="fnote"></p>
+      <p class="fnote" id="fsummary"></p>
+      <div id="fbody">
+        <div class="frow" style="margin-top:10px">
+          <button id="fonly" onclick="toggleOnly()" title="Show only tilings made of nothing but the ticked shapes">Nothing else</button>
+        </div>
+        <div class="chips" id="fshapes"></div>
+        <div class="chips" id="fclasses"></div>
+        <p class="fnote" id="fnote"></p>
+      </div>
     </div>
 
     <p class="section-title first" id="sec-regular">Regular</p>
@@ -2697,7 +2708,12 @@ function scanShapes() {
    set into an exact match by ruling out everything not ticked, which would
    otherwise take a click on all thirteen categories. */
 const filters = { shape: new Map(), only: false,
-                  search: '', cls: new Set(), open: new Set() };
+                  search: '', cls: new Set(), open: new Set(),
+                  /* The chips are the tall part of the bar — 183px against the
+                     row's 40 — so they fold away. They start folded only where
+                     the height actually hurts, since a filter nobody can see is
+                     a filter nobody uses. */
+                  shown: innerWidth > 620 };
 
 // Ticking a category permits any of its members; ticking a member permits
 // just that one.
@@ -2745,6 +2761,11 @@ function chipHTML(key, label, state, count, extra, arrow) {
 }
 
 function renderFilters() {
+  /* Counting for every chip walks all 65 tilings once per chip, and a keystroke
+     in the search box re-renders. None of that is worth doing while the chips
+     are folded away, so the whole body is skipped and rebuilt on opening. */
+  if (!filters.shown) { renderFilterBar(); return; }
+
   const box = document.getElementById('fshapes');
   if (!shapesReady) { box.innerHTML = '<span class="fnote">Indexing shapes…</span>'; }
   else {
@@ -2802,15 +2823,45 @@ function renderFilters() {
   }
 
   document.getElementById('fonly').classList.toggle('on', filters.only);
-  const active = filters.shape.size || filters.only ||
-                 filters.search || filters.cls.size;
-  document.getElementById('fclear').disabled = !active;
   document.getElementById('fnote').textContent = filters.only
     ? 'Showing tilings made of nothing but the ticked shapes.'
     : filters.shape.size
       ? 'Click a shape again to rule it out, and once more to forget it.'
       : '';
+  renderFilterBar();
 }
+
+// The always-visible row, which stands alone when the chips are folded away.
+function renderFilterBar() {
+  const active = filters.shape.size || filters.only ||
+                 filters.search || filters.cls.size;
+  document.getElementById('fclear').disabled = !active;
+  document.getElementById('fbody').classList.toggle('gone', !filters.shown);
+  const tog = document.getElementById('ftoggle');
+  tog.classList.toggle('shut', !filters.shown);
+  tog.setAttribute('aria-expanded', String(filters.shown));
+  // Folding the chips away must not hide what they are doing, so a closed bar
+  // says what is set. The search box speaks for itself and is left out.
+  document.getElementById('fsummary').textContent =
+    filters.shown ? '' : summarise();
+}
+
+// "Triangles, not Squares, Cairo · 2-uniform · nothing else"
+function summarise() {
+  const label = key => {
+    const cat = catOf(key);
+    if (cat) return cat.label;
+    const [c, s] = key.split('.');
+    return (catOf(c).subs.find(([k]) => k === s) || [, s])[1];
+  };
+  const parts = [];
+  for (const [k, v] of filters.shape) parts.push((v > 0 ? '' : 'not ') + label(k));
+  for (const g of filters.cls) parts.push(CLASS_LABEL[g]);
+  if (filters.only) parts.push('nothing else');
+  return parts.join(' · ');
+}
+
+function toggleFilters() { filters.shown = !filters.shown; renderFilters(); }
 
 /* Cycles none → must → must not. A category ruled out takes its members with
    it, so a required member under a ruled-out family cannot be expressed. */
