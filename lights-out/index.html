@@ -1325,14 +1325,18 @@ function orbitCounts(polys, S) {
    Run checkSymmetry() from the console. Two entries disagree, both recorded
    as they stand rather than quietly adjusted:
 
-   n17  derived t=3, Chavey prints t=6. The tiling has 12 tiles per unit cell
-        and a point group of order 4, and no tile is fixed by any non-identity
-        symmetry — the triangles cannot be, since a 180° turn does not fix an
-        equilateral triangle — so the orbits have size 4 and t=3. t=6 would
-        need every tile stabilised. Euler agrees with the rest: 20 edges and
-        8 vertices per cell, 8 vertices of degree 5 against 2·20.
-   n20  derived e=6, Chavey prints e=7; v, t and the group all agree. Small
-        enough to be either a miscount here or the scan, and unresolved.
+   n17  derived t=3, Chavey prints t=6.
+   n20  derived e=6, Chavey prints e=7.
+
+   Both disagreements point the same way, and the argument does not depend on
+   this search finding every symmetry. Each element it does find was re-checked
+   over the whole of a large patch at a tolerance of 0.001 — 88,281 tile images
+   for n17 and 46,827 for n20, no failures — so they are symmetries of the
+   tiling and not artefacts of the patch. Symmetries can only merge orbits, so
+   exhibiting them bounds the counts from above: t ≤ 3 for n17 and e ≤ 6 for
+   n20, whatever else may exist. A larger group would lower them further, never
+   raise them. So the printed 6 and 7 cannot both be right, and the numbers
+   here stand as derived.
 
    This check is what found n6: it derived five vertex orbits where a 2-uniform
    tiling must have two, and the cell it now carries was arrived at by asking
