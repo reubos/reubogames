@@ -161,7 +161,7 @@
   }
   .card:hover { border-color: var(--accent); transform: translateY(-2px); }
   .card.sel { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
-  .card svg { width: 100%; height: 96px; display: block; background: #17301b; border-radius: 6px; }
+  .card svg { width: 100%; height: 128px; display: block; background: #17301b; border-radius: 6px; }
   .card .cname { font-weight: 600; color: #fff; margin-top: 9px; font-size: 0.88rem; line-height: 1.25; }
   /* the longest of these is [V3⁴.6; V3³.4²; V3².4.3.4], so let it wrap rather
      than widen the card or get clipped */
@@ -2768,9 +2768,47 @@ function setTiling(t) {
 const BOARD_SIZES = [];
 for (let k = 2; k <= 17; k++) BOARD_SIZES.push(k * k);
 const DEFAULT_SIZE = 6;                      // index into BOARD_SIZES → 8×8, 64 tiles
-const PREVIEW_TILES = 50;                    // tiles shown in a picker card
-const THUMB_TILES = 16;                      // and in the 40px sidebar thumbnail
-const CARD_ASPECT = 1.44;                    // matches the card's svg box
+/* How much of a tiling a card shows. A flat tile count treats every tiling the
+   same, which is exactly wrong: 50 tiles is several repeats of the square
+   tiling and barely one of a 27-tile cell, so the tilings hardest to tell
+   apart were the ones shown least of. Ask for a number of repeats instead and
+   let the tile count follow, with a floor so the simple ones do not come out
+   nearly empty and a ceiling so the big ones stay legible. */
+const PREVIEW_REPEATS = 5;
+const PREVIEW_MIN = 60;
+const PREVIEW_MAX = 130;
+const THUMB_TILES = 16;                      // in the 40px sidebar thumbnail
+
+// tiles in one unit cell: density is tiles per unit area, and v1 x v2 is the
+// area of the cell. An aperiodic tiling has no cell and reports none.
+function cellTiles(src) {
+  if (!src.v1 || !src.v2) return 0;
+  return src.density * Math.abs(src.v1[0] * src.v2[1] - src.v1[1] * src.v2[0]);
+}
+
+function previewTarget(t) {
+  const F = cellTiles(t.src);
+  return Math.round(Math.min(PREVIEW_MAX, Math.max(PREVIEW_MIN, F * PREVIEW_REPEATS)));
+}
+
+/* The window has to be cut to the shape of the box it lands in, or
+   preserveAspectRatio letterboxes it and a strip of every card goes to waste —
+   which is what a constant kept beside the CSS had quietly been doing since the
+   preview height last changed. So measure the box. The first successful reading
+   sticks, because cards are also drawn ahead of time while the picker is closed,
+   and nothing inside a hidden panel has a size to read. */
+const CARD_ASPECT = 1.5;                     // until a card can be measured
+let cardAspectSeen = 0;
+function cardAspect(el) {
+  const svg = el && el.querySelector('svg');
+  if (svg) {
+    const r = svg.getBoundingClientRect();
+    // rounded, or a few pixels of resize would throw away every cached patch
+    if (r.width > 0 && r.height > 0)
+      cardAspectSeen = Math.min(3, Math.max(1, Math.round(r.width / r.height * 10) / 10));
+  }
+  return cardAspectSeen || CARD_ASPECT;
+}
 const patchCache = new Map();
 const colourCache = new Map();
 const workCache = new Map();                 // one growable working patch per tiling
@@ -3581,6 +3619,7 @@ function cardFacts(t) {
 function buildCards() {
   drawQueue = [];                            // abandon any pass still running
   let shown = 0, first = null;
+  const pending = [];
   for (const g of ['regular', 'semi', 'dual', 'two', 'twodual',
                    'three', 'threedual', 'aperiodic']) {
     const box = document.getElementById('grp-' + g);
@@ -3599,12 +3638,19 @@ function buildCards() {
         <div class="cname">${t.name}</div>
         <div class="csub">${cardConfig(t)}</div>
         ${cardFacts(t)}`;
-      el.draw = () => drawPreview(el.querySelector('svg'),
-                                  previewPatch(t, PREVIEW_TILES, CARD_ASPECT));
       el.onclick = () => { setTiling(t); buildCards(); closePicker(); };
       box.appendChild(el);
-      drawQueue.push(el);
+      pending.push([el, t]);
     }
+  }
+  /* Measured once the cards are in the document, and once for the whole pass:
+     they all share a grid, so they all share a shape, and reading it per card
+     would force a reflow per card for the same answer. */
+  const aspect = cardAspect(pending.length ? pending[0][0] : null);
+  for (const [el, t] of pending) {
+    el.draw = () => drawPreview(el.querySelector('svg'),
+                                previewPatch(t, previewTarget(t), aspect));
+    drawQueue.push(el);
   }
   // whichever section survives filtering goes without the rule above it
   if (first) first.classList.add('first');
