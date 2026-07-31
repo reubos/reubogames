@@ -219,9 +219,6 @@
   .fsearch::placeholder { color: var(--muted); }
   .frow button { font-size: 0.8rem; padding: 8px 10px; }
   .fcount { font-size: 0.78rem; color: var(--muted); margin-left: auto; }
-  #ftoggle::after { content: ' ▾'; font-size: 0.7rem; opacity: 0.7; }
-  #ftoggle.shut::after { content: ' ▸'; }
-  #fbody.gone { display: none; }
   /* the summary only earns its line when the chips are hidden and set */
   #fsummary:empty { display: none; }
 
@@ -260,6 +257,11 @@
   .fmore[open] summary::before { content: '▾ '; }
   .fmore summary:hover { color: var(--text); }
   .fmore .chips { margin-top: 7px; }
+  /* The facets sit under Filters the way the subcategory chips sit under a
+     shape family: stepped in, with a rule to carry the eye down the nesting. */
+  .fmain > #fbody {
+    margin: 2px 0 0 4px; padding-left: 14px; border-left: 1px solid var(--line);
+  }
   /* A folded section must still show that something inside it is set, or a
      filter goes on working with nothing on screen to say so. */
   .badge { color: var(--gold); font-size: 0.72rem; margin-left: 6px; letter-spacing: 0; }
@@ -364,14 +366,14 @@
 
     <div class="filters">
       <div class="frow">
-        <button id="ftoggle" onclick="toggleFilters()" aria-expanded="true">Filters</button>
         <input class="fsearch" id="fsearch" placeholder="Search name or notation…"
                oninput="setSearch(this.value)">
         <button id="fclear" onclick="clearFilters()">Clear</button>
         <span class="fcount" id="fcount"></span>
       </div>
-      <p class="fnote" id="fsummary"></p>
-      <div id="fbody">
+      <details class="fmore fmain" id="fmain" ontoggle="onFiltersToggle()">
+        <summary>Filters<span class="badge" id="badgeAll"></span></summary>
+        <div id="fbody">
         <details class="fmore" open><summary>Shapes<span class="badge" id="badgeShapes"></span></summary>
           <div class="chips" id="fshapes"></div>
           <div class="frow" style="margin-top:9px">
@@ -387,7 +389,9 @@
           <div class="chips" id="ffaces"></div></details>
         <details class="fmore"><summary>Wallpaper groups<span class="badge" id="badgeGroups"></span></summary>
           <div class="chips" id="fgroups"></div></details>
-      </div>
+        </div>
+      </details>
+      <p class="fnote" id="fsummary"></p>
     </div>
 
     <p class="section-title first" id="sec-regular">Regular</p>
@@ -3358,19 +3362,24 @@ function renderFilters() {
   renderFilterBar();
 }
 
-// The always-visible row, which stands alone when the chips are folded away.
+// The search row and the state of the Filters fold, which stand alone when
+// the facets are closed.
 function renderFilterBar() {
-  const active = filters.shape.size || filters.only || filters.search ||
-                 filters.cls.size || filters.types.size || filters.groups.size;
-  document.getElementById('fclear').disabled = !active;
-  document.getElementById('fbody').classList.toggle('gone', !filters.shown);
-  const tog = document.getElementById('ftoggle');
-  tog.classList.toggle('shut', !filters.shown);
-  tog.setAttribute('aria-expanded', String(filters.shown));
-  // Folding the chips away must not hide what they are doing, so a closed bar
-  // says what is set. The search box speaks for itself and is left out.
-  document.getElementById('fsummary').textContent =
-    filters.shown ? '' : summarise();
+  const active = filters.shape.size + filters.cls.size +
+                 filters.types.size + filters.groups.size + (filters.only ? 1 : 0);
+  document.getElementById('fclear').disabled = !active && !filters.search;
+  document.getElementById('badgeAll').textContent =
+    !filters.shown && active ? '● ' + active : '';
+  // Folding the facets away must not hide what they are doing, so a closed
+  // Filters says what is set. The search box speaks for itself and is left out.
+  document.getElementById('fsummary').textContent = filters.shown ? '' : summarise();
+}
+
+function onFiltersToggle() {
+  const open = document.getElementById('fmain').open;
+  if (open === filters.shown) return;
+  filters.shown = open;
+  renderFilters();
 }
 
 // "Triangles, not Squares, Cairo · 2-uniform · nothing else"
@@ -3390,7 +3399,6 @@ function summarise() {
   return parts.join(' · ');
 }
 
-function toggleFilters() { filters.shown = !filters.shown; renderFilters(); }
 
 /* Cycles none → must → must not. A category ruled out takes its members with
    it, so a required member under a ruled-out family cannot be expressed. */
@@ -3513,6 +3521,9 @@ try { saved = localStorage.getItem('lightsout.tiling'); } catch (e) {}
 const start = TILINGS.find(t => t.id === saved) || TILINGS[1];
 state.size = DEFAULT_SIZE;
 setTiling(start);
+// the fold starts to match the width; after that it is the reader's to set
+document.getElementById('fmain').open = filters.shown;
+
 setTimeout(scanShapes, 200);           // indexes the shapes, warming the previews
 loadSymCache();
 setTimeout(scanSymmetry, 400);         // derives the groups and orbits, once per browser
