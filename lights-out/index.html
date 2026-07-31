@@ -161,7 +161,7 @@
   }
   .card:hover { border-color: var(--accent); transform: translateY(-2px); }
   .card.sel { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
-  .card svg { width: 100%; height: 128px; display: block; background: #17301b; border-radius: 6px; }
+  .card svg { width: 100%; height: 190px; display: block; background: #17301b; border-radius: 6px; }
   .card .cname { font-weight: 600; color: #fff; margin-top: 9px; font-size: 0.88rem; line-height: 1.25; }
   /* the longest of these is [V3⁴.6; V3³.4²; V3².4.3.4], so let it wrap rather
      than widen the card or get clipped */
@@ -2786,34 +2786,26 @@ function cellTiles(src) {
   return src.density * Math.abs(src.v1[0] * src.v2[1] - src.v1[1] * src.v2[0]);
 }
 
-/* The half-height of the smallest window of the card's shape that holds `cells`
-   unit cells across and the same number down.
+/* The half-height of the smallest window of the card's shape in which the
+   pattern comes round `cells` times across and the same number down.
 
-   One cell's bounding box is |v1| + |v2| on each axis, since its corners are 0,
-   v1, v2 and v1 + v2 — but which cell is not fixed. Any basis of the same
-   lattice cuts an equally good one, and they are not equally shaped: k59 is
-   stored on a cell 3.5 wide and 6 tall, and forcing two of those down a card
-   twice as wide as it is high drags seven along the width, 563 tiles for a
-   picture of two. The same lattice cuts a 6.9 by 4 cell, which suits the card
-   and costs 249. So try every cell the lattice offers and keep the cheapest.
+   A repeat means the shortest lattice vector along that axis — the same
+   question the board asks when deciding where a wrap may join, so the same
+   function. The cell's own bounding box is a weaker thing and was the first
+   attempt: rows offset by half a period stack two cell-heights before they
+   repeat vertically, so n1 measured two cells high while the pattern actually
+   came round 1.12 times, and 33 of the 67 were short the same way.
 
-   Deliberately not the lattice period along the axis: for k58, n15 and n20 the
-   shortest vertical lattice vector is already two cells tall, so two of those
-   would be four cells. */
+   Nothing is gained by hunting for a better-shaped cell, either. A period along
+   an axis belongs to the lattice, not to the basis, so no choice of cell can
+   move it. */
 function cellWindow(src, aspect, cells) {
-  const A = Math.abs(src.v1[0] * src.v2[1] - src.v1[1] * src.v2[0]);
-  const V = [];
-  for (let a = -3; a <= 3; a++) for (let b = -3; b <= 3; b++)
-    if (a || b) V.push([a * src.v1[0] + b * src.v2[0], a * src.v1[1] + b * src.v2[1]]);
-  let best = Infinity;
-  for (const p of V) for (const q of V) {
-    // same area means the pair spans the same lattice, so it is a cell too
-    if (Math.abs(Math.abs(p[0] * q[1] - p[1] * q[0]) - A) > 1e-6) continue;
-    const bx = Math.abs(p[0]) + Math.abs(q[0]), by = Math.abs(p[1]) + Math.abs(q[1]);
-    const hy = Math.max(by, bx / aspect) * (cells / 2);
-    if (hy < best) best = hy;
-  }
-  return best;
+  const ax = axisVector(src.v1, src.v2, 0), ay = axisVector(src.v1, src.v2, 1);
+  // a lattice with no vector along an axis never repeats along it, and the
+  // cell's own extent stands in
+  const px = ax === null ? Math.abs(src.v1[0]) + Math.abs(src.v2[0]) : ax;
+  const py = ay === null ? Math.abs(src.v1[1]) + Math.abs(src.v2[1]) : ay;
+  return Math.max(py, px / aspect) * (cells / 2);
 }
 
 /* Whether a repeat reads is a statement about each axis, not about area: a
