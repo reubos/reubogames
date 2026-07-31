@@ -257,6 +257,12 @@
   .fmore[open] summary::before { content: '▾ '; }
   .fmore summary:hover { color: var(--text); }
   .fmore .chips { margin-top: 7px; }
+  /* three counts to a section, each on its own line behind a fixed label so
+     the chip rows line up and 2 under Tiles never reads as 2 under Edges */
+  .orow { display: grid; grid-template-columns: 88px 1fr; align-items: center; gap: 8px; margin-top: 7px; }
+  .orow .chips { margin-top: 0; }
+  .olab { font-size: 0.72rem; color: var(--muted); }
+  .olab i { font-family: ui-monospace, monospace; font-style: normal; color: var(--text); }
   /* The facets sit under Filters the way the subcategory chips sit under a
      shape family: stepped in, with a rule to carry the eye down the nesting. */
   .fmain > #fbody {
@@ -389,6 +395,11 @@
           <div class="chips" id="ffaces"></div></details>
         <details class="fmore"><summary>Wallpaper groups<span class="badge" id="badgeGroups"></span></summary>
           <div class="chips" id="fgroups"></div></details>
+        <details class="fmore"><summary>Orbit counts<span class="badge" id="badgeOrbits"></span></summary>
+          <div class="orow"><span class="olab">Vertices <i>v</i></span><div class="chips" id="forbv"></div></div>
+          <div class="orow"><span class="olab">Tiles <i>t</i></span><div class="chips" id="forbt"></div></div>
+          <div class="orow"><span class="olab">Edges <i>e</i></span><div class="chips" id="forbe"></div></div>
+        </details>
         </div>
       </details>
       <p class="fnote" id="fsummary"></p>
@@ -3192,6 +3203,7 @@ const filters = { shape: new Map(), only: false,
                      the height actually hurts, since a filter nobody can see is
                      a filter nobody uses. */
                   types: new Set(), groups: new Set(),
+                  orbits: { v: new Set(), t: new Set(), e: new Set() },
                   shown: innerWidth > 620 };
 
 // Ticking a category permits any of its members; ticking a member permits
@@ -3217,9 +3229,16 @@ function matches(t, skip) {
   }
   if (filters.cls.size && !filters.cls.has(t.group)) return false;
   if (filters.types.size && !info.types.some(x => filters.types.has(x))) return false;
+  /* A group or an orbit count is something only a periodic tiling has, so the
+     aperiodic four drop out as soon as either is asked for. */
   if (filters.groups.size) {
     const s = symInfo(t);
     if (!s || !filters.groups.has(s.group)) return false;
+  }
+  for (const k of ORBIT_KEYS) {
+    if (!filters.orbits[k].size) continue;
+    const s = symInfo(t);
+    if (!s || !filters.orbits[k].has(String(s[k]))) return false;
   }
   if (filters.search && !info.text.includes(filters.search)) return false;
   return true;
@@ -3236,6 +3255,19 @@ function allTypes() {
   return [...n.entries()].sort((a, b) =>
     (a[0][0] === 'V') - (b[0][0] === 'V') || b[1] - a[1] || a[0].localeCompare(b[0]));
 }
+const ORBIT_KEYS = ['v', 't', 'e'];
+
+// The counts that occur for one measure, in numeric order rather than by
+// frequency: these are a scale, and a scale out of order is unreadable.
+function allOrbits(k) {
+  const n = new Map();
+  for (const t of TILINGS) {
+    const s = symInfo(t);
+    if (s) n.set(String(s[k]), (n.get(String(s[k])) || 0) + 1);
+  }
+  return [...n.entries()].sort((a, b) => a[0] - b[0]);
+}
+
 function allGroups() {
   const n = new Map();
   for (const t of TILINGS) {
@@ -3345,6 +3377,9 @@ function renderFilters() {
   pickList('ftypes', types.filter(([k]) => !isFace(k)), filters.types, shapesReady);
   pickList('ffaces', types.filter(([k]) => isFace(k)), filters.types, shapesReady);
   pickList('fgroups', symReady ? allGroups() : [], filters.groups, symReady);
+  for (const k of ORBIT_KEYS) {
+    pickList('forb' + k, symReady ? allOrbits(k) : [], filters.orbits[k], symReady);
+  }
 
   const badge = (el, n) => document.getElementById(el).textContent = n ? '● ' + n : '';
   badge('badgeShapes', filters.shape.size + (filters.only ? 1 : 0));
@@ -3352,6 +3387,7 @@ function renderFilters() {
   badge('badgeTypes', [...filters.types].filter(k => !isFace(k)).length);
   badge('badgeFaces', [...filters.types].filter(isFace).length);
   badge('badgeGroups', filters.groups.size);
+  badge('badgeOrbits', orbitsSet());
 
   document.getElementById('fonly').classList.toggle('on', filters.only);
   document.getElementById('fnote').textContent = filters.only
@@ -3364,9 +3400,11 @@ function renderFilters() {
 
 // The search row and the state of the Filters fold, which stand alone when
 // the facets are closed.
+const orbitsSet = () => ORBIT_KEYS.reduce((n, k) => n + filters.orbits[k].size, 0);
+
 function renderFilterBar() {
-  const active = filters.shape.size + filters.cls.size +
-                 filters.types.size + filters.groups.size + (filters.only ? 1 : 0);
+  const active = filters.shape.size + filters.cls.size + filters.types.size +
+                 filters.groups.size + orbitsSet() + (filters.only ? 1 : 0);
   document.getElementById('fclear').disabled = !active && !filters.search;
   document.getElementById('badgeAll').textContent =
     !filters.shown && active ? '● ' + active : '';
@@ -3395,6 +3433,9 @@ function summarise() {
   for (const g of filters.cls) parts.push(CLASS_LABEL[g]);
   for (const x of filters.types) parts.push(x);
   for (const g of filters.groups) parts.push(g);
+  for (const k of ORBIT_KEYS) {
+    if (filters.orbits[k].size) parts.push(k + '=' + [...filters.orbits[k]].sort().join('/'));
+  }
   if (filters.only) parts.push('nothing else');
   return parts.join(' · ');
 }
@@ -3428,6 +3469,7 @@ function toggleOnly() { filters.only = !filters.only; refilter(); }
 function clearFilters() {
   filters.shape.clear(); filters.cls.clear(); filters.open.clear();
   filters.types.clear(); filters.groups.clear();
+  for (const k of ORBIT_KEYS) filters.orbits[k].clear();
   filters.only = false; filters.search = '';
   document.getElementById('fsearch').value = '';
   refilter();
