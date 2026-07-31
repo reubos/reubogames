@@ -2786,9 +2786,51 @@ function cellTiles(src) {
   return src.density * Math.abs(src.v1[0] * src.v2[1] - src.v1[1] * src.v2[0]);
 }
 
-function previewTarget(t) {
+/* The half-height of the smallest window of the card's shape that holds `cells`
+   unit cells across and the same number down.
+
+   One cell's bounding box is |v1| + |v2| on each axis, since its corners are 0,
+   v1, v2 and v1 + v2 — but which cell is not fixed. Any basis of the same
+   lattice cuts an equally good one, and they are not equally shaped: k59 is
+   stored on a cell 3.5 wide and 6 tall, and forcing two of those down a card
+   twice as wide as it is high drags seven along the width, 563 tiles for a
+   picture of two. The same lattice cuts a 6.9 by 4 cell, which suits the card
+   and costs 249. So try every cell the lattice offers and keep the cheapest.
+
+   Deliberately not the lattice period along the axis: for k58, n15 and n20 the
+   shortest vertical lattice vector is already two cells tall, so two of those
+   would be four cells. */
+function cellWindow(src, aspect, cells) {
+  const A = Math.abs(src.v1[0] * src.v2[1] - src.v1[1] * src.v2[0]);
+  const V = [];
+  for (let a = -3; a <= 3; a++) for (let b = -3; b <= 3; b++)
+    if (a || b) V.push([a * src.v1[0] + b * src.v2[0], a * src.v1[1] + b * src.v2[1]]);
+  let best = Infinity;
+  for (const p of V) for (const q of V) {
+    // same area means the pair spans the same lattice, so it is a cell too
+    if (Math.abs(Math.abs(p[0] * q[1] - p[1] * q[0]) - A) > 1e-6) continue;
+    const bx = Math.abs(p[0]) + Math.abs(q[0]), by = Math.abs(p[1]) + Math.abs(q[1]);
+    const hy = Math.max(by, bx / aspect) * (cells / 2);
+    if (hy < best) best = hy;
+  }
+  return best;
+}
+
+/* Whether a repeat reads is a statement about each axis, not about area: a
+   window holding six cells' worth of tiles can still be under two cells wide,
+   which is how the two [(3⁶)²; 3⁴.6] tilings came to look alike. So the window
+   must run two periods across and two down whatever that costs in tiles — the
+   repeat count and the ceiling only apply above that floor. */
+const PREVIEW_CELLS = 2;
+
+function previewTarget(t, aspect) {
   const F = cellTiles(t.src);
-  return Math.round(Math.min(PREVIEW_MAX, Math.max(PREVIEW_MIN, F * PREVIEW_REPEATS)));
+  let want = Math.max(PREVIEW_MIN, Math.min(PREVIEW_MAX, F * PREVIEW_REPEATS));
+  if (t.src.v1 && t.src.v2) {
+    const hy = cellWindow(t.src, aspect, PREVIEW_CELLS);
+    want = Math.max(want, t.src.density * 4 * hy * hy * aspect);
+  }
+  return Math.round(want);
 }
 
 /* The window has to be cut to the shape of the box it lands in, or
@@ -3649,7 +3691,7 @@ function buildCards() {
   const aspect = cardAspect(pending.length ? pending[0][0] : null);
   for (const [el, t] of pending) {
     el.draw = () => drawPreview(el.querySelector('svg'),
-                                previewPatch(t, previewTarget(t), aspect));
+                                previewPatch(t, previewTarget(t, aspect), aspect));
     drawQueue.push(el);
   }
   // whichever section survives filtering goes without the rule above it
