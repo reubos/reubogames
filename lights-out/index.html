@@ -3105,6 +3105,35 @@ function shapePolys(t) {
   return t.src.raw(t.aperiodic ? aperiodicH(t.src.density) : SHAPE_H);
 }
 
+/* Both configurations, off the geometry rather than off the printed notation.
+   Every tiling has vertices and faces whatever else it is, so a dual has
+   vertex configurations just as its parent has face ones: rhombille's
+   vertices are 4.4.4 and 4.4.4.4.4.4, and the trihexagonal tiling's faces are
+   V4.4.4 and V4.4.4.4.4.4. Only vertices whose angles close to a full turn
+   count, and only faces whose every corner is such a vertex, so the ragged rim
+   of a patch cannot invent a type that the tiling does not have. */
+function configsOf(polys) {
+  const { pts, faces, vertFaces } = topology(polys);
+  const ring = new Map();                    // closed vertex -> its faces, in order
+  for (const [vid, fl] of vertFaces) {
+    const around = [...new Set(fl)];
+    let sum = 0;
+    for (const fi of around) sum += angleAt(faces[fi], vid);
+    if (Math.abs(sum - TAU) > 1e-6) continue;
+    const v = pts[vid];
+    ring.set(vid, around
+      .map(fi => ({ fi, a: Math.atan2(faces[fi].cy - v.y, faces[fi].cx - v.x) }))
+      .sort((m, n) => m.a - n.a).map(m => m.fi));
+  }
+  const out = new Set();
+  for (const r of ring.values()) out.add(prettyCfg(r.map(fi => faces[fi].poly.length)));
+  for (const f of faces) {
+    if (!f.v.every(vid => ring.has(vid))) continue;
+    out.add('V' + prettyCfg(f.v.map(vid => ring.get(vid).length)));
+  }
+  return [...out];
+}
+
 function shapeInfo(t) {
   if (shapeTagCache.has(t.id)) return shapeTagCache.get(t.id);
   const polys = shapePolys(t);
@@ -3116,23 +3145,12 @@ function shapeInfo(t) {
     if (tag.sub) tags.add(tag.cat + '.' + tag.sub);
     leaves.add(leafKey(tag));
   }
-  /* The types the card shows: vertex configurations for a tiling, face
-     configurations for a dual. Splitting the notation is what makes "has a
-     3.4.6.4 vertex" a filter, and verify() has already checked that notation
-     against the geometry. */
-  /* Written out rather than left as printed: the triangular tiling says
-     3.3.3.3.3.3 while a 2-uniform notation says 3⁶, and unless those become
-     one string the chip for that vertex splits in two. */
-  const types = cardConfig(t).replace(/[\[\]]/g, '').split(';')
-    .map(s => s.trim())
-    .filter(s => /^V?[\d.¹²³⁴⁵⁶]+$/.test(s))
-    .map(s => {
-      const dual = s.startsWith('V');
-      const seq = expandCfg(dual ? s.slice(1) : s);
-      return seq.length ? (dual ? 'V' : '') + prettyCfg(seq) : null;
-    })
-    .filter(Boolean);
-  const out = { tags, leaves, types,
+  /* An aperiodic tiling has no finite list of these. The Penrose dual alone
+     shows 34 face configurations in one patch and would show more in a larger
+     one, all of them unique to it, so chipping them would flood the facet with
+     entries matching a single tiling and imply a completeness that is not
+     there. The aperiodic four are reachable by shape, class and search. */
+  const out = { tags, leaves, types: isAperiodic(t) ? [] : configsOf(polys),
                 text: (t.name + ' ' + cardConfig(t) + ' ' + (BUILD[t.id] || '')).toLowerCase() };
   shapeTagCache.set(t.id, out);
   return out;
@@ -3194,11 +3212,16 @@ function matches(t, skip) {
   return true;
 }
 
-// The vertex and face configurations that actually occur, commonest first.
+/* The configurations that occur, vertices first and then faces, each group
+   commonest first. Every vertex type is matched by a face type of the same
+   name and the same count — a dual's vertices answer to its parent's faces —
+   so the two halves mirror each other, and interleaving them by count alone
+   read as one long muddle. */
 function allTypes() {
   const n = new Map();
   for (const t of TILINGS) for (const x of shapeInfo(t).types) n.set(x, (n.get(x) || 0) + 1);
-  return [...n.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  return [...n.entries()].sort((a, b) =>
+    (a[0][0] === 'V') - (b[0][0] === 'V') || b[1] - a[1] || a[0].localeCompare(b[0]));
 }
 function allGroups() {
   const n = new Map();
