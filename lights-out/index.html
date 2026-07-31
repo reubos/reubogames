@@ -260,6 +260,10 @@
   .fmore[open] summary::before { content: '▾ '; }
   .fmore summary:hover { color: var(--text); }
   .fmore .chips { margin-top: 7px; }
+  /* A folded section must still show that something inside it is set, or a
+     filter goes on working with nothing on screen to say so. */
+  .badge { color: var(--gold); font-size: 0.72rem; margin-left: 6px; letter-spacing: 0; }
+  .badge:empty { display: none; }
   .fnote { font-size: 0.78rem; color: var(--muted); margin: 10px 0 0; }
   .empty { color: var(--muted); font-size: 0.9rem; padding: 30px 0 10px; text-align: center; }
 
@@ -368,16 +372,21 @@
       </div>
       <p class="fnote" id="fsummary"></p>
       <div id="fbody">
-        <div class="frow" style="margin-top:10px">
-          <button id="fonly" onclick="toggleOnly()" title="Show only tilings made of nothing but the ticked shapes">Nothing else</button>
-        </div>
-        <div class="chips" id="fshapes"></div>
-        <div class="chips" id="fclasses"></div>
-        <details class="fmore"><summary>Vertex and face types</summary>
+        <details class="fmore" open><summary>Shapes<span class="badge" id="badgeShapes"></span></summary>
+          <div class="chips" id="fshapes"></div>
+          <div class="frow" style="margin-top:9px">
+            <button id="fonly" onclick="toggleOnly()" title="Show only tilings made of nothing but the ticked shapes">Nothing else</button>
+          </div>
+          <p class="fnote" id="fnote"></p>
+        </details>
+        <details class="fmore"><summary>Classes<span class="badge" id="badgeClasses"></span></summary>
+          <div class="chips" id="fclasses"></div></details>
+        <details class="fmore"><summary>Vertex types<span class="badge" id="badgeTypes"></span></summary>
           <div class="chips" id="ftypes"></div></details>
-        <details class="fmore"><summary>Wallpaper groups</summary>
+        <details class="fmore"><summary>Face types<span class="badge" id="badgeFaces"></span></summary>
+          <div class="chips" id="ffaces"></div></details>
+        <details class="fmore"><summary>Wallpaper groups<span class="badge" id="badgeGroups"></span></summary>
           <div class="chips" id="fgroups"></div></details>
-        <p class="fnote" id="fnote"></p>
       </div>
     </div>
 
@@ -3327,8 +3336,18 @@ function renderFilters() {
       refilter();
     };
   };
-  pickList('ftypes', shapesReady ? allTypes() : [], filters.types, shapesReady);
+  const isFace = k => k[0] === 'V';
+  const types = shapesReady ? allTypes() : [];
+  pickList('ftypes', types.filter(([k]) => !isFace(k)), filters.types, shapesReady);
+  pickList('ffaces', types.filter(([k]) => isFace(k)), filters.types, shapesReady);
   pickList('fgroups', symReady ? allGroups() : [], filters.groups, symReady);
+
+  const badge = (el, n) => document.getElementById(el).textContent = n ? '● ' + n : '';
+  badge('badgeShapes', filters.shape.size + (filters.only ? 1 : 0));
+  badge('badgeClasses', filters.cls.size);
+  badge('badgeTypes', [...filters.types].filter(k => !isFace(k)).length);
+  badge('badgeFaces', [...filters.types].filter(isFace).length);
+  badge('badgeGroups', filters.groups.size);
 
   document.getElementById('fonly').classList.toggle('on', filters.only);
   document.getElementById('fnote').textContent = filters.only
