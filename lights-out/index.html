@@ -2090,6 +2090,9 @@ function trianglePatch(src, side) {
    matched by distance rather than by an exact key. A tile is orders of
    magnitude wider than that, so nothing else is near enough to be confused. */
 const HEX_TOL = 2e-3;
+// how far a hexagon's tiles may be off its area before it is not one. Sits in a
+// wide gap: filling boards come to within 3e-4, failing ones fall 2% short.
+const HEX_FILL = 1e-3;
 const SHAPE_TILES = 400;                     // the biggest board a shape offers
 const SHAPE_RINGS = 12;                      // ... and the most rings, if they fit
 const CENTRE_PROBE = 150;                    // tiles checked to pin the centre down
@@ -2213,9 +2216,18 @@ function ringLayers({ faces, edgeMap }, rim, C) {
 /* The straight-sided hexagons, in whichever edge direction yields the most of
    them. Only a radius that some tile's outermost corner sits exactly on can
    bound a hexagon — anywhere between two of those and the board is the same as
-   at the lower one — so those are the candidates, and a candidate survives only
-   if no tile has a corner inside while another is out. Sorting by how far each
-   tile reaches makes both tests a single sweep. */
+   at the lower one — so those are the candidates. Sorting by how far each tile
+   reaches makes the tests a single sweep.
+
+   Two things have to hold, and the second is the one that bites. No tile may
+   have a corner inside while another is out, or the hexagon cuts the tiling.
+   And the tiles kept have to fill the hexagon, not merely fit inside it: their
+   areas must come to 2√3r². Without that second test the rhombitrihexagonal
+   tiling passed with a board that is a dodecagon — a hexagon ringed by squares
+   and triangles, falling short at all six corners and straight nowhere. Area
+   settles it exactly, and the two cases are nowhere near each other: the boards
+   that do fill are out by 3e-4 at worst, which is the drift the coordinates
+   carry, and the ones that do not are short by 2% at least. */
 function hexLayers(polys, rim, C) {
   const S = Math.PI / 3, dirs = [];
   for (const p of polys) for (let k = 0; k < p.length; k++) {
@@ -2226,6 +2238,7 @@ function hexLayers(polys, rim, C) {
     if (!dirs.some(u => Math.abs(u - x) < 2e-3 || Math.abs(Math.abs(u - x) - S) < 2e-3))
       dirs.push(x);
   }
+  const ar = polys.map(polyArea);
   let best = null;
   for (const ang of dirs) {
     const { mn, mx } = hexReach(polys, C, hexNormals(ang));
@@ -2240,13 +2253,17 @@ function hexLayers(polys, rim, C) {
     suf[ord.length] = Infinity;
     for (let i = ord.length - 1; i >= 0; i--) suf[i] = Math.min(suf[i + 1], mn[ord[i]]);
     const counts = [];
-    let full = false;
-    for (let i = 5; i < ord.length; i++) {
+    let full = false, cum = 0;
+    for (let i = 0; i < ord.length; i++) {
+      cum += ar[ord[i]];                          // area of everything kept so far
+      if (i < 5) continue;
       const r = mx[ord[i]];
       if (i + 1 > SHAPE_TILES) { full = true; break; }
       if (r >= lim) break;                                                // patch ran out
       if (i + 1 < ord.length && mx[ord[i + 1]] <= r + HEX_TOL) continue;   // same board
       if (suf[i + 1] < r - HEX_TOL) continue;                             // a tile straddles
+      const want = 2 * Math.sqrt(3) * r * r;      // a hexagon of inradius r
+      if (Math.abs(cum - want) > HEX_FILL * want) continue;               // does not fill it
       counts.push(i + 1);
     }
     if (counts.length && (!best || counts.length > best.counts.length))
