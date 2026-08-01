@@ -349,6 +349,15 @@
           <button id="wrapTorus" onclick="setWrap('torus')">Torus</button>
         </div>
         <p class="note" id="wrapNote"></p>
+
+        <div id="outlineBox" style="display:none">
+          <p class="label" style="margin-top:16px">Board shape</p>
+          <div class="seg">
+            <button id="outRect" onclick="setOutline('rect')">Rectangle</button>
+            <button id="outAlt" onclick="setOutline('alt')">Shape</button>
+          </div>
+          <p class="note" id="outlineNote"></p>
+        </div>
       </div>
 
       <div class="panel">
@@ -2026,6 +2035,60 @@ function buildBoard(polys) {
 }
 
 /* =====================================================================
+   6a. BOARDS SHAPED TO THE TILING
+
+   A rectangle suits a square grid and nothing else. The triangular tiling
+   makes a triangle of side k out of exactly k² of its own triangles, and the
+   hexagonal tiling makes a honeycomb of r rings out of 1 + 3r(r+1) hexagons.
+   Both are offered instead of the rectangle, and only when the board is flat:
+   neither is a fundamental domain, so neither can be wrapped.
+   ===================================================================== */
+
+const centroidOf = p => {
+  let x = 0, y = 0;
+  for (const q of p) { x += q[0]; y += q[1]; }
+  return [x / p.length, y / p.length];
+};
+
+/* A big upward triangle with a corner on a vertex of the tiling and its sides
+   along two of the tiling's edge directions. Every edge of it therefore runs
+   along tile edges, so no tile straddles the boundary and the count is exact. */
+function trianglePatch(src, side) {
+  const S3 = Math.sqrt(3);
+  const A = [0, 0], B = [side, 0], C = [side / 2, side * S3 / 2];
+  const sign = (p, a, b) => (b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0]);
+  const inside = p => sign(p, A, B) > 0 && sign(p, B, C) > 0 && sign(p, C, A) > 0;
+  const out = [];
+  for (const p of src.raw(side + 3)) if (inside(centroidOf(p))) out.push(p);
+  return out;
+}
+
+/* Rings of hexagons about a middle one, counted through the tiling's own
+   adjacency rather than by measuring — a ring is a step in the board graph,
+   which is exactly what the game means by one. */
+function honeycombPatch(src, rings) {
+  const all = src.raw(rings * 2 + 4);
+  const { faces, edgeMap } = topology(all);
+  const adj = faces.map(() => []);
+  for (const e of edgeMap.values())
+    if (e.length === 2) { adj[e[0]].push(e[1]); adj[e[1]].push(e[0]); }
+  let mid = 0, best = Infinity;
+  faces.forEach((f, i) => {
+    const d = f.cx * f.cx + f.cy * f.cy;
+    if (d < best) { best = d; mid = i; }
+  });
+  const depth = new Map([[mid, 0]]);
+  let front = [mid];
+  for (let r = 1; r <= rings; r++) {
+    const next = [];
+    for (const i of front) for (const j of adj[i])
+      if (!depth.has(j)) { depth.set(j, r); next.push(j); }
+    front = next;
+  }
+  return [...depth.keys()].map(i => faces[i].poly);
+}
+
+/* =====================================================================
    6b. WRAPPED BOARDS  (cylinder and torus)
 
    Identifying opposite edges of a board means quotienting the tiling by a
@@ -2508,6 +2571,7 @@ const state = {
   tiling: TILINGS[1],
   size: 6,                                   // index into BOARD_SIZES; set at boot
   mode: 'edge',
+  outline: 'alt',                              // 'rect', or the tiling's own shape
   wrap: 'flat',                                // what the player asked for
   wrapping: 'flat',                            // what this board actually does
   canWrap: true,
@@ -2654,16 +2718,23 @@ function tileClick(f) {
 }
 
 function rebuild() {
-  const target = BOARD_SIZES[state.size];
+  const shape = activeOutline();
+  const sizes = sizeList();
+  if (state.size >= sizes.length) state.size = sizes.length - 1;
+  const target = sizes[state.size];
   state.canWrap = !!state.tiling.src.v1;
   // state.wrap is what the player asked for and is kept even while an aperiodic
   // tiling is selected, so it comes back when they move to one that can wrap
-  const want = state.canWrap ? state.wrap : 'flat';
+  // a shaped board has no repeating domain, so it is flat by construction
+  const want = state.canWrap && !shape ? state.wrap : 'flat';
   state.board = want === 'flat' ? null
               : wrapBoard(state.tiling, target, want === 'torus');
   state.wrapping = state.board ? want : 'flat';
-  if (!state.board) state.board = buildBoard(windowPatch(state.tiling, target, 1).polys);
+  if (!state.board) state.board = buildBoard(shape
+        ? shape.build(state.tiling.src, shape.params[state.size])
+        : windowPatch(state.tiling, target, 1).polys);
   updateWrapUI();
+  updateOutlineUI();
 
   // a fresh board is a whole one: changing tiling, size or wrapping starts the
   // shape over rather than trying to carry holes across a different board
@@ -3004,10 +3075,14 @@ function kernelDim(cells, mode) {
 const kernelCache = new Map();
 let scanTimer = 0;
 
-const configKey = () => state.tiling.id + '|' + state.wrapping + '|' + state.mode;
+const configKey = () => state.tiling.id + '|' + state.wrapping + '|' + state.mode +
+                       '|' + (activeOutline() ? 'alt' : 'rect');
 
 function kernelAt(sizeIndex) {
-  const t = state.tiling, target = BOARD_SIZES[sizeIndex];
+  const t = state.tiling, shape = activeOutline();
+  if (shape) return kernelDim(
+    buildBoard(shape.build(t.src, shape.params[sizeIndex])).cells, state.mode);
+  const target = BOARD_SIZES[sizeIndex];
   const b = state.wrapping === 'flat'
     ? buildBoard(windowPatch(t, target, 1).polys)
     : wrapBoard(t, target, state.wrapping === 'torus');
@@ -3016,7 +3091,7 @@ function kernelAt(sizeIndex) {
 
 function scanKernels() {
   const key = configKey();
-  if (!kernelCache.has(key)) kernelCache.set(key, BOARD_SIZES.map(() => null));
+  if (!kernelCache.has(key)) kernelCache.set(key, sizeList().map(() => null));
   drawSizeTicks();
   clearTimeout(scanTimer);
   const arr = kernelCache.get(key);
@@ -3033,16 +3108,21 @@ function scanKernels() {
 
 function drawSizeTicks() {
   const box = document.getElementById('sizeTicks');
-  const arr = kernelCache.get(configKey()) || BOARD_SIZES.map(() => null);
-  if (box.children.length !== BOARD_SIZES.length) {
-    box.innerHTML = BOARD_SIZES.map(() => '<span></span>').join('');
+  const sizes = sizeList();
+  const arr = kernelCache.get(configKey()) || sizes.map(() => null);
+  if (box.children.length !== sizes.length) {
+    box.innerHTML = sizes.map(() => '<span></span>').join('');
   }
-  BOARD_SIZES.forEach((s, i) => {
-    const el = box.children[i], side = Math.round(Math.sqrt(s));
+  const shape = activeOutline();
+  // a shaped board is named by what makes it, not by a side count it has not got
+  const name = i => shape ? `${shape.label} of ${shape.params[i]} ${shape.unit}`
+                          : `${Math.round(Math.sqrt(sizes[i]))}×${Math.round(Math.sqrt(sizes[i]))}`;
+  sizes.forEach((s, i) => {
+    const el = box.children[i];
     el.className = arr[i] === null ? 'pending' : arr[i] === 0 ? 'uniq' : '';
-    el.title = arr[i] === null ? `${side}×${side} — working it out`
-             : arr[i] === 0 ? `${side}×${side} — unique solution`
-             : `${side}×${side} — ${howMany(arr[i])} solutions`;
+    el.title = arr[i] === null ? `${name(i)} — working it out`
+             : arr[i] === 0 ? `${name(i)} — unique solution`
+             : `${name(i)} — ${howMany(arr[i])} solutions`;
   });
   /* The scan measures whole boards, so once tiles have been taken out it is
      describing one that is no longer on screen. Measure the board that is. */
@@ -3241,6 +3321,35 @@ function onSize(v) {
   rebuild();                                 // sets the label from the real count
 }
 
+function setOutline(v) {
+  if (state.outline === v) return;
+  state.outline = v;
+  rebuild();
+}
+
+/* The row appears only for a tiling that has a shape of its own, and the shape
+   is offered only while the board is flat — the wrap buttons and this one are
+   asking the same question from two sides, so one has to give way. */
+function updateOutlineUI() {
+  const o = OUTLINES[state.tiling.id];
+  document.getElementById('outlineBox').style.display = o ? '' : 'none';
+  if (!o) return;
+  const flat = state.wrap === 'flat';
+  const alt = document.getElementById('outAlt');
+  alt.textContent = o.label;
+  alt.disabled = !flat;
+  alt.classList.toggle('sel', flat && state.outline === 'alt');
+  document.getElementById('outRect').classList.toggle('sel', !(flat && state.outline === 'alt'));
+  document.getElementById('outlineNote').textContent = !flat
+    ? `${o.label} boards cannot be wrapped — a rectangle is the only shape that repeats.`
+    : state.outline === 'alt'
+      ? `Sizes are whole ${o.label.toLowerCase()}s, so the slider steps through the ${o.unit} count.`
+      : 'A rectangle cut from the tiling, the same as every other board.';
+  const slider = document.getElementById('sizeSlider');
+  slider.max = sizeList().length - 1;
+  slider.value = state.size;
+}
+
 function setMode(m) {
   if (m === 'corner' && !state.cornerDiffers) return;
   state.mode = m;
@@ -3307,6 +3416,31 @@ function setTiling(t) {
    tilings land on the same counts and come out as square as their tiles allow. */
 const BOARD_SIZES = [];
 for (let k = 2; k <= 17; k++) BOARD_SIZES.push(k * k);
+
+/* Tilings that can be cut to their own shape instead of a rectangle, and the
+   sizes that shape comes in. Keyed by tiling id. Neither shape is a repeating
+   domain, so both are offered only while the board is flat; the rectangle
+   stays available everywhere and is what cylinder and torus always use. */
+const OUTLINES = {
+  triangle: { label: 'Triangle',  unit: 'side',
+              params: Array.from({ length: 16 }, (_, i) => i + 2),
+              tiles: k => k * k,
+              build: (src, k) => trianglePatch(src, k) },
+  hexagon:  { label: 'Honeycomb', unit: 'rings',
+              params: Array.from({ length: 9 }, (_, i) => i + 1),
+              tiles: r => 1 + 3 * r * (r + 1),
+              build: (src, r) => honeycombPatch(src, r) }
+};
+
+// the shaped outline in force right now, or null for the rectangle
+function activeOutline() {
+  const o = OUTLINES[state.tiling.id];
+  return (o && state.outline === 'alt' && state.wrap === 'flat') ? o : null;
+}
+function sizeList() {
+  const o = activeOutline();
+  return o ? o.params.map(o.tiles) : BOARD_SIZES;
+}
 const DEFAULT_SIZE = 6;                      // index into BOARD_SIZES → 8×8, 64 tiles
 /* How much of a tiling a card shows. A flat tile count treats every tiling the
    same, which is exactly wrong: 50 tiles is several repeats of the square
