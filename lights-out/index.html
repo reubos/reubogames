@@ -2033,8 +2033,28 @@ function buildBoard(polys) {
    A rectangle suits a square grid and nothing else. The triangular tiling
    makes a triangle of side k out of exactly k² of its own triangles, and the
    hexagonal tiling makes a honeycomb of r rings out of 1 + 3r(r+1) hexagons.
-   Both are offered instead of the rectangle, and only when the board is flat:
-   neither is a fundamental domain, so neither can be wrapped.
+
+   Those two are the p6/p6m case of something general. Both of those groups
+   contain a six-fold rotation centre by definition, and anything measured from
+   that centre alone is carried to itself by turning through 60°, so a board
+   built that way comes out six-fold symmetric whatever the tiling — and for
+   p6m it inherits the six mirrors through the centre as well. Two boards come
+   of it, and they are not the same idea:
+
+     Honeycomb — every tile within k steps of the centre through the board's
+     own adjacency. Distance in the board graph is what the game already means
+     by a step, and it is available in every one of the 62 p6/p6m tilings here.
+
+     Hexagon — a genuine straight-sided hexagon, kept only at the radii where
+     no tile straddles the boundary. That is a real restriction: 52 of the 62
+     admit one, and often at only one or two sizes, because the six edges have
+     to fall clear of the tiles all the way round. The honeycomb tiling itself
+     admits none, every vertex of it being three edges at 120° with nothing
+     running straight through, which is why it is the one shape that cannot be
+     had by cutting straight lines.
+
+   All of these are offered instead of the rectangle, and only when the board
+   is flat: none is a fundamental domain, so none can be wrapped.
    ===================================================================== */
 
 const centroidOf = p => {
@@ -2065,48 +2085,214 @@ function trianglePatch(src, side) {
   return out;
 }
 
-/* A regular hexagon of side r centred on a vertex of the tiling. Its six edges
-   run along lattice lines, so again nothing straddles the boundary, and the
-   region is six side-r triangles — 6r² of them. */
-function hexRegionPatch(src, r) {
-  const V = [];
-  for (let m = 0; m < 6; m++)
-    V.push([r * Math.cos(m * Math.PI / 3), r * Math.sin(m * Math.PI / 3)]);
-  const inside = p => {
-    for (let m = 0; m < 6; m++) {
-      const a = V[m], b = V[(m + 1) % 6];
-      if ((b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0]) < 0) return false;
+/* Tilings built by attaching one tile to the next accumulate about 5e-4 of
+   drift across a patch this size, so points that ought to coincide have to be
+   matched by distance rather than by an exact key. A tile is orders of
+   magnitude wider than that, so nothing else is near enough to be confused. */
+const HEX_TOL = 2e-3;
+const SHAPE_TILES = 400;                     // the biggest board a shape offers
+const SHAPE_RINGS = 12;                      // ... and the most rings, if they fit
+const CENTRE_PROBE = 150;                    // tiles checked to pin the centre down
+
+// nearest-point lookup, bucketed so a match is decided by distance and never by
+// which side of a rounding boundary two equal numbers happened to fall
+function pointIndex(pts) {
+  const m = new Map();
+  pts.forEach((p, i) => {
+    const k = Math.floor(p[0]) + ',' + Math.floor(p[1]);
+    if (!m.has(k)) m.set(k, []);
+    m.get(k).push(i);
+  });
+  return (x, y) => {
+    const bx = Math.floor(x), by = Math.floor(y);
+    for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) {
+      const l = m.get((bx + i) + ',' + (by + j));
+      if (!l) continue;
+      for (const k of l)
+        if (Math.abs(pts[k][0] - x) < HEX_TOL && Math.abs(pts[k][1] - y) < HEX_TOL) return k;
     }
-    return true;
+    return -1;
   };
-  const out = [];
-  for (const p of src.raw(r + 3)) if (inside(centroidOf(p))) out.push(p);
-  return out;
 }
 
-/* Rings of hexagons about a middle one, counted through the tiling's own
-   adjacency rather than by measuring — a ring is a step in the board graph,
-   which is exactly what the game means by one. */
-function honeycombPatch(src, rings) {
-  const all = src.raw(rings * 2 + 4);
-  const { faces, edgeMap } = topology(all);
+/* Locate the six-fold centre. A point fixed by a sixth-turn either sits inside
+   a tile — and then that tile is itself six-fold symmetric, so the point is its
+   centroid — or at a corner where the tiles come round in multiples of six.
+   Those are the only candidates, and the group already tells us one of them
+   works, so this is finding it rather than proving it exists: turning the patch
+   about each candidate and checking the tiles land on tiles settles it. */
+function sixFoldCentre(polys, pitch, R) {
+  const cen = polys.map(centroidOf), at = pointIndex(cen);
+  const co = Math.cos(Math.PI / 3), si = Math.sin(Math.PI / 3);
+  const cand = [];
+  for (let i = 0; i < polys.length; i++) {
+    if (Math.hypot(cen[i][0], cen[i][1]) > 1.2 * pitch) continue;
+    cand.push(cen[i]);
+    for (const q of polys[i]) cand.push(q);
+  }
+  cand.sort((a, b) => Math.hypot(a[0], a[1]) - Math.hypot(b[0], b[1]));
+  // work outwards, so a candidate is judged on its closest neighbours first and
+  // a wrong one is dropped after a handful of tiles rather than a patch of them
+  const order = Array.from(cen.keys())
+    .sort((a, b) => (cen[a][0] ** 2 + cen[a][1] ** 2) - (cen[b][0] ** 2 + cen[b][1] ** 2));
+  for (const c of cand) {
+    const rad = R - Math.hypot(c[0], c[1]) - pitch;
+    if (rad < 2 * pitch) continue;
+    let ok = true, n = 0;
+    for (const i of order) {
+      const x = cen[i][0] - c[0], y = cen[i][1] - c[1];
+      if (Math.hypot(x, y) > rad) continue;
+      const j = at(c[0] + x * co - y * si, c[1] + x * si + y * co);
+      if (j < 0 || polys[j].length !== polys[i].length) { ok = false; break; }
+      if (++n >= CENTRE_PROBE) break;
+    }
+    if (ok && n >= 24) return c;
+  }
+  return null;
+}
+
+// outward normals of a hexagon whose first edge runs along the given direction
+function hexNormals(ang) {
+  const n0 = [-Math.sin(ang), Math.cos(ang)], N = [];
+  for (let m = 0; m < 6; m++) {
+    const f = m * Math.PI / 3, c = Math.cos(f), s = Math.sin(f);
+    N.push([n0[0] * c - n0[1] * s, n0[0] * s + n0[1] * c]);
+  }
+  return N;
+}
+
+/* Where a tile falls relative to a hexagon of radius r turns on two numbers
+   that do not involve r at all: how far its corners reach in the six edge
+   directions, at most and at least. Reading those once turns every candidate
+   radius into a comparison instead of another sweep over the whole patch. */
+function hexReach(polys, C, N) {
+  const mn = new Float64Array(polys.length), mx = new Float64Array(polys.length);
+  for (let i = 0; i < polys.length; i++) {
+    let a = Infinity, b = -Infinity;
+    for (const q of polys[i]) {
+      const x = q[0] - C[0], y = q[1] - C[1];
+      let v = -Infinity;
+      for (const n of N) { const u = x * n[0] + y * n[1]; if (u > v) v = u; }
+      if (v < a) a = v;
+      if (v > b) b = v;
+    }
+    mn[i] = a; mx[i] = b;
+  }
+  return { mn, mx };
+}
+
+// the tiles at each step out from the centre, stopping at the layer that would
+// be built from tiles missing neighbours, or would pass the size limit
+function ringLayers({ faces, edgeMap }, rim, C) {
   const adj = faces.map(() => []);
   for (const e of edgeMap.values())
     if (e.length === 2) { adj[e[0]].push(e[1]); adj[e[1]].push(e[0]); }
-  let mid = 0, best = Infinity;
-  faces.forEach((f, i) => {
-    const d = f.cx * f.cx + f.cy * f.cy;
-    if (d < best) { best = d; mid = i; }
-  });
-  const depth = new Map([[mid, 0]]);
-  let front = [mid];
-  for (let r = 1; r <= rings; r++) {
+  const d = faces.map(f => Math.hypot(f.cx - C[0], f.cy - C[1]));
+  const near = Math.min(...d);
+  // the tiles meeting the centre are one orbit and so exactly equidistant; the
+  // tie has to be read generously because the coordinates carry drift
+  let front = faces.map((f, i) => i).filter(i => d[i] < near + 1e-2);
+  const seen = new Set(front), out = [];
+  let total = 0;
+  let full = false;
+  for (let r = 0; r <= SHAPE_RINGS && front.length; r++) {
+    if (total + front.length > SHAPE_TILES) { full = true; break; }
+    out.push(front.map(i => faces[i].poly));
+    total += front.length;
+    if (r === SHAPE_RINGS) { full = true; break; }
+    if (front.some(i => rim[i])) break;          // the next layer would be short
     const next = [];
     for (const i of front) for (const j of adj[i])
-      if (!depth.has(j)) { depth.set(j, r); next.push(j); }
+      if (!seen.has(j)) { seen.add(j); next.push(j); }
     front = next;
   }
-  return [...depth.keys()].map(i => faces[i].poly);
+  // full means it stopped because it had enough, not because the patch ran out
+  return { layers: out, full };
+}
+
+/* The straight-sided hexagons, in whichever edge direction yields the most of
+   them. Only a radius that some tile's outermost corner sits exactly on can
+   bound a hexagon — anywhere between two of those and the board is the same as
+   at the lower one — so those are the candidates, and a candidate survives only
+   if no tile has a corner inside while another is out. Sorting by how far each
+   tile reaches makes both tests a single sweep. */
+function hexLayers(polys, rim, C) {
+  const S = Math.PI / 3, dirs = [];
+  for (const p of polys) for (let k = 0; k < p.length; k++) {
+    const a = p[k], b = p[(k + 1) % p.length];
+    let x = Math.atan2(b[1] - a[1], b[0] - a[0]) % S;
+    if (x < 0) x += S;
+    // six normals a sixth-turn apart make the directions repeat every 60°
+    if (!dirs.some(u => Math.abs(u - x) < 2e-3 || Math.abs(Math.abs(u - x) - S) < 2e-3))
+      dirs.push(x);
+  }
+  let best = null;
+  for (const ang of dirs) {
+    const { mn, mx } = hexReach(polys, C, hexNormals(ang));
+    /* Keep every rim tile wholly outside. Past that point a tile straddling the
+       boundary might simply be missing from the patch, and a hexagon that cuts
+       the tiling would pass for one that does not. */
+    let lim = Infinity;
+    for (let i = 0; i < polys.length; i++) if (rim[i] && mn[i] < lim) lim = mn[i];
+    const ord = Array.from(polys.keys()).sort((a, b) => mx[a] - mx[b]);
+    // the least any tile still outside reaches inwards, read from the far end
+    const suf = new Float64Array(ord.length + 1);
+    suf[ord.length] = Infinity;
+    for (let i = ord.length - 1; i >= 0; i--) suf[i] = Math.min(suf[i + 1], mn[ord[i]]);
+    const counts = [];
+    let full = false;
+    for (let i = 5; i < ord.length; i++) {
+      const r = mx[ord[i]];
+      if (i + 1 > SHAPE_TILES) { full = true; break; }
+      if (r >= lim) break;                                                // patch ran out
+      if (i + 1 < ord.length && mx[ord[i + 1]] <= r + HEX_TOL) continue;   // same board
+      if (suf[i + 1] < r - HEX_TOL) continue;                             // a tile straddles
+      counts.push(i + 1);
+    }
+    if (counts.length && (!best || counts.length > best.counts.length))
+      best = { order: ord.map(i => polys[i]), counts, full };
+  }
+  return best;
+}
+
+/* One patch per tiling answers everything: where the centre is, what the rings
+   hold and which hexagons close up. Holding on to it makes every size after the
+   first free, which matters because the solution-count scan builds them all. */
+const shapeCache = new Map();
+function shapePlan(t) {
+  if (shapeCache.has(t.id)) return shapeCache.get(t.id);
+  const src = t.src;
+  // the centre search wants room to turn a few cells about a candidate, and the
+  // shapes want a disc holding the largest board with a margin ring outside it
+  let R = Math.max(5 * src.pitch, Math.sqrt(1.8 * SHAPE_TILES / (Math.PI * src.density)));
+  let plan = null;
+  /* What is ample for one tiling is short for the next, and the patch is where
+     all the time goes, so rather than size it for the worst case start small
+     and grow only while the shape being offered is still cut off by the edge of
+     it. Rings fall short only ever for want of patch, so they are grown until
+     they stop. Hexagons are sparse — most tilings have one or two and no more
+     however far out you look — so growing for them pays off only when the
+     largest found was still climbing towards the size limit. */
+  for (let attempt = 0; attempt < 3; attempt++, R *= 1.5) {
+    const polys = src.raw(R / Math.SQRT2);   // raw reaches h·√2, so ask for R
+    const C = sixFoldCentre(polys, src.pitch, R);
+    if (!C) continue;
+    const topo = topology(polys);
+    /* A tile with an edge no other tile shares sits at the rim of the patch and
+       is short of neighbours it would have in the plane. Anything built out
+       from one comes out short too, so the rim is where both shapes have to
+       stop — and it says exactly where that is, which measuring against the
+       radius only estimated: thirteen tilings quietly lost their outer ring. */
+    const rim = polys.map(() => false);
+    for (const e of topo.edgeMap.values()) if (e.length === 1) rim[e[0]] = true;
+    const rings = ringLayers(topo, rim, C), hex = hexLayers(polys, rim, C);
+    plan = { C, rings: rings.layers, hex };
+    const climbing = hex && !hex.full &&
+                     hex.counts[hex.counts.length - 1] > SHAPE_TILES / 3;
+    if (hex ? !climbing : rings.full) break;
+  }
+  shapeCache.set(t.id, plan);
+  return plan;
 }
 
 /* =====================================================================
@@ -2592,7 +2778,7 @@ const state = {
   tiling: TILINGS[1],
   size: 6,                                   // index into BOARD_SIZES; set at boot
   mode: 'edge',
-  outline: 'tri',                              // 'rect', or a shape key from OUTLINES
+  outline: 'tri',                              // 'rect', or a key from outlinesFor
   wrap: 'flat',                                // what the player asked for
   wrapping: 'flat',                            // what this board actually does
   canWrap: true,
@@ -2737,8 +2923,12 @@ function tileClick(f) {
 function rebuild() {
   const shape = activeOutline();
   const sizes = sizeList();
-  if (state.size >= sizes.length) state.size = sizes.length - 1;
-  const target = sizes[state.size];
+  /* Shapes differ widely in how many sizes they run to — some hexagons close up
+     at only one — so a shape short of the size asked for is held to its largest
+     rather than allowed to overwrite the request. Cutting it down would mean a
+     look at a one-size hexagon left the rectangle on its smallest board. */
+  const at = sizeIndex();
+  const target = sizes[at];
   state.canWrap = !!state.tiling.src.v1;
   // state.wrap is what the player asked for and is kept even while an aperiodic
   // tiling is selected, so it comes back when they move to one that can wrap
@@ -2748,7 +2938,7 @@ function rebuild() {
               : wrapBoard(state.tiling, target, want === 'torus');
   state.wrapping = state.board ? want : 'flat';
   if (!state.board) state.board = buildBoard(shape
-        ? shape.build(state.tiling.src, shape.params[state.size])
+        ? shape.build(state.tiling.src, shape.params[at])
         : windowPatch(state.tiling, target, 1).polys);
   updateWrapUI();
   updateOutlineUI();
@@ -3113,7 +3303,7 @@ function drawSizeTicks() {
   /* The scan measures whole boards, so once tiles have been taken out it is
      describing one that is no longer on screen. Measure the board that is. */
   const cut = state.removed.size > 0;
-  const here = cut ? kernelDim(state.board.cells, state.mode) : arr[state.size];
+  const here = cut ? kernelDim(state.board.cells, state.mode) : arr[sizeIndex()];
   const tail = cut ? ' Marks show the whole board at each size.'
                    : ' Marks show the sizes that are unique.';
   document.getElementById('kernelNote').textContent =
@@ -3315,8 +3505,14 @@ function setOutline(v) {
    offered only while the board is flat — the wrap buttons and these are asking
    the same question from two sides, so one has to give way. */
 function updateOutlineUI() {
-  const list = OUTLINES[state.tiling.id];
+  const list = outlinesFor(state.tiling);
   document.getElementById('outlineBox').style.display = list ? '' : 'none';
+  /* The slider is the one thing here that belongs to every tiling, shapes or
+     none, so it is set before the row bows out — leaving it behind meant coming
+     from a shape with fewer sizes capped the rectangle short of its own. */
+  const slider = document.getElementById('sizeSlider');
+  slider.max = sizeList().length - 1;
+  slider.value = sizeIndex();
   if (!list) return;
   const flat = state.wrap === 'flat';
   const here = activeOutline();
@@ -3337,9 +3533,6 @@ function updateOutlineUI() {
     : here
       ? `Sizes are whole ${here.label.toLowerCase()}s, so the slider steps through the ${here.unit} count.`
       : 'A rectangle cut from the tiling, the same as every other board.';
-  const slider = document.getElementById('sizeSlider');
-  slider.max = sizeList().length - 1;
-  slider.value = state.size;
 }
 
 function setMode(m) {
@@ -3409,40 +3602,70 @@ function setTiling(t) {
 const BOARD_SIZES = [];
 for (let k = 2; k <= 17; k++) BOARD_SIZES.push(k * k);
 
-/* Tilings that can be cut to their own shape instead of a rectangle, and the
-   sizes that shape comes in. Keyed by tiling id. Neither shape is a repeating
-   domain, so both are offered only while the board is flat; the rectangle
-   stays available everywhere and is what cylinder and torus always use. */
-const OUTLINES = {
-  triangle: [
-    { key: 'tri', label: 'Triangle', unit: 'side',
-      params: Array.from({ length: 16 }, (_, i) => i + 2),
-      tiles: k => k * k,
-      build: (src, k) => trianglePatch(src, k) },
-    // six side-r triangles round a vertex, so 6r^2 of them
-    { key: 'hex', label: 'Hexagon', unit: 'side',
-      params: Array.from({ length: 7 }, (_, i) => i + 1),
-      tiles: r => 6 * r * r,
-      build: (src, r) => hexRegionPatch(src, r) }
-  ],
-  hexagon: [
-    { key: 'comb', label: 'Honeycomb', unit: 'rings',
-      params: Array.from({ length: 9 }, (_, i) => i + 1),
-      tiles: r => 1 + 3 * r * (r + 1),
-      build: (src, r) => honeycombPatch(src, r) }
-  ]
-};
+/* The shapes a tiling can be cut to instead of a rectangle, and the sizes each
+   comes in. The triangle belongs to the triangular tiling alone; the honeycomb
+   and the hexagon come from the six-fold centre and so are offered to every
+   p6 and p6m tiling, the hexagon only where one actually closes up without
+   cutting a tile. None is a repeating domain, so all are offered only while the
+   board is flat; the rectangle stays available everywhere and is what cylinder
+   and torus always use.
+
+   Working the shapes out means building a patch, so the answer is kept: the
+   list is asked for on every rebuild and would otherwise be rederived each
+   time. */
+const outlineCache = new Map();
+function outlinesFor(t) {
+  if (outlineCache.has(t.id)) return outlineCache.get(t.id);
+  const list = [];
+  if (t.id === 'triangle') list.push({
+    key: 'tri', label: 'Triangle', unit: 'side',
+    params: Array.from({ length: 16 }, (_, i) => i + 2),
+    tiles: k => k * k,
+    build: (src, k) => trianglePatch(src, k)
+  });
+  const g = (symInfo(t) || {}).group;
+  if (g === 'p6' || g === 'p6m') {
+    const plan = shapePlan(t);
+    /* The honeycomb is the fallback, not a second offering: where a hexagon can
+       be cut it is the better shape, straight sided where the honeycomb is
+       ragged, and the two would only be the same idea drawn twice. So it is
+       kept for the ten tilings that admit no hexagon at all. */
+    if (plan && plan.hex) {
+      const hex = plan.hex;
+      list.push({
+        key: 'hex', label: 'Hexagon', unit: 'bands',
+        params: hex.counts.map((_, i) => i + 1),
+        tiles: k => hex.counts[k - 1],
+        build: (src, k) => hex.order.slice(0, hex.counts[k - 1])
+      });
+    } else if (plan && plan.rings.length > 1) {
+      const cum = [];
+      plan.rings.reduce((s, layer) => { cum.push(s + layer.length); return s + layer.length; }, 0);
+      list.push({
+        key: 'comb', label: 'Honeycomb', unit: 'rings',
+        params: plan.rings.map((_, i) => i).slice(1),
+        tiles: r => cum[r],
+        build: (src, r) => plan.rings.slice(0, r + 1).flat()
+      });
+    }
+  }
+  const out = list.length ? list : null;
+  outlineCache.set(t.id, out);
+  return out;
+}
 
 // the shaped outline in force right now, or null for the rectangle
 function activeOutline() {
-  const list = OUTLINES[state.tiling.id];
-  if (!list || state.wrap !== 'flat') return null;
-  return list.find(o => o.key === state.outline) || null;
+  if (state.wrap !== 'flat') return null;
+  const list = outlinesFor(state.tiling);
+  return list ? list.find(o => o.key === state.outline) || null : null;
 }
 function sizeList() {
   const o = activeOutline();
   return o ? o.params.map(o.tiles) : BOARD_SIZES;
 }
+// the size in force: what the player asked for, unless this shape runs short
+function sizeIndex() { return Math.min(state.size, sizeList().length - 1); }
 const DEFAULT_SIZE = 6;                      // index into BOARD_SIZES → 8×8, 64 tiles
 /* How much of a tiling a card shows. A flat tile count treats every tiling the
    same, which is exactly wrong: 50 tiles is several repeats of the square
