@@ -2067,9 +2067,10 @@ function buildBoard(polys) {
    p6m it inherits the six mirrors through the centre as well. Two boards come
    of it, and they are not the same idea:
 
-     Honeycomb — every tile within k steps of the centre through the board's
-     own adjacency. Distance in the board graph is what the game already means
-     by a step, and it is available in every one of the 62 p6/p6m tilings here.
+     Honeycomb — every tile whose centre falls in a hexagon about the centre.
+     The region is convex, so the board cannot wander however uneven the tiles
+     are, and the edge jogs by at most half a tile — the same rule the rectangle
+     boards are cut on. Available in every one of the 62 p6/p6m tilings here.
 
      Hexagon — a genuine straight-sided hexagon, kept only at the radii where
      no tile straddles the boundary. That is a real restriction: 52 of the 62
@@ -2120,7 +2121,7 @@ const HEX_TOL = 2e-3;
 // wide gap: filling boards come to within 3e-4, failing ones fall 2% short.
 const HEX_FILL = 1e-3;
 const SHAPE_TILES = 400;                     // the biggest board a shape offers
-const SHAPE_RINGS = 12;                      // ... and the most rings, if they fit
+const SHAPE_RINGS = 12;                      // ... and the most sizes it comes in
 const CENTRE_PROBE = 150;                    // tiles checked to pin the centre down
 
 // nearest-point lookup, bucketed so a match is decided by distance and never by
@@ -2210,33 +2211,103 @@ function hexReach(polys, C, N) {
   return { mn, mx };
 }
 
-// the tiles at each step out from the centre, stopping at the layer that would
-// be built from tiles missing neighbours, or would pass the size limit
-function ringLayers({ faces, edgeMap }, rim, C) {
-  const adj = faces.map(() => []);
-  for (const e of edgeMap.values())
-    if (e.length === 2) { adj[e[0]].push(e[1]); adj[e[1]].push(e[0]); }
-  const d = faces.map(f => Math.hypot(f.cx - C[0], f.cy - C[1]));
-  const near = Math.min(...d);
-  // the tiles meeting the centre are one orbit and so exactly equidistant; the
-  // tie has to be read generously because the coordinates carry drift
-  let front = faces.map((f, i) => i).filter(i => d[i] < near + 1e-2);
-  const seen = new Set(front), out = [];
-  let total = 0;
-  let full = false;
-  for (let r = 0; r <= SHAPE_RINGS && front.length; r++) {
-    if (total + front.length > SHAPE_TILES) { full = true; break; }
-    out.push(front.map(i => faces[i].poly));
-    total += front.length;
-    if (r === SHAPE_RINGS) { full = true; break; }
-    if (front.some(i => rim[i])) break;          // the next layer would be short
-    const next = [];
-    for (const i of front) for (const j of adj[i])
-      if (!seen.has(j)) { seen.add(j); next.push(j); }
-    front = next;
+// convex hull, to judge how far a board wanders from its own outline
+function convexHull(pts) {
+  const P = pts.slice().sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  const cross = (o, a, b) =>
+    (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  const lo = [], up = [];
+  for (const p of P) {
+    while (lo.length > 1 && cross(lo[lo.length - 2], lo[lo.length - 1], p) <= 0) lo.pop();
+    lo.push(p);
   }
-  // full means it stopped because it had enough, not because the patch ran out
-  return { layers: out, full };
+  for (let i = P.length - 1; i >= 0; i--) {
+    const p = P[i];
+    while (up.length > 1 && cross(up[up.length - 2], up[up.length - 1], p) <= 0) up.pop();
+    up.push(p);
+  }
+  lo.pop(); up.pop();
+  return lo.concat(up);
+}
+
+// how much of its own convex hull a board fills: 1 for a board with no dents
+function solidity(tiles) {
+  const a = tiles.reduce((s, p) => s + polyArea(p), 0);
+  const h = polyArea(convexHull([].concat(...tiles)));
+  return h > 0 ? a / h : 0;
+}
+
+/* Every distinct size is only a handful of tiles above the last, which is far
+   too fine for a slider, so thin them to a dozen spread as squares — the same
+   progression a side length gives, and what the sizes of a shape that does come
+   out exact look like. */
+function thinSizes(levels, want) {
+  if (levels.length <= want) return levels;
+  const max = levels[levels.length - 1], out = [];
+  for (let k = 1; k <= want; k++) {
+    const target = max * (k / want) * (k / want);
+    let pick = levels[0];
+    for (const n of levels) if (Math.abs(n - target) < Math.abs(pick - target)) pick = n;
+    if (out[out.length - 1] !== pick) out.push(pick);
+  }
+  return out;
+}
+
+/* The honeycomb: the tiles whose centres fall in a hexagon about the centre.
+
+   This began as rings of the board graph, a step out at a time, which is what
+   the game means by distance and is exactly right for the hexagonal tiling. But
+   a step crosses a big tile as readily as a small one, so on a tiling of mixed
+   sizes the rings reach further in some directions than others and the board
+   grows lobes: the squares and triangles one filled only 71% of its own convex
+   hull. Cutting to a convex region instead cannot wander — the worst the edge
+   does is jog by half a tile, the same as the rectangle boards, which are cut
+   from the tiling on exactly this rule.
+
+   The orientation is free, since nothing has to lie along a tile edge here, so
+   both the edge directions and those turned 30° are tried and the one filling
+   its hull best is kept. That is also what recovers the classic honeycomb: for
+   the hexagonal tiling the turned hexagon gives 1, 7, 19, 37, 61 … exactly, the
+   rings the board graph gave. */
+function regionLayers(polys, rim, C) {
+  const S = Math.PI / 3, dirs = [];
+  for (const p of polys) for (let k = 0; k < p.length; k++) {
+    const a = p[k], b = p[(k + 1) % p.length];
+    let x = Math.atan2(b[1] - a[1], b[0] - a[0]) % S;
+    if (x < 0) x += S;
+    for (const d of [x, x + S / 2])
+      if (!dirs.some(u => Math.abs(u - d) < 2e-3 || Math.abs(Math.abs(u - d) - S) < 2e-3))
+        dirs.push(d);
+  }
+  const cent = polys.map(centroidOf);
+  let best = null;
+  for (const ang of dirs) {
+    const N = hexNormals(ang);
+    const hc = cent.map(c => {
+      let v = -Infinity;
+      for (const n of N) v = Math.max(v, (c[0] - C[0]) * n[0] + (c[1] - C[1]) * n[1]);
+      return v;
+    });
+    // no rim tile may be inside: past there the board is short of what it needs
+    let lim = Infinity;
+    for (let i = 0; i < polys.length; i++) if (rim[i] && hc[i] < lim) lim = hc[i];
+    const ord = Array.from(polys.keys()).sort((a, b) => hc[a] - hc[b]);
+    const levels = [];
+    let full = false;
+    for (let i = 0; i < ord.length; i++) {
+      if (hc[ord[i]] >= lim) break;
+      // one orbit of six or twelve comes in together, and has to be cut whole
+      if (i + 1 < ord.length && hc[ord[i + 1]] <= hc[ord[i]] + HEX_TOL) continue;
+      if (i + 1 > SHAPE_TILES) { full = true; break; }
+      levels.push(i + 1);
+    }
+    if (!levels.length) continue;
+    const order = ord.map(i => polys[i]);
+    const sol = solidity(order.slice(0, levels[levels.length - 1]));
+    if (!best || sol > best.sol)
+      best = { order, levels: thinSizes(levels, SHAPE_RINGS), full, sol };
+  }
+  return best || { order: [], levels: [], full: true, sol: 0 };
 }
 
 /* The straight-sided hexagons, in whichever edge direction yields the most of
@@ -2306,18 +2377,19 @@ function hexLayers(polys, rim, C) {
   return best;
 }
 
-/* One patch per tiling answers everything: where the centre is, what the rings
-   hold and which hexagons close up. Holding on to it makes every size after the
-   first free, which matters because the solution-count scan builds them all. */
 /* A hexagon has to come in a decent range of sizes to be worth offering. Where
-   it does not, the honeycomb runs to ten sizes or more on the same tiling, and
-   often takes in the hexagon's own boards along the way — its rings pass through
-   exactly those tile counts — so what is given up is the straight edge at the
-   sizes between, not the boards themselves. Below four sizes that is a poor
-   trade, and at one it is no choice at all. */
+   it does not, the honeycomb runs to a dozen on the same tiling, and often takes
+   in the hexagon's own boards along the way — it passes through exactly those
+   tile counts — so what is given up is the straight edge at the sizes between,
+   not the boards themselves. Below four sizes that is a poor trade, and at one
+   it is no choice at all. */
 const HEX_MIN_SIZES = 4;
 const hexUsable = hex => !!hex && hex.counts.length >= HEX_MIN_SIZES;
 
+/* One patch per tiling answers everything: where the centre is, what the
+   honeycomb holds and which hexagons close up. Holding on to it makes every size
+   after the first free, which matters because the solution-count scan builds
+   them all. */
 const shapeCache = new Map();
 function shapePlan(t) {
   if (shapeCache.has(t.id)) return shapeCache.get(t.id);
@@ -2329,8 +2401,8 @@ function shapePlan(t) {
   /* What is ample for one tiling is short for the next, and the patch is where
      all the time goes, so rather than size it for the worst case start small
      and grow only while the shape being offered is still cut off by the edge of
-     it. Rings fall short only ever for want of patch, so they are grown until
-     they stop. Hexagons are sparse — most tilings have one or two and no more
+     it. The honeycomb falls short only ever for want of patch, so it is grown
+     until it stops. Hexagons are sparse — most tilings have one or two and no more
      however far out you look — so growing for them pays off only when the
      largest found was still climbing towards the size limit.
 
@@ -2350,13 +2422,13 @@ function shapePlan(t) {
        radius only estimated: thirteen tilings quietly lost their outer ring. */
     const rim = polys.map(() => false);
     for (const e of topo.edgeMap.values()) if (e.length === 1) rim[e[0]] = true;
-    const rings = ringLayers(topo, rim, C), hex = hexLayers(polys, rim, C);
-    plan = { C, rings: rings.layers, hex };
+    const comb = regionLayers(polys, rim, C), hex = hexLayers(polys, rim, C);
+    plan = { C, comb, hex };
     // capped means the hexagons ran out at the size limit rather than at the rim
     const capped = !hex || hex.full;
     if (!capped && hex.counts.length < HEX_MIN_SIZES && attempt === 0) continue;
     const climbing = !capped && hex.counts[hex.counts.length - 1] > SHAPE_TILES / 3;
-    if (hexUsable(hex) ? !climbing : rings.full) break;
+    if (hexUsable(hex) ? !climbing : comb.full) break;
   }
   shapeCache.set(t.id, plan);
   return plan;
@@ -3358,8 +3430,11 @@ function drawSizeTicks() {
   }
   const shape = activeOutline();
   // a shaped board is named by what makes it, not by a side count it has not got
-  const name = i => shape ? `${shape.label} of ${shape.params[i]} ${shape.unit}`
-                          : `${Math.round(Math.sqrt(sizes[i]))}×${Math.round(Math.sqrt(sizes[i]))}`;
+  const name = i => {
+    if (!shape) return `${Math.round(Math.sqrt(sizes[i]))}×${Math.round(Math.sqrt(sizes[i]))}`;
+    const n = shape.params[i];                 // "1 bands" reads badly
+    return `${shape.label} of ${n} ${n === 1 ? shape.unit.replace(/s$/, '') : shape.unit}`;
+  };
   sizes.forEach((s, i) => {
     const el = box.children[i];
     el.className = arr[i] === null ? 'pending' : arr[i] === 0 ? 'uniq' : '';
@@ -3705,14 +3780,13 @@ function outlinesFor(t) {
         tiles: k => hex.counts[k - 1],
         build: (src, k) => hex.order.slice(0, hex.counts[k - 1])
       });
-    } else if (plan && plan.rings.length > 1) {
-      const cum = [];
-      plan.rings.reduce((s, layer) => { cum.push(s + layer.length); return s + layer.length; }, 0);
+    } else if (plan && plan.comb.levels.length > 1) {
+      const comb = plan.comb;
       list.push({
-        key: 'comb', label: 'Honeycomb', unit: 'rings',
-        params: plan.rings.map((_, i) => i).slice(1),
-        tiles: r => cum[r],
-        build: (src, r) => plan.rings.slice(0, r + 1).flat()
+        key: 'comb', label: 'Honeycomb', unit: 'bands',
+        params: comb.levels.map((_, i) => i + 1),
+        tiles: k => comb.levels[k - 1],
+        build: (src, k) => comb.order.slice(0, comb.levels[k - 1])
       });
     }
   }
