@@ -2200,7 +2200,7 @@ function trianglePatch(src, side) {
    centre, kisrhombille in six, the kites and right trapeziums in nine — so the
    cut falls between tiles rather than through them. Checked at every size
    against the area of the triangle, which the tiles come to exactly. */
-const TRIANGLE_BOARDS = { triangle: 1, triakis: 3, kisrhombille: 6, n5d: 9 };
+const TRIANGLE_BOARDS = { triangle: 1, triakis: 3, deltoidal: 3, kisrhombille: 6, n5d: 9 };
 
 /* Tilings built by attaching one tile to the next accumulate about 5e-4 of
    drift across a patch this size, so points that ought to coincide have to be
@@ -2399,15 +2399,59 @@ function rosetteAnchors(polys, src, C) {
   const cent = polys.map(centroidOf);
   const d = cent.map(c => Math.hypot(c[0] - C[0], c[1] - C[1]));
   const near = Math.min(...d);
-  if (d.filter(v => v < near + 1e-2).length !== perCell) return null;
+  const rosette = d.filter(v => v < near + 1e-2).length === perCell;
+  if (!rosette && !hexCellAt(polys, cent, src, C)) return null;
   const det = a[0] * b[1] - a[1] * b[0];
   const inv = [[b[1] / det, -b[0] / det], [-a[1] / det, a[0] / det]];
+  /* The nearest lattice point, not the rounded one: rounding sorts the tiles
+     into parallelograms, and it is the Voronoi cell — a hexagon on a lattice
+     like this — that the tiles actually fall into whole. */
   return cent.map(c => {
     const x = c[0] - C[0], y = c[1] - C[1];
-    const u = Math.round(inv[0][0] * x + inv[0][1] * y);
-    const w = Math.round(inv[1][0] * x + inv[1][1] * y);
-    return [C[0] + u * a[0] + w * b[0], C[1] + u * a[1] + w * b[1]];
+    const u0 = inv[0][0] * x + inv[0][1] * y, w0 = inv[1][0] * x + inv[1][1] * y;
+    let best = null, bd = Infinity;
+    for (let du = -1; du <= 1; du++) for (let dw = -1; dw <= 1; dw++) {
+      const u = Math.round(u0) + du, w = Math.round(w0) + dw;
+      const px = u * a[0] + w * b[0], py = u * a[1] + w * b[1];
+      const dd = (x - px) * (x - px) + (y - py) * (y - py);
+      if (dd < bd) { bd = dd; best = [C[0] + px, C[1] + py]; }
+    }
+    return best;
   });
+}
+
+/* Does one whole repeating cell sit on the centre, as a hexagon? On a lattice
+   with a six-fold centre the Voronoi cell is a regular hexagon of exactly one
+   cell's area, and a tiling that fills it — no tile straddling the boundary —
+   can be cut by whole cells, so its honeycomb comes out a true ball of them
+   rather than a hexagon sawn across whatever lies under it. Twenty-one tilings
+   have such a cell; eleven of them have it centred on the six-fold point, which
+   is what a board built out from there needs. */
+function hexCellAt(polys, cent, src, C) {
+  const [a, b] = [src.v1, src.v2];
+  const s = (p, q) => [p[0] + q[0], p[1] + q[1]], m = (p, q) => [p[0] - q[0], p[1] - q[1]];
+  const vs = [a, b, s(a, b), m(a, b)];
+  let side = Infinity;
+  for (const v of vs) { const l = Math.hypot(v[0], v[1]); if (l > 1e-9) side = Math.min(side, l); }
+  const near = vs.concat(vs.map(v => [-v[0], -v[1]]))
+    .filter(v => Math.abs(Math.hypot(v[0], v[1]) - side) < 1e-3 * side);
+  if (near.length < 6) return false;
+  const N = near.map(v => { const l = Math.hypot(v[0], v[1]); return [v[0] / l, v[1] / l]; });
+  const r = side / 2;
+  const depth = q => {
+    let v = Infinity;
+    for (const n of N) v = Math.min(v, r - ((q[0] - C[0]) * n[0] + (q[1] - C[1]) * n[1]));
+    return v;
+  };
+  const perCell = Math.round(src.density * Math.abs(a[0] * b[1] - a[1] * b[0]));
+  let inside = 0;
+  for (let i = 0; i < polys.length; i++) {
+    let lo = Infinity, hi = -Infinity;
+    for (const q of polys[i]) { const v = depth(q); lo = Math.min(lo, v); hi = Math.max(hi, v); }
+    if (lo < -HEX_TOL && hi > HEX_TOL) return false;      // a tile crosses the cell wall
+    if (depth(cent[i]) > HEX_TOL) inside++;
+  }
+  return inside === perCell;
 }
 
 /* The honeycomb: the tiles whose centres fall in a hexagon about the centre.
@@ -4745,8 +4789,8 @@ const BOARD_REGISTRY = 165;                  // the registry this was taken from
 const RECT_ONLY = ['rect'];
 const BOARD_SHAPES = {};
 for (const [keys, ids] of [
-  ['tri hex', 'triangle triakis kisrhombille n5d'],
-  ['hex', 'trihex deltoidal n10 n19 n20 n1d k43 k58 k42 k59 k60 k4d k7d'],
+  ['tri hex', 'triangle triakis deltoidal kisrhombille n5d'],
+  ['hex', 'trihex n10 n19 n20 n1d k43 k58 k42 k59 k60 k4d k7d'],
   ['comb', 'hexagon truncHex rhombitrihex truncTrihex snubTrihex rhombille floret ' +
            'n18 n8 n9 n5 n13 n1 n18d n19d n20d n8d n9d n10d n13d ' +
            'k57 k54 k4 k1 fcb k24 k36 k26 k47 k7 k5 ' +
