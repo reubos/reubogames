@@ -1307,7 +1307,7 @@ addCells(THREE_UNIFORM, 'three', {});
    on that count rather than on a two-shape composition like the others. */
 TILINGS.push({
   id: 'fcbd', group: 'threedual', name: 'Floret, Cairo and Prismatic Pentagons',
-  cfg: 'dual of Hexagons, Squares and Triangles 1',
+  cfg: '',                                   // numberNames fills it from the parent
   src: dualOf(TILINGS.find(t => t.id === 'fcb').src),
   pentagons: 3, dualOfId: 'fcb'
 });
@@ -1370,6 +1370,32 @@ const THREE_DUALS = [
   ['k61', 'Hexagons and Floret Pentagons', 2]
 ];
 addDuals(THREE_DUALS, THREE_UNIFORM, 'threedual');
+
+/* Each list numbers its own names, which left thirty names belonging to two
+   tilings apiece: "Hexagons and Triangles 3" was the 2-uniform n10 and the
+   3-uniform k2 alike, and a name held once in each list — "Kites and Right
+   Trapeziums" — went bare in both. Number across the whole registry instead.
+
+   Registry order does it: the 2-uniform tilings are pushed first, so they keep
+   the numbers they had and the 3-uniform ones carry on from where those stop,
+   and the same for the two sets of duals. A name only one tiling holds still
+   takes no number. */
+function numberNames() {
+  const base = t => t.name.replace(/ \d+$/, '');
+  const total = new Map();
+  for (const t of TILINGS) total.set(base(t), (total.get(base(t)) || 0) + 1);
+  const seen = new Map();
+  for (const t of TILINGS) {
+    const b = base(t);
+    if (total.get(b) < 2) { t.name = b; continue; }
+    seen.set(b, (seen.get(b) || 0) + 1);
+    t.name = `${b} ${seen.get(b)}`;
+  }
+  // a dual is labelled by its parent, so those read off the settled names
+  for (const t of TILINGS)
+    if (t.dualOfId) t.cfg = 'dual of ' + TILINGS.find(p => p.id === t.dualOfId).name;
+}
+numberNames();
 
 /* =====================================================================
    5c. SQUARING THE LATTICES TO THE SCREEN
