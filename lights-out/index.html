@@ -380,7 +380,7 @@
       <details class="fmore fmain" id="fmain" ontoggle="onFiltersToggle()">
         <summary>Filters<span class="badge" id="badgeAll"></span></summary>
         <div id="fbody">
-        <details class="fmore" open><summary>Shapes<span class="badge" id="badgeShapes"></span></summary>
+        <details class="fmore"><summary>Shapes<span class="badge" id="badgeShapes"></span></summary>
           <div class="chips" id="fshapes"></div>
           <div class="frow" style="margin-top:9px">
             <button id="fonly" onclick="toggleOnly()" title="Show only tilings made of nothing but the ticked shapes">Nothing else</button>
@@ -3691,12 +3691,15 @@ function scanShapes() {
 const filters = { shape: new Map(), only: false,
                   search: '', cls: new Set(), open: new Set(),
                   /* The chips are the tall part of the bar — 183px against the
-                     row's 40 — so they fold away. They start folded only where
-                     the height actually hurts, since a filter nobody can see is
-                     a filter nobody uses. */
+                     row's 40 — so they fold away, and they start that way at
+                     every width. What is above the picker is the picker, and a
+                     column of chips pushes the first row of cards off the
+                     screen before anyone has asked to filter anything. The
+                     search box stays out, and a folded bar still says what is
+                     set, so nothing is hidden that is doing anything. */
                   types: new Set(), groups: new Set(),
                   orbits: { v: new Set(), t: new Set(), e: new Set() },
-                  shown: innerWidth > 620 };
+                  shown: false };
 
 // Ticking a category permits any of its members; ticking a member permits
 // just that one.
