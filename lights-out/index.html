@@ -2182,13 +2182,13 @@ const centroidOf = p => {
    same orientation — base along the bottom, apex up, which on a screen whose y
    runs downward means the third corner at negative y. */
 function trianglePatch(src, tri, k) {
-  const O = tri.O;
+  const O = tri.O, s = tri.sides[k - 1];
   // the pair wound so the third corner comes out below the base, then squared up
-  let [a, b] = (tri.a[0] * tri.b[1] - tri.a[1] * tri.b[0]) < 0
-             ? [tri.a, tri.b] : [tri.b, tri.a];
+  let [a, b] = (tri.u[0] * tri.w[1] - tri.u[1] * tri.w[0]) < 0
+             ? [tri.u, tri.w] : [tri.w, tri.u];
+  a = [a[0] * s, a[1] * s]; b = [b[0] * s, b[1] * s];
   const th = -Math.atan2(a[1], a[0]), co = Math.cos(th), si = Math.sin(th);
-  const A = O, B = [O[0] + k * a[0], O[1] + k * a[1]],
-        C = [O[0] + k * b[0], O[1] + k * b[1]];
+  const A = O, B = [O[0] + a[0], O[1] + a[1]], C = [O[0] + b[0], O[1] + b[1]];
   const sign = (p, u, v) => (v[0] - u[0]) * (p[1] - u[1]) - (v[1] - u[1]) * (p[0] - u[0]);
   const inside = p => {
     const s1 = sign(p, A, B), s2 = sign(p, B, C), s3 = sign(p, C, A);
@@ -2201,28 +2201,79 @@ function trianglePatch(src, tri, k) {
   /* Generously: raw fills a parallelogram of cells, so how far out it can be
      trusted depends on the direction, and asking for the side length alone
      leaves the far corner short — triakis lost a fifth of its tiles that way. */
-  const reach = Math.hypot(O[0], O[1]) + k * Math.hypot(a[0], a[1]) + 3;
+  const reach = Math.hypot(O[0], O[1]) + s + 3;
   const out = [];
   for (const p of src.raw(reach)) if (inside(centroidOf(p))) out.push(turn(p));
   return out;
 }
 
-/* The tilings that fill such a triangle exactly: how many of their tiles go in
-   one, the corner it starts from and the two side vectors. Each carries the
-   triangular lattice's lines as chains of its own tile edges — triakis cuts each
-   triangle in three about its centre, kisrhombille in six, the kites and right
-   trapeziums in nine — so the cut falls between tiles rather than through them.
+/* The tilings that fill a triangle exactly: the corner it starts from, unit
+   vectors along its two sides, and the side lengths that work with the tile
+   count each gives.
 
-   Found by cutting and checking that no tile crosses the boundary and that the
-   tiles come to the triangle's area. Area alone will not do: a tile poking out
-   cancels one poking in, and on that test alone forty-four tilings appeared to
-   fill a triangle when five do. */
+   The sides are not multiples of anything convenient. A triangle of the lattice
+   holds half a cell, so the obvious quantum is a lattice vector — but the
+   trihexagonal's triangles have odd sides in tile edges, where its lattice
+   vector is two, and a subdivided tiling's are multiples of the parent's unit,
+   which need be no whole number of its own edges. What is always true is that
+   the far corner lands on a vertex, so the lengths worth trying are the
+   distances to the vertices lying along the ray, and that finds them all.
+
+   Kept as one family per tiling: the sides step evenly, so each size adds a row
+   to the last, and no board is a single tile. Checked by cutting and requiring
+   that no tile crosses the boundary and that the tiles come to the triangle's
+   area. Neither test alone will do — a tile poking out cancels one poking in,
+   so area passed forty-four tilings when seventeen fill one; and a tile whose
+   inner corners sit exactly on the boundary reads as wholly inside, so
+   straddling has to be judged from which side the centre falls. */
 const TRIANGLE_BOARDS = {
-  triangle:     { per: 1, O: [-1, 0],            a: [1, 0],           b: [0.5, 0.866] },
-  triakis:      { per: 3, O: [-1.866, -3.2321],  a: [3.7321, 0],      b: [1.866, 3.2321] },
-  deltoidal:    { per: 3, O: [-2.366, 1.366],    a: [2.366, 1.366],   b: [0, 2.7321] },
-  kisrhombille: { per: 6, O: [-2.366, -4.0981],  a: [4.7321, 0],      b: [2.366, 4.0981] },
-  n5d:          { per: 9, O: [4.4366, -1.5368],  a: [-2.366, 4.0981], b: [-4.7321, 0] }
+  triangle: { O: [-1, 0], u: [1, 0], w: [0.5, 0.866025],
+    sides: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20],
+    tiles: [4, 9, 16, 25, 36, 49, 64, 81, 100, 121, 144, 169, 196, 225, 256, 289, 324, 361, 400] },
+  trihex: { O: [-1.5, -0.866], u: [1, 0], w: [0.5, 0.866025],
+    sides: [3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23, 25, 27, 29, 31],
+    tiles: [4, 10, 19, 31, 46, 64, 85, 109, 136, 166, 199, 235, 274, 316, 361] },
+  triakis: { O: [-3.7321, 0], u: [1, 0], w: [0.5, 0.866025],
+    sides: [3.7321, 7.4641, 11.1962, 14.9282, 18.6603, 22.3923, 26.1244, 29.8564, 33.5885, 37.3205, 41.0526],
+    tiles: [3, 12, 27, 48, 75, 108, 147, 192, 243, 300, 363] },
+  kisrhombille: { O: [-4.7321, 0], u: [0.866025, 0.500001], w: [-0.000001, 1],
+    sides: [2.7321, 5.4641, 8.1962, 10.9282, 13.6603, 16.3923, 19.1244, 21.8564, 24.5885, 27.3205, 30.0526, 32.7846, 35.5167, 38.2487],
+    tiles: [2, 8, 18, 32, 50, 72, 98, 128, 162, 200, 242, 288, 338, 392] },
+  deltoidal: { O: [-2.366, -1.366], u: [0.866025, 0.500001], w: [-0.000001, 1],
+    sides: [2.7321, 5.4641, 8.1962, 10.9282, 13.6603, 16.3923, 19.1244, 21.8564, 24.5885, 27.3205, 30.0526],
+    tiles: [3, 12, 27, 48, 75, 108, 147, 192, 243, 300, 363] },
+  n10: { O: [1.276, -3.0625], u: [1, 0], w: [0.5, 0.866025],
+    sides: [3, 6, 9, 12, 15, 18, 21, 24, 27],
+    tiles: [4, 16, 36, 64, 100, 144, 196, 256, 324] },
+  n19: { O: [-0.4148, 3.2312], u: [1, 0], w: [0.5, 0.866025],
+    sides: [2, 5, 8, 11, 14, 17, 20, 23],
+    tiles: [4, 20, 49, 91, 146, 214, 295, 389] },
+  n20: { O: [2.4244, 3.1703], u: [-0.693405, 0.720548], w: [-0.970715, -0.240232],
+    sides: [2, 3, 4], tiles: [4, 9, 16] },
+  n5d: { O: [4.4366, -1.5368], u: [1, 0], w: [0.5, 0.866025],
+    sides: [4.7321, 9.4642, 14.1963, 18.9284], tiles: [9, 36, 81, 144] },
+  n1d: { O: [-4.826, 2.7912], u: [-0.499994, -0.866029], w: [-1, -0.000007],
+    sides: [2.7322, 5.4642, 8.1963, 10.9283, 13.6605, 16.3925],
+    tiles: [2, 9, 20, 36, 56, 81] },
+  k43: { O: [-3.3403, -1.2143], u: [-0.866028, 0.499995], w: [-0.866022, -0.500005],
+    sides: [3.0001, 5, 7.0001, 9.0001, 11.0001, 13.0001, 15.0001, 17.0001],
+    tiles: [4, 15, 29, 46, 71, 99, 130, 169] },
+  k58: { O: [3.4641, -1], u: [-0.866022, -0.500005], w: [-0.866028, 0.499995],
+    sides: [3, 5, 7, 8.9999, 10.9999, 12.9999, 14.9999],
+    tiles: [9, 20, 39, 66, 96, 134, 180] },
+  k42: { O: [-2.3943, 3.1471], u: [0.866025, 0.500001], w: [-0.000001, 1],
+    sides: [3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23, 25, 27],
+    tiles: [4, 10, 24, 36, 61, 79, 115, 139, 186, 216, 274, 310, 379] },
+  k59: { O: [4.3301, -0.6481], u: [-0.866028, 0.499995], w: [-0.866022, -0.500005],
+    sides: [2, 4, 6, 8, 10, 12, 14, 16, 18, 20],
+    tiles: [4, 16, 31, 59, 85, 129, 166, 226, 274, 350] },
+  k60: { O: [0.4101, -4.6841], u: [-0.802935, 0.596066], w: [-0.917676, -0.397329],
+    sides: [3.9999, 5, 5.9999, 6.9999], tiles: [11, 20, 31, 44] },
+  k4d: { O: [1.0585, -1.8333], u: [-1, -0.000007], w: [-0.499994, -0.866029],
+    sides: [5.1961, 8.6602, 12.1243, 15.5884, 19.0525], tiles: [10, 28, 55, 91, 136] },
+  k7d: { O: [1.866, -3.5399], u: [-0.500004, 0.866023], w: [-1, -0.000005],
+    sides: [3.7321, 7.4641, 11.1961, 14.9282, 18.6602, 22.3922, 26.1243],
+    tiles: [4, 16, 36, 64, 100, 144, 196] }
 };
 
 /* Tilings built by attaching one tile to the next accumulate about 5e-4 of
@@ -4066,15 +4117,12 @@ function outlinesFor(t) {
   if (outlineCache.has(t.id)) return outlineCache.get(t.id);
   const list = [];
   const tri = TRIANGLE_BOARDS[t.id];
-  if (tri) {
-    const most = Math.floor(Math.sqrt(SHAPE_TILES / tri.per));
-    list.push({
-      key: 'tri', label: 'Triangle', unit: 'side',
-      params: Array.from({ length: most - 1 }, (_, i) => i + 2),
-      tiles: k => tri.per * k * k,
-      build: (src, k) => trianglePatch(src, tri, k)
-    });
-  }
+  if (tri) list.push({
+    key: 'tri', label: 'Triangle', unit: 'rows',
+    params: tri.sides.map((_, i) => i + 1),
+    tiles: k => tri.tiles[k - 1],
+    build: (src, k) => trianglePatch(src, tri, k)
+  });
   const g = (symInfo(t) || {}).group;
   if (g === 'p6' || g === 'p6m') {
     const plan = shapePlan(t);
@@ -4863,8 +4911,8 @@ const BOARD_REGISTRY = 165;                  // the registry this was taken from
 const RECT_ONLY = ['rect'];
 const BOARD_SHAPES = {};
 for (const [keys, ids] of [
-  ['tri hex', 'triangle triakis deltoidal kisrhombille n5d'],
-  ['hex', 'trihex n10 n19 n20 n1d k43 k58 k42 k59 k60 k4d k7d'],
+  ['tri hex', 'triangle trihex triakis deltoidal kisrhombille ' +
+              'n10 n19 n20 n5d n1d k43 k58 k42 k59 k60 k4d k7d'],
   ['comb', 'hexagon truncHex rhombitrihex truncTrihex snubTrihex rhombille floret ' +
            'n18 n8 n9 n5 n13 n1 n18d n19d n20d n8d n9d n10d n13d ' +
            'k57 k54 k4 k1 fcb k24 k36 k26 k47 k7 k5 ' +
