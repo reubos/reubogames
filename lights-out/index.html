@@ -71,8 +71,6 @@
   .glow { filter: url(#glow); }
 
   .marker { fill: var(--gold); pointer-events: none; opacity: 0.9; }
-  .marker.hint { animation: pulse 900ms ease-in-out infinite; }
-  @keyframes pulse { 0%,100% { opacity: 0.25; } 50% { opacity: 1; } }
 
   #win {
     position: absolute; inset: 10px;
@@ -365,8 +363,6 @@
         <div class="btn-row">
           <button class="primary full" onclick="newGame()">New puzzle</button>
           <button onclick="restart()">Restart</button>
-          <button onclick="undo()" id="undoBtn">Undo</button>
-          <button onclick="hint()">Hint</button>
           <button id="solveBtn" onclick="toggleSolution()">Solution</button>
         </div>
         <p class="label" style="margin-top:16px">Shape</p>
@@ -2050,14 +2046,23 @@ const centroidOf = p => {
   return [x / p.length, y / p.length];
 };
 
-/* A big upward triangle with a corner on a vertex of the tiling and its sides
-   along two of the tiling's edge directions. Every edge of it therefore runs
-   along tile edges, so no tile straddles the boundary and the count is exact. */
+/* A big triangle with a corner on a vertex of the tiling and its sides along
+   two of the tiling's edge directions. Every edge of it therefore runs along
+   tile edges, so no tile straddles the boundary and the count is exact.
+
+   The apex is at negative y so the board sits point up on screen, base along
+   the bottom — screen y runs downward, so building it point up in the maths
+   would draw it upside down. The lattice is unchanged by the flip: negating y
+   sends its second vector to the difference of the two, which is a lattice
+   vector already, so the triangle still lands squarely on the tiles. */
 function trianglePatch(src, side) {
   const S3 = Math.sqrt(3);
-  const A = [0, 0], B = [side, 0], C = [side / 2, side * S3 / 2];
+  const A = [0, 0], B = [side, 0], C = [side / 2, -side * S3 / 2];
   const sign = (p, a, b) => (b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0]);
-  const inside = p => sign(p, A, B) > 0 && sign(p, B, C) > 0 && sign(p, C, A) > 0;
+  const inside = p => {
+    const s1 = sign(p, A, B), s2 = sign(p, B, C), s3 = sign(p, C, A);
+    return (s1 > 0 && s2 > 0 && s3 > 0) || (s1 < 0 && s2 < 0 && s3 < 0);
+  };
   const out = [];
   for (const p of src.raw(side + 3)) if (inside(centroidOf(p))) out.push(p);
   return out;
@@ -2580,11 +2585,9 @@ const state = {
   lit: null,
   initial: null,
   moves: 0,
-  history: [],
   showSolution: false,
   solIndex: 0,                                 // which of the offered solutions
   follow: null,                                // the one on show, kept across presses
-  hintCell: -1,
   nodes: [],
   /* The board as built, before any tile was taken out of it. Removals are held
      as indices into that rather than as edits to the live board, so a tile can
@@ -2634,11 +2637,9 @@ function shapeChanged() {
   state.lit = new Uint8Array(state.board.cells.length);
   state.initial = Uint8Array.from(state.lit);
   state.moves = 0;
-  state.history = [];
   state.showSolution = false;
   state.solIndex = 0;
   state.follow = null;
-  state.hintCell = -1;
   state.blank = true;
   document.getElementById('sizeVal').textContent =
     '(' + state.board.cells.length + ' tiles)';
@@ -2769,11 +2770,9 @@ function newGame() {
   state.lit = lit;
   state.initial = Uint8Array.from(lit);
   state.moves = 0;
-  state.history = [];
   state.showSolution = false;
   state.solIndex = 0;
   state.follow = null;
-  state.hintCell = -1;
   state.blank = false;
   refresh();
 }
@@ -2781,11 +2780,9 @@ function newGame() {
 function restart() {
   state.lit = Uint8Array.from(state.initial);
   state.moves = 0;
-  state.history = [];
   state.showSolution = false;                  // the followed solution no longer applies
   state.solIndex = 0;
   state.follow = null;
-  state.hintCell = -1;
   refresh();
 }
 
@@ -2801,19 +2798,7 @@ function press(i, record) {
   state.lit[i] ^= 1;
   for (const j of neighbours(i)) state.lit[j] ^= 1;
   followPress(i);
-  if (record !== false) { state.history.push(i); state.moves++; }
-  state.hintCell = -1;
-  refresh();
-}
-
-function undo() {
-  const i = state.history.pop();
-  if (i === undefined) return;
-  state.lit[i] ^= 1;
-  for (const j of neighbours(i)) state.lit[j] ^= 1;
-  followPress(i);                              // the same flip undoes it
-  state.moves = Math.max(0, state.moves - 1);
-  state.hintCell = -1;
+  if (record !== false) state.moves++;
   refresh();
 }
 
@@ -3012,21 +2997,6 @@ function toggleSolution() {
     const chosen = solve();
     if (chosen) state.follow = Uint8Array.from(chosen);
   }
-  state.hintCell = -1;
-  refresh();
-}
-
-function hint() {
-  // back to the shortest first: a hint should not follow whichever alternative
-  // the Show solution button was left on
-  state.solIndex = 0;
-  state.follow = null;
-  const s = solve();
-  if (!s) return;
-  const idx = [...s.keys()].filter(i => s[i]);
-  if (!idx.length) return;
-  state.hintCell = idx[Math.floor(Math.random() * idx.length)];
-  state.showSolution = false;
   refresh();
 }
 
@@ -3237,14 +3207,12 @@ function refresh() {
     nd.cell.classList.toggle('glow', on);
 
     const mk = nd.mark;
-    mk.style.display = ((sol && sol[i]) || i === state.hintCell) ? '' : 'none';
-    mk.classList.toggle('hint', i === state.hintCell);
+    mk.style.display = (sol && sol[i]) ? '' : 'none';
   }
 
   document.getElementById('statMoves').textContent = state.moves;
   document.getElementById('statLit').textContent = litCount;
   document.getElementById('solveBtn').classList.toggle('on', state.showSolution);
-  document.getElementById('undoBtn').disabled = state.history.length === 0;
 
   /* With free columns the solver's answer is one of 2^free solutions, not the
      only one — and not necessarily the shortest, since picking the shortest
@@ -4390,8 +4358,6 @@ addEventListener('resize', drawVisibleCards);
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') closePicker();
   else if (e.key === 'n') newGame();
-  else if (e.key === 'h') hint();
-  else if (e.key === 'u') undo();
 });
 
 /* ---------------- boot ---------------- */
