@@ -2283,12 +2283,14 @@ function hexLayers(polys, rim, C) {
 /* One patch per tiling answers everything: where the centre is, what the rings
    hold and which hexagons close up. Holding on to it makes every size after the
    first free, which matters because the solution-count scan builds them all. */
-/* A hexagon has to come in more than one size to be worth offering: a slider
-   that cannot move is no choice at all. Fifteen tilings close up at exactly one
-   radius and no other, nine of them a board of six or seven tiles, where the
-   honeycomb runs to ten sizes or more — and in several of those the honeycomb's
-   first ring is that same board, so nothing is given up by preferring it. */
-const hexUsable = hex => !!hex && hex.counts.length > 1;
+/* A hexagon has to come in a decent range of sizes to be worth offering. Where
+   it does not, the honeycomb runs to ten sizes or more on the same tiling, and
+   often takes in the hexagon's own boards along the way — its rings pass through
+   exactly those tile counts — so what is given up is the straight edge at the
+   sizes between, not the boards themselves. Below four sizes that is a poor
+   trade, and at one it is no choice at all. */
+const HEX_MIN_SIZES = 4;
+const hexUsable = hex => !!hex && hex.counts.length >= HEX_MIN_SIZES;
 
 const shapeCache = new Map();
 function shapePlan(t) {
@@ -2304,7 +2306,12 @@ function shapePlan(t) {
      it. Rings fall short only ever for want of patch, so they are grown until
      they stop. Hexagons are sparse — most tilings have one or two and no more
      however far out you look — so growing for them pays off only when the
-     largest found was still climbing towards the size limit. */
+     largest found was still climbing towards the size limit.
+
+     A count short of the threshold is the exception: it decides which shape the
+     tiling is given, so it cannot be taken from a patch that might be the thing
+     cutting it short. The triakis triangular and one other read three hexagons
+     on the first patch, and a fourth on the second. One retest settles it. */
   for (let attempt = 0; attempt < 3; attempt++, R *= 1.5) {
     const polys = src.raw(R / Math.SQRT2);   // raw reaches h·√2, so ask for R
     const C = sixFoldCentre(polys, src.pitch, R);
@@ -2319,8 +2326,10 @@ function shapePlan(t) {
     for (const e of topo.edgeMap.values()) if (e.length === 1) rim[e[0]] = true;
     const rings = ringLayers(topo, rim, C), hex = hexLayers(polys, rim, C);
     plan = { C, rings: rings.layers, hex };
-    const climbing = hex && !hex.full &&
-                     hex.counts[hex.counts.length - 1] > SHAPE_TILES / 3;
+    // capped means the hexagons ran out at the size limit rather than at the rim
+    const capped = !hex || hex.full;
+    if (!capped && hex.counts.length < HEX_MIN_SIZES && attempt === 0) continue;
+    const climbing = !capped && hex.counts[hex.counts.length - 1] > SHAPE_TILES / 3;
     if (hexUsable(hex) ? !climbing : rings.full) break;
   }
   shapeCache.set(t.id, plan);
