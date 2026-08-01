@@ -2601,6 +2601,24 @@ function hexCellAt(polys, cent, src, C) {
    size is less solid than the next and only the largest would survive. */
 const COMB_PEAKS = new Set(['rhombille']);
 
+/* Tilings kept to the sizes where none of the biggest tiles touches the outside,
+   so the edge of the board is small tiles all the way round.
+
+   The rhombitrihexagonal is the case. Its hexagons sit a hexagonal lattice apart
+   with squares along the lattice edges and triangles on its faces, so a hexagon
+   comes with a collar of six squares and six triangles, and the board looks
+   right when it holds whole collars: 13, 61, 145 and 265 tiles, being 1, 7, 19
+   and 37 hexagons — the honeycomb numbers, the same shells the hexagonal tiling
+   itself counts. Cut anywhere else and hexagons sit on the rim with their
+   collars half missing, which is how it read before: 1, 43, 67, 115 tiles, the
+   hexagons going 1, 7, 13, 19, 31 as the shells came in halves.
+
+   Opt-in, because it is a strong condition and most tilings cannot meet it three
+   times inside the size limit — and on the tilings whose big tiles are the rare
+   ones, the dodecagon tilings above all, the collar is most of the board and the
+   sizes it leaves are miles apart. */
+const COMB_INNER = new Set(['rhombitrihex']);
+
 function regionLayers(polys, rim, C, src, adj, id) {
   const S = Math.PI / 3, dirs = [];
   const add = x => {
@@ -2624,6 +2642,7 @@ function regionLayers(polys, rim, C, src, adj, id) {
      19 flowers — the shells of a hexagon laid crooked — where lining it up gives
      1, 7, 19, 37, the honeycomb proper. */
   if (anchors) for (const v of [src.v1, src.v2]) add(Math.atan2(v[1], v[0]));
+  const big = Math.max(...polys.map(p => p.length));
   let best = null;
   for (const ang of dirs) {
     const N = hexNormals(ang);
@@ -2641,17 +2660,24 @@ function regionLayers(polys, rim, C, src, adj, id) {
        them as the board grows costs nothing: each tile added tells its
        neighbours, and a neighbour reaching two stops being one. */
     const held = new Int32Array(polys.length), inside = new Uint8Array(polys.length);
-    let hanging = 0;
-    const levels = [], comp = [], loose = [], run = new Map();
+    // and, the same way, how many of the biggest tiles are still short a neighbour
+    const miss = new Int32Array(polys.length);
+    let hanging = 0, edge = 0;
+    const levels = [], comp = [], loose = [], edges = [], run = new Map();
     let full = false;
     for (let i = 0; i < ord.length; i++) {
       const x = ord[i], s = polys[x].length;
       run.set(s, (run.get(s) || 0) + 1);
       inside[x] = 1;
-      let n = 0;
-      for (const j of adj[x]) if (inside[j]) { n++; if (++held[j] === 2) hanging--; }
+      let n = 0, m = rim[x] ? 1 : 0;      // off the patch counts as short a neighbour
+      for (const j of adj[x]) {
+        if (inside[j]) { n++; if (++held[j] === 2) hanging--;
+                         if (polys[j].length === big && --miss[j] === 0) edge--; }
+        else m++;
+      }
       held[x] = n;
       if (n <= 1) hanging++;
+      if (s === big) { miss[x] = m; if (m) edge++; }
       if (hc[ord[i]] >= lim) break;
       // one orbit of six or twelve comes in together, and has to be cut whole
       if (i + 1 < ord.length && hc[ord[i + 1]] <= hc[ord[i]] + HEX_TOL) continue;
@@ -2659,17 +2685,26 @@ function regionLayers(polys, rim, C, src, adj, id) {
       levels.push(i + 1);
       comp.push(new Map(run));
       loose.push(i === 0 ? 0 : hanging);      // one tile alone pokes out of nothing
+      edges.push(edge);
     }
     if (!levels.length) continue;
+    let lv = levels, cp = comp, ls = loose;
+    if (COMB_INNER.has(id)) {
+      const keep = edges.map(e => !e);
+      lv = levels.filter((_, i) => keep[i]);
+      if (lv.length < 3) continue;            // too few to be a range at this angle
+      cp = comp.filter((_, i) => keep[i]);
+      ls = loose.filter((_, i) => keep[i]);
+    }
     /* Keep the sizes with nothing poking out, where there are enough of them to
        be a range. Squares and Triangles 5 is the plain case: 6, 42, 150 and 324
        have not a tile hanging by one edge between them, and every other size it
        offered had six apiece. */
-    let pick = levels, picked = comp;
-    const clean = levels.filter((_, i) => !loose[i]);
+    let pick = lv, picked = cp;
+    const clean = lv.filter((_, i) => !ls[i]);
     if (clean.length >= 3) {
       pick = clean;
-      picked = comp.filter((_, i) => !loose[i]);
+      picked = cp.filter((_, i) => !ls[i]);
     }
     /* Consistency is worth more than choice, so the banded run is taken even
        when it is much the shorter: the dodecagon tilings come down to three or
