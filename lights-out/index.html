@@ -2220,7 +2220,13 @@ function trianglePatch(src, tri, k) {
    distances to the vertices lying along the ray, and that finds them all.
 
    Kept as one family per tiling: the sides step evenly, so each size adds a row
-   to the last, and no board is a single tile. Checked by cutting and requiring
+   to the last, and no board is a single tile. Every kind of tile the tiling has
+   must be on the board and must grow at every step, or the run is not one thing
+   getting bigger — four of these had families of pure triangles that never
+   reached a hexagon at all, the squares and triangles going 4, 9, 16 like a
+   plain triangular grid, which is not what that tiling looks like.
+
+   Checked by cutting and requiring
    that no tile crosses the boundary and that the tiles come to the triangle's
    area. Neither test alone will do — a tile poking out cancels one poking in,
    so area passed forty-four tilings when seventeen fill one; and a tile whose
@@ -2246,29 +2252,28 @@ const TRIANGLE_BOARDS = {
     sides: [3, 6, 9, 12, 15, 18, 21, 24, 27],
     tiles: [4, 16, 36, 64, 100, 144, 196, 256, 324] },
   n19: { O: [-0.4148, 3.2312], u: [1, 0], w: [0.5, 0.866025],
-    sides: [2, 5, 8, 11, 14, 17, 20, 23],
-    tiles: [4, 20, 49, 91, 146, 214, 295, 389] },
-  n20: { O: [2.4244, 3.1703], u: [-0.693405, 0.720548], w: [-0.970715, -0.240232],
-    sides: [2, 3, 4], tiles: [4, 9, 16] },
+    sides: [5, 8, 11, 14, 17, 20, 23],
+    tiles: [20, 49, 91, 146, 214, 295, 389] },
+  n20: { O: [0.483, 2.6899], u: [0.970717, 0.240227], w: [0.277315, 0.960779],
+    sides: [4, 8], tiles: [11, 49] },
   n5d: { O: [4.4366, -1.5368], u: [1, 0], w: [0.5, 0.866025],
     sides: [4.7321, 9.4642, 14.1963, 18.9284], tiles: [9, 36, 81, 144] },
   n1d: { O: [-4.826, 2.7912], u: [-0.499994, -0.866029], w: [-1, -0.000007],
-    sides: [2.7322, 5.4642, 8.1963, 10.9283, 13.6605, 16.3925],
-    tiles: [2, 9, 20, 36, 56, 81] },
+    sides: [5.4642, 8.1963, 10.9283, 13.6605, 16.3925],
+    tiles: [9, 20, 36, 56, 81] },
   k43: { O: [-3.3403, -1.2143], u: [-0.866028, 0.499995], w: [-0.866022, -0.500005],
     sides: [3.0001, 5, 7.0001, 9.0001, 11.0001, 13.0001, 15.0001, 17.0001],
     tiles: [4, 15, 29, 46, 71, 99, 130, 169] },
   k58: { O: [3.4641, -1], u: [-0.866022, -0.500005], w: [-0.866028, 0.499995],
-    sides: [3, 5, 7, 8.9999, 10.9999, 12.9999, 14.9999],
-    tiles: [9, 20, 39, 66, 96, 134, 180] },
+    sides: [5, 7, 8.9999, 10.9999, 12.9999, 14.9999],
+    tiles: [20, 39, 66, 96, 134, 180] },
   k42: { O: [-2.3943, 3.1471], u: [0.866025, 0.500001], w: [-0.000001, 1],
     sides: [3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23, 25, 27],
     tiles: [4, 10, 24, 36, 61, 79, 115, 139, 186, 216, 274, 310, 379] },
-  k59: { O: [4.3301, -0.6481], u: [-0.866028, 0.499995], w: [-0.866022, -0.500005],
-    sides: [2, 4, 6, 8, 10, 12, 14, 16, 18, 20],
-    tiles: [4, 16, 31, 59, 85, 129, 166, 226, 274, 350] },
-  k60: { O: [0.4101, -4.6841], u: [-0.802935, 0.596066], w: [-0.917676, -0.397329],
-    sides: [3.9999, 5, 5.9999, 6.9999], tiles: [11, 20, 31, 44] },
+  k59: { O: [4.3301, -0.6481], u: [-0.000004, 1], w: [-0.866027, 0.499997],
+    sides: [4, 8, 12, 16, 20], tiles: [11, 49, 114, 206, 325] },
+  k60: { O: [2.3601, -2.8959], u: [0.114743, 0.993395], w: [-0.802934, 0.596068],
+    sides: [6, 8, 10], tiles: [31, 54, 85] },
   k4d: { O: [1.0585, -1.8333], u: [-1, -0.000007], w: [-0.499994, -0.866029],
     sides: [5.1961, 8.6602, 12.1243, 15.5884, 19.0525], tiles: [10, 28, 55, 91, 136] },
   k7d: { O: [1.866, -3.5399], u: [-0.500004, 0.866023], w: [-1, -0.000005],
