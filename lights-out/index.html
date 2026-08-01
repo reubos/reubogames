@@ -2180,15 +2180,25 @@ const centroidOf = p => {
    was not one the tiling can fill. So each carries its own corner and pair of
    side vectors, and the tiles are turned afterwards to bring every board to the
    same orientation — base along the bottom, apex up, which on a screen whose y
-   runs downward means the third corner at negative y. */
+   runs downward means the third corner at negative y.
+
+   Which corner the tiling is pinned by decides what the slider does. Pin a base
+   corner and the apex is O + b·s, so it slides to a fresh spot at every size and
+   the tile at the point of the board keeps changing. Pin the apex and the base
+   is what slides: each size is the last one with another row joined along the
+   bottom, and the top of the board never moves. That is the better board, but
+   only some tilings have their corner at the apex, so it is a flag. */
 function trianglePatch(src, tri, k) {
   const O = tri.O, s = tri.sides[k - 1];
   // the pair wound so the third corner comes out below the base, then squared up
   let [a, b] = (tri.u[0] * tri.w[1] - tri.u[1] * tri.w[0]) < 0
              ? [tri.u, tri.w] : [tri.w, tri.u];
   a = [a[0] * s, a[1] * s]; b = [b[0] * s, b[1] * s];
-  const th = -Math.atan2(a[1], a[0]), co = Math.cos(th), si = Math.sin(th);
   const A = O, B = [O[0] + a[0], O[1] + a[1]], C = [O[0] + b[0], O[1] + b[1]];
+  // the two that make the base, then the one left over at the point
+  const [P, Q] = tri.apex ? [B, C] : [A, B];
+  const th = -Math.atan2(Q[1] - P[1], Q[0] - P[0]);
+  const co = Math.cos(th), si = Math.sin(th);
   const sign = (p, u, v) => (v[0] - u[0]) * (p[1] - u[1]) - (v[1] - u[1]) * (p[0] - u[0]);
   const inside = p => {
     const s1 = sign(p, A, B), s2 = sign(p, B, C), s3 = sign(p, C, A);
@@ -2229,10 +2239,18 @@ function trianglePatch(src, tri, k) {
    The run must also carry on, not merely happen a few times. Two tilings had
    runs that stopped dead after two and three sizes with the next side failing to
    close, and those are a coincidence rather than a family, so they keep the
-   hexagon board alone. And what sits at the apex has to hold: Hexagons and
-   Triangles 15 had a run with a hexagon under the point at one size and a
-   triangle at the next, three shapes in one slider, where the run beginning 4,
-   61, 175 keeps a triangle over a hexagon the whole way up.
+   hexagon board alone.
+
+   What sits at the apex has to hold too, and where it does not the cure is
+   usually to turn the triangle over rather than to throw the run away. Pinned by
+   a base corner the apex is O + b·s, a fresh spot at every size: Kites and
+   Triangles 2 alternated a kite and a triangle at the point, Hexagons and
+   Triangles 14 a hexagon and a triangle. Pinning the apex instead leaves the
+   same triangles — the same counts, the same sides — with the top of the board
+   standing still and each size the last one with a row joined along the bottom.
+   Hexagons and Triangles 15 was the one that needed a different run altogether,
+   its old one going 20, 39, 66 with a hexagon under the point and then a
+   triangle twice.
 
    Checked by cutting and requiring
    that no tile crosses the boundary and that the tiles come to the triangle's
@@ -2264,12 +2282,12 @@ const TRIANGLE_BOARDS = {
     tiles: [20, 49, 91, 146, 214, 295, 389] },
   n5d: { O: [4.4366, -1.5368], u: [1, 0], w: [0.5, 0.866025],
     sides: [4.7321, 9.4642, 14.1963, 18.9284], tiles: [9, 36, 81, 144] },
-  n1d: { O: [-4.826, 2.7912], u: [-0.499994, -0.866029], w: [-1, -0.000007],
-    sides: [5.4642, 8.1963, 10.9283, 13.6605, 16.3925],
-    tiles: [9, 20, 36, 56, 81] },
-  k43: { O: [-3.3403, -1.2143], u: [-0.866028, 0.499995], w: [-0.866022, -0.500005],
-    sides: [3.0001, 5, 7.0001, 9.0001, 11.0001, 13.0001, 15.0001, 17.0001],
-    tiles: [4, 15, 29, 46, 71, 99, 130, 169] },
+  n1d: { O: [-4.826, 2.7912], u: [-0.499994, -0.866029], w: [-1, -0.000007], apex: 1,
+    sides: [5.4642, 8.1963, 10.9284, 13.6605, 16.3926, 19.1247, 21.8568, 24.5889, 27.321, 30.0531, 32.7852],
+    tiles: [9, 20, 36, 56, 81, 110, 144, 182, 225, 272, 324] },
+  k43: { O: [-3.3403, -1.2143], u: [-0.866028, 0.499995], w: [-0.866022, -0.500005], apex: 1,
+    sides: [3.0001, 5.0001, 7.0001, 9.0001, 11.0001, 13.0001, 15.0001, 17.0001, 19.0001, 21.0001, 23.0001, 25.0001],
+    tiles: [4, 15, 29, 46, 71, 99, 130, 169, 211, 256, 309, 365] },
   k58: { O: [1.732, 0], u: [-0.866028, 0.499995], w: [-0.866022, -0.500005],
     sides: [3, 9, 15.0001, 21.0001], tiles: [4, 61, 175, 346] },
   k42: { O: [-2.3943, 3.1471], u: [0.866025, 0.500001], w: [-0.000001, 1],
