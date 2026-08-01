@@ -898,9 +898,25 @@ const TILINGS = [
   // Offsets must be generic — three grid lines meeting at a point would break
   // the construction — and summing to zero is what makes N=5 a true Penrose.
   { id: 'penrose', group: 'aperiodic', name: 'Penrose Rhombs', cfg: 'aperiodic · 5-fold',
-    src: multigrid(5, [0.1234, 0.2371, -0.3123, 0.4111, -0.4593]), aperiodic: true },
+    src: multigrid(5, [0.1234, 0.2371, -0.3123, 0.4111, -0.4593]),
+    aperiodic: true, rhombi: 2 },
   { id: 'ammann', group: 'aperiodic', name: 'Ammann–Beenker', cfg: 'aperiodic · 8-fold',
-    src: multigrid(4, [0.1913, -0.2671, 0.3319, -0.1237]), aperiodic: true }
+    src: multigrid(4, [0.1913, -0.2671, 0.3319, -0.1237]),
+    aperiodic: true, rhombi: 2 },
+  /* The generator was already written for any N, and only two values of it were
+     ever asked for. N families of lines give N edge directions and so a 2N-fold
+     tiling, with one rhombus shape per angle between a pair of directions —
+     floor(N/2) of them. Six families is the dodecagonal tiling, a square beside
+     30 and 60 degree rhombi; seven is 14-fold. Neither has a translation
+     symmetry, checked the same way as the two above. */
+  { id: 'dodeca', group: 'aperiodic', name: 'Dodecagonal Rhombs',
+    cfg: 'aperiodic · 12-fold',
+    src: multigrid(6, [0.1131, -0.2417, 0.3719, -0.1873, 0.2291, -0.2851]),
+    aperiodic: true, rhombi: 3 },
+  { id: 'tetradeca', group: 'aperiodic', name: 'Tetradecagonal Rhombs',
+    cfg: 'aperiodic · 14-fold',
+    src: multigrid(7, [0.1447, -0.2213, 0.3391, -0.1729, 0.2617, -0.3083, 0.1570]),
+    aperiodic: true, rhombi: 3 }
 ];
 
 /* The 2-uniform tilings have no common names, and their vertex notation is
@@ -1322,7 +1338,7 @@ addDuals(THREE_DUALS, THREE_UNIFORM, 'threedual');
    vertices of varying degree. That makes them the only boards here where the
    number of neighbours genuinely varies from tile to tile, so no composition
    name would be either short or stable, and they are named for their parent. */
-for (const id of ['penrose', 'ammann']) {
+for (const id of ['penrose', 'ammann', 'dodeca', 'tetradeca']) {
   const base = TILINGS.find(t => t.id === id);
   TILINGS.push({
     id: id + 'd', group: 'aperiodic', name: `${base.name} Dual`,
@@ -2415,7 +2431,7 @@ function verify() {
                                    (p[1][1]-p[0][1])*(p[3][0]-p[0][0])) * 1000);
       }));
       ok = badEdge === 0 && closed > 0 && sides.size === 1 && [...sides][0] === 4 &&
-           areas.size === 2;
+           areas.size === (t.rhombi || 2);
       detail = `rhombi=${[...areas].sort((a,b)=>a-b).map(a=>(a/1000).toFixed(3)).join('/')}`;
     } else if (t.shapes) {
       /* A dual has one tile per vertex type of its parent, so a 2-uniform one
