@@ -1332,21 +1332,6 @@ const THREE_DUALS = [
 ];
 addDuals(THREE_DUALS, THREE_UNIFORM, 'threedual');
 
-/* Duals of the two aperiodic tilings. These are the odd ones out: with no
-   repeating cell there is no bound on how many faces meet at a vertex, so the
-   dual has tiles of many shapes and sizes — triangles through octagons — and
-   vertices of varying degree. That makes them the only boards here where the
-   number of neighbours genuinely varies from tile to tile, so no composition
-   name would be either short or stable, and they are named for their parent. */
-for (const id of ['penrose', 'ammann', 'dodeca', 'tetradeca']) {
-  const base = TILINGS.find(t => t.id === id);
-  TILINGS.push({
-    id: id + 'd', group: 'aperiodic', name: `${base.name} Dual`,
-    cfg: `dual of ${base.name}`,
-    src: dualOf(base.src), mixed: true, dualOfId: id
-  });
-}
-
 /* =====================================================================
    5c. SQUARING THE LATTICES TO THE SCREEN
 
@@ -2443,11 +2428,6 @@ function verify() {
       ok = badEdge === 0 && closed > 0 &&
            reps.length === (t.classes || 2) && got === t.shapes;
       detail = `shapes=${got} (${reps.length} classes)`;
-    } else if (t.mixed) {
-      // no uniformity of any kind to lean on — only that it is a sound tiling
-      const { reps } = shapeClasses(polys);
-      ok = badEdge === 0 && closed > 0 && reps.length > 2;
-      detail = `shapes=${composition(polys)}`;
     } else if (t.notation) {
       // k-uniform: must show exactly the vertex types its notation declares,
       // however many that is — two for the 2-uniform tilings, three for the
