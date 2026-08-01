@@ -188,9 +188,20 @@
   .section-title {
     font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.09em;
     color: var(--muted); margin: 26px 0 0; padding-top: 18px; border-top: 1px solid var(--line);
+    cursor: pointer; list-style: none;
   }
-  .section-title.first { border-top: 0; padding-top: 0; margin-top: 20px; }
-  .section-title.gone, .cards.gone { display: none; }
+  .section-title::-webkit-details-marker { display: none; }
+  .section-title::before { content: '▸ '; }
+  .sect[open] > .section-title::before { content: '▾ '; }
+  .section-title:hover { color: var(--text); }
+  /* how many are in there, since a folded section otherwise says nothing */
+  .scount { margin-left: 9px; opacity: 0.7; font-variant-numeric: tabular-nums; }
+  .sect.first > .section-title { border-top: 0; padding-top: 0; margin-top: 20px; }
+  .sect.gone { display: none; }
+  /* A closed details hides its contents through a slot, which an explicit
+     display on the child overrides — .cards is a grid, so it kept laying its
+     cards out and they went on measuring full height while folded. */
+  .sect:not([open]) > .cards { display: none; }
 
   /* ---------- filter bar ---------- */
   /* Sticky inside the scrolling modal, with negative side margins so the
@@ -405,29 +416,37 @@
       <p class="fnote" id="fsummary"></p>
     </div>
 
-    <p class="section-title first" id="sec-regular">Regular</p>
-    <div class="cards" id="grp-regular"></div>
+    <details class="sect first" id="sec-regular" open>
+      <summary class="section-title">Regular<span class="scount"></span></summary>
+      <div class="cards" id="grp-regular"></div></details>
 
-    <p class="section-title" id="sec-semi">Semiregular &mdash; Archimedean</p>
-    <div class="cards" id="grp-semi"></div>
+    <details class="sect" id="sec-semi" open>
+      <summary class="section-title">Semiregular &mdash; Archimedean<span class="scount"></span></summary>
+      <div class="cards" id="grp-semi"></div></details>
 
-    <p class="section-title" id="sec-dual">Laves duals</p>
-    <div class="cards" id="grp-dual"></div>
+    <details class="sect" id="sec-dual" open>
+      <summary class="section-title">Laves duals<span class="scount"></span></summary>
+      <div class="cards" id="grp-dual"></div></details>
 
-    <p class="section-title" id="sec-two">2-uniform</p>
-    <div class="cards" id="grp-two"></div>
+    <details class="sect" id="sec-two" open>
+      <summary class="section-title">2-uniform<span class="scount"></span></summary>
+      <div class="cards" id="grp-two"></div></details>
 
-    <p class="section-title" id="sec-twodual">2-uniform duals</p>
-    <div class="cards" id="grp-twodual"></div>
+    <details class="sect" id="sec-twodual" open>
+      <summary class="section-title">2-uniform duals<span class="scount"></span></summary>
+      <div class="cards" id="grp-twodual"></div></details>
 
-    <p class="section-title" id="sec-three">3-uniform</p>
-    <div class="cards" id="grp-three"></div>
+    <details class="sect" id="sec-three" open>
+      <summary class="section-title">3-uniform<span class="scount"></span></summary>
+      <div class="cards" id="grp-three"></div></details>
 
-    <p class="section-title" id="sec-threedual">3-uniform duals</p>
-    <div class="cards" id="grp-threedual"></div>
+    <details class="sect" id="sec-threedual" open>
+      <summary class="section-title">3-uniform duals<span class="scount"></span></summary>
+      <div class="cards" id="grp-threedual"></div></details>
 
-    <p class="section-title" id="sec-aperiodic">Aperiodic</p>
-    <div class="cards" id="grp-aperiodic"></div>
+    <details class="sect" id="sec-aperiodic" open>
+      <summary class="section-title">Aperiodic<span class="scount"></span></summary>
+      <div class="cards" id="grp-aperiodic"></div></details>
 
     <p class="empty" id="noneFound" style="display:none">No tiling matches those filters.</p>
   </div>
@@ -3462,6 +3481,9 @@ function drawVisibleCards() {
   const due = [];
   for (const el of drawQueue) {
     const r = el.getBoundingClientRect();
+    // a card in a folded section measures zero, which would otherwise read as
+    // sitting at the top of the screen and pull the whole section forward
+    if (!r.height) continue;
     if (r.bottom >= -200 && r.top <= innerHeight + 200) due.push(el);
   }
   if (!due.length) return;
@@ -4003,14 +4025,14 @@ function buildCards() {
   for (const g of ['regular', 'semi', 'dual', 'two', 'twodual',
                    'three', 'threedual', 'aperiodic']) {
     const box = document.getElementById('grp-' + g);
-    const title = document.getElementById('sec-' + g);
+    const sect = document.getElementById('sec-' + g);
     box.innerHTML = '';
     const list = TILINGS.filter(x => x.group === g && (!shapesReady || matches(x)));
     // A section with nothing left in it says nothing worth the vertical space.
-    title.classList.toggle('gone', list.length === 0);
-    box.classList.toggle('gone', list.length === 0);
-    title.classList.remove('first');
-    if (list.length) { shown += list.length; if (!first) first = title; }
+    sect.classList.toggle('gone', list.length === 0);
+    sect.classList.remove('first');
+    sect.querySelector('.scount').textContent = list.length || '';
+    if (list.length) { shown += list.length; if (!first) first = sect; }
     for (const t of list) {
       const el = document.createElement('div');
       el.className = 'card' + (t.id === state.tiling.id ? ' sel' : '');
