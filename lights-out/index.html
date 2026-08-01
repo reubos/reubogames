@@ -57,6 +57,11 @@
     transition: fill 110ms ease;
   }
   .cell.lit { fill: var(--accent); }
+  /* A removed tile is still drawn, faintly, so the hole can be clicked back.
+     It takes no other state — never lit, never shaded as a neighbour. */
+  .cell.hole { fill: transparent; stroke: #2a4a30; stroke-dasharray: 0.12 0.12; }
+  #board.editing .cell { cursor: crosshair; }
+  #board.editing .cell:hover { stroke: var(--gold); stroke-width: 0.09; }
   /* preview of what a press would toggle: the tile under the cursor and its
      neighbours all shift shade, with no outline singling out the cursor tile */
   .cell.affect { fill: #315b39; }
@@ -353,6 +358,15 @@
           <button onclick="hint()">Hint</button>
           <button id="solveBtn" onclick="toggleSolution()">Solution</button>
         </div>
+        <p class="label" style="margin-top:16px">Shape</p>
+        <div class="btn-row">
+          <button id="editBtn" onclick="toggleEditing()"
+                  title="Tap tiles to take them out of the board or put them back">Edit shape</button>
+          <button id="resetShapeBtn" onclick="resetShape()">Reset shape</button>
+        </div>
+        <p class="note">Right-click a tile to remove it, or turn on Edit shape and
+           tap. Removing clears the lights — New puzzle deals a position on the
+           shape you have made. Changing tiling, size or edges starts it over.</p>
         <div class="stat-grid" style="margin-top:14px">
           <div class="stat"><div class="v" id="statMoves">0</div><div class="k">Moves</div></div>
           <div class="stat"><div class="v" id="statLit">0</div><div class="k">Lit</div></div>
@@ -2503,12 +2517,101 @@ const state = {
   solIndex: 0,                                 // which of the offered solutions
   follow: null,                                // the one on show, kept across presses
   hintCell: -1,
-  nodes: []
+  nodes: [],
+  /* The board as built, before any tile was taken out of it. Removals are held
+     as indices into that rather than as edits to the live board, so a tile can
+     come back and the whole shape can be undone at once. */
+  full: null,
+  removed: new Set(),
+  liveOf: null,                                // full index -> live index, or -1
+  fullOf: null,                                // live index -> full index
+  editing: false,
+  blank: false                                 // cleared by an edit, awaiting a deal
 };
 
 function neighbours(i) {
   const c = state.board.cells[i];
   return state.mode === 'edge' ? c.edgeNb : c.cornerNb;
+}
+
+/* Cut the removed tiles out of the full board and renumber what is left, so
+   everything downstream — the solver, the renderer, the counter — goes on
+   seeing an ordinary board and needs to know nothing about this. The bounding
+   box is the full one, so taking tiles out never makes the rest jump or
+   rescale under the cursor. */
+function applyShape() {
+  const full = state.full, n = full.cells.length;
+  const liveOf = new Int32Array(n).fill(-1), fullOf = [];
+  for (let i = 0; i < n; i++) {
+    if (state.removed.has(i)) continue;
+    liveOf[i] = fullOf.length; fullOf.push(i);
+  }
+  const cut = list => { const out = []; for (const j of list) if (liveOf[j] >= 0) out.push(liveOf[j]); return out; };
+  state.liveOf = liveOf; state.fullOf = fullOf;
+  state.board = { bbox: full.bbox, cells: fullOf.map(i => {
+    const c = full.cells[i];
+    return { poly: c.poly, cx: c.cx, cy: c.cy, edgeNb: cut(c.edgeNb), cornerNb: cut(c.cornerNb) };
+  }) };
+  state.cornerDiffers = state.board.cells.some(c => c.cornerNb.length !== c.edgeNb.length);
+  if (!state.cornerDiffers && state.mode === 'corner') state.mode = 'edge';
+  updateModeUI();
+}
+
+/* Every change of shape blanks the board rather than leaving a position that
+   may no longer be solvable — and a blank board is a solved one, so the win
+   banner and the move count have to be told this is an edit and not a win. */
+function shapeChanged() {
+  applyShape();
+  state.lit = new Uint8Array(state.board.cells.length);
+  state.initial = Uint8Array.from(state.lit);
+  state.moves = 0;
+  state.history = [];
+  state.showSolution = false;
+  state.solIndex = 0;
+  state.follow = null;
+  state.hintCell = -1;
+  state.blank = true;
+  document.getElementById('sizeVal').textContent =
+    '(' + state.board.cells.length + ' tiles)';
+  document.getElementById('tileCount').textContent =
+    `${state.board.cells.length} tiles on the board.`;
+  updateShapeUI();
+  drawSizeTicks();                             // the count is about this shape now
+  render();
+  refresh();
+}
+
+function toggleTile(f) {
+  if (state.removed.has(f)) state.removed.delete(f);
+  else {
+    if (state.removed.size >= state.full.cells.length - 1) return;   // leave one
+    state.removed.add(f);
+  }
+  shapeChanged();
+}
+
+function resetShape() {
+  if (!state.removed.size) return;
+  state.removed.clear();
+  shapeChanged();
+}
+
+function toggleEditing() {
+  state.editing = !state.editing;
+  updateShapeUI();
+}
+
+function updateShapeUI() {
+  document.getElementById('editBtn').classList.toggle('on', state.editing);
+  document.getElementById('resetShapeBtn').disabled = state.removed.size === 0;
+  document.getElementById('board').classList.toggle('editing', state.editing);
+}
+
+// a click on a tile means press, or cut, depending on the mode the board is in
+function tileClick(f) {
+  if (state.editing) { toggleTile(f); return; }
+  const i = state.liveOf[f];
+  if (i >= 0) press(i);
 }
 
 function rebuild() {
@@ -2522,17 +2625,18 @@ function rebuild() {
   state.wrapping = state.board ? want : 'flat';
   if (!state.board) state.board = buildBoard(windowPatch(state.tiling, target, 1).polys);
   updateWrapUI();
+
+  // a fresh board is a whole one: changing tiling, size or wrapping starts the
+  // shape over rather than trying to carry holes across a different board
+  state.full = state.board;
+  state.removed.clear();
+  applyShape();
   document.getElementById('sizeVal').textContent =
     '(' + state.board.cells.length + ' tiles)';
 
-  // In some tilings (hexagons, 4.8.8) every pair of tiles meeting at a vertex
-  // already shares an edge, so corner mode is the same game. Say so.
-  state.cornerDiffers = state.board.cells.some(c => c.cornerNb.length !== c.edgeNb.length);
-  if (!state.cornerDiffers) state.mode = 'edge';
-  updateModeUI();
-
   document.getElementById('tileCount').textContent =
     `${state.board.cells.length} tiles on the board.`;
+  updateShapeUI();
   scanKernels();
   render();
   newGame();
@@ -2560,6 +2664,7 @@ function newGame() {
   state.solIndex = 0;
   state.follow = null;
   state.hintCell = -1;
+  state.blank = false;
   refresh();
 }
 
@@ -2616,8 +2721,10 @@ function undo() {
 let solveMemo = null;
 
 function solve() {
+  // the shape is part of the question: two different sets of holes can leave
+  // the same number of tiles lit in the same places and are not the same board
   const key = state.tiling.id + '|' + state.wrapping + '|' + state.mode + '|' +
-              state.board.cells.length + '|' + state.lit.join('');
+              state.fullOf.join(',') + '|' + state.lit.join('');
   if (solveMemo && solveMemo.key === key) return pickSolution(solveMemo);
 
   const found = solveFrom();
@@ -2898,12 +3005,16 @@ function drawSizeTicks() {
              : arr[i] === 0 ? `${side}×${side} — unique solution`
              : `${side}×${side} — ${howMany(arr[i])} solutions`;
   });
-  const here = arr[state.size];
+  /* The scan measures whole boards, so once tiles have been taken out it is
+     describing one that is no longer on screen. Measure the board that is. */
+  const cut = state.removed.size > 0;
+  const here = cut ? kernelDim(state.board.cells, state.mode) : arr[state.size];
+  const tail = cut ? ' Marks show the whole board at each size.'
+                   : ' Marks show the sizes that are unique.';
   document.getElementById('kernelNote').textContent =
     here === null ? 'Counting the solutions each size has…'
-    : here === 0 ? 'Every position on this board has a unique solution.'
-    : `Every position on this board has ${howMany(here)} solutions.` +
-      ' Marks show the sizes that are unique.';
+    : here === 0 ? 'Every position on this shape has a unique solution.' + (cut ? tail : '')
+    : `Every position on this shape has ${howMany(here)} solutions.` + tail;
 }
 
 /* =====================================================================
@@ -2933,13 +3044,18 @@ function render() {
   // stay visually proportional at any board size.
   gCells.setAttribute('stroke-width', '0.035');
   const r = 0.15;
-  state.nodes = state.board.cells.map((c, i) => {
+  /* Drawn from the full board, holes included, so a removed tile leaves a dim
+     outline you can put back rather than a gap you cannot reach. Handlers are
+     keyed by the full index and look the live one up when they fire, since
+     renumbering happens under them every time the shape changes. */
+  state.nodes = state.full.cells.map((c, f) => {
     const el = document.createElementNS(SVGNS, 'polygon');
     el.setAttribute('points', ptsAttr(c.poly));
-    el.setAttribute('class', 'cell');
-    el.addEventListener('click', () => press(i));
-    el.addEventListener('pointerenter', () => highlight(i, true));
-    el.addEventListener('pointerleave', () => highlight(i, false));
+    el.setAttribute('class', 'cell' + (state.removed.has(f) ? ' hole' : ''));
+    el.addEventListener('click', () => tileClick(f));
+    el.addEventListener('contextmenu', e => { e.preventDefault(); toggleTile(f); });
+    el.addEventListener('pointerenter', () => highlight(f, true));
+    el.addEventListener('pointerleave', () => highlight(f, false));
     gCells.appendChild(el);
 
     const m = document.createElementNS(SVGNS, 'circle');
@@ -2954,8 +3070,14 @@ function render() {
   });
 }
 
-function highlight(i, on) {
-  for (const j of [i, ...neighbours(i)]) state.nodes[j].cell.classList.toggle('affect', on);
+// takes a full index: what a press would toggle is a fact about the live board,
+// but which shapes on screen to shade is a fact about the full one
+function highlight(f, on) {
+  if (state.editing) return;                   // nothing is about to be pressed
+  const i = state.liveOf[f];
+  if (i < 0) return;
+  for (const j of [i, ...neighbours(i)])
+    state.nodes[state.fullOf[j]].cell.classList.toggle('affect', on);
 }
 
 function refresh() {
@@ -2977,14 +3099,18 @@ function refresh() {
     }
   } else if (sol) shownRank = opt && opt.rank !== undefined ? opt.rank : 0;
 
+  for (const nd of state.nodes) {              // holes carry no state of their own
+    nd.cell.classList.remove('lit', 'glow');
+    nd.mark.style.display = 'none';
+  }
   for (let i = 0; i < n; i++) {
     const on = !!state.lit[i];
     if (on) litCount++;
-    const el = state.nodes[i].cell;
-    el.classList.toggle('lit', on);
-    el.classList.toggle('glow', on);
+    const nd = state.nodes[state.fullOf[i]];
+    nd.cell.classList.toggle('lit', on);
+    nd.cell.classList.toggle('glow', on);
 
-    const mk = state.nodes[i].mark;
+    const mk = nd.mark;
     mk.style.display = ((sol && sol[i]) || i === state.hintCell) ? '' : 'none';
     mk.classList.toggle('hint', i === state.hintCell);
   }
@@ -3005,7 +3131,13 @@ function refresh() {
   /* `presses` counts the solution on screen, which after a few clicks of the
      button need not be the shortest, so the two are reported separately. */
   let text;
-  if (!opt) text = 'This position has no solution.';
+  /* A board cleared by an edit is all off, which is the same thing as solved
+     and would otherwise be announced as a win. Say what it actually is. */
+  if (state.blank) text = state.removed.size
+    ? `${state.removed.size} tile${state.removed.size === 1 ? '' : 's'} removed. ` +
+      'New puzzle deals a position on this shape.'
+    : 'Board restored. New puzzle deals a position on it.';
+  else if (!opt) text = 'This position has no solution.';
   // on the board being out, not on the chosen solution being empty: with quiet
   // patterns about, a solved board still has non-empty press-sets that do nothing
   else if (litCount === 0) text = 'Solved.';
@@ -3037,7 +3169,7 @@ function refresh() {
   document.getElementById('optNote').textContent = text;
 
   const win = document.getElementById('win');
-  win.classList.toggle('show', litCount === 0);
+  win.classList.toggle('show', litCount === 0 && !state.blank);
   if (litCount === 0) {
     document.getElementById('winSub').textContent =
       `${state.tiling.name} · ${n} tiles · solved in ${state.moves} move${state.moves === 1 ? '' : 's'}`;
