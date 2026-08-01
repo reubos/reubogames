@@ -2302,6 +2302,37 @@ function bandLevels(levels, comp) {
   return best;
 }
 
+/* Some tilings come in rosettes — the floret pentagonal is flowers of six, and
+   a flower's outline is the honeycomb shape itself: eighteen corners at two
+   radii, the same figure as a hexagon with six round it. Cutting by the tiles'
+   own centres saws through those flowers, so the board never comes out as one.
+   Measuring from the flower's centre instead moves the six together, and the
+   board is always a whole number of flowers with the honeycomb outline exact.
+
+   The tiles meeting the six-fold centre are one whole repeating cell precisely
+   when the tiling is built this way, which is the test. Of the tilings that get
+   a honeycomb only the floret and the hexagonal are, and the hexagonal is one
+   tile to a cell, so this changes the floret and nothing else. */
+function rosetteAnchors(polys, src, C) {
+  if (!src.v1 || !src.v2) return null;
+  const [a, b] = [src.v1, src.v2];
+  const area = Math.abs(a[0] * b[1] - a[1] * b[0]);
+  const perCell = Math.round(src.density * area);
+  if (perCell < 2) return null;
+  const cent = polys.map(centroidOf);
+  const d = cent.map(c => Math.hypot(c[0] - C[0], c[1] - C[1]));
+  const near = Math.min(...d);
+  if (d.filter(v => v < near + 1e-2).length !== perCell) return null;
+  const det = a[0] * b[1] - a[1] * b[0];
+  const inv = [[b[1] / det, -b[0] / det], [-a[1] / det, a[0] / det]];
+  return cent.map(c => {
+    const x = c[0] - C[0], y = c[1] - C[1];
+    const u = Math.round(inv[0][0] * x + inv[0][1] * y);
+    const w = Math.round(inv[1][0] * x + inv[1][1] * y);
+    return [C[0] + u * a[0] + w * b[0], C[1] + u * a[1] + w * b[1]];
+  });
+}
+
 /* The honeycomb: the tiles whose centres fall in a hexagon about the centre.
 
    This began as rings of the board graph, a step out at a time, which is what
@@ -2318,17 +2349,29 @@ function bandLevels(levels, comp) {
    its hull best is kept. That is also what recovers the classic honeycomb: for
    the hexagonal tiling the turned hexagon gives 1, 7, 19, 37, 61 … exactly, the
    rings the board graph gave. */
-function regionLayers(polys, rim, C) {
+function regionLayers(polys, rim, C, src) {
   const S = Math.PI / 3, dirs = [];
+  const add = x => {
+    let d = x % S;
+    if (d < 0) d += S;
+    for (const y of [d, d + S / 2])
+      if (!dirs.some(u => Math.abs(u - y) < 2e-3 || Math.abs(Math.abs(u - y) - S) < 2e-3))
+        dirs.push(y);
+  };
+  // a rosette tiling is measured from its rosette centres, so they cut whole
+  const anchors = rosetteAnchors(polys, src, C);
+  const cent = anchors || polys.map(centroidOf);
   for (const p of polys) for (let k = 0; k < p.length; k++) {
     const a = p[k], b = p[(k + 1) % p.length];
-    let x = Math.atan2(b[1] - a[1], b[0] - a[0]) % S;
-    if (x < 0) x += S;
-    for (const d of [x, x + S / 2])
-      if (!dirs.some(u => Math.abs(u - d) < 2e-3 || Math.abs(Math.abs(u - d) - S) < 2e-3))
-        dirs.push(d);
+    add(Math.atan2(b[1] - a[1], b[0] - a[0]));
   }
-  const cent = polys.map(centroidOf);
+  /* Cutting whole rosettes splits no tile whatever the angle, so the hexagon is
+     free of the tile edges and should line up with the lattice the rosettes
+     make instead. It matters for a chiral tiling: the floret's edges run at 41°
+     and 71° to that lattice, and off those angles the sizes come out 1, 7, 13,
+     19 flowers — the shells of a hexagon laid crooked — where lining it up gives
+     1, 7, 19, 37, the honeycomb proper. */
+  if (anchors) for (const v of [src.v1, src.v2]) add(Math.atan2(v[1], v[0]));
   let best = null;
   for (const ang of dirs) {
     const N = hexNormals(ang);
@@ -2364,8 +2407,14 @@ function regionLayers(polys, rim, C) {
     const use = band.length >= 3 ? band : levels;
     const order = ord.map(i => polys[i]);
     const sol = solidity(order.slice(0, use[use.length - 1]));
-    if (!best || sol > best.sol)
-      best = { order, levels: thinSizes(use, SHAPE_RINGS), full, sol };
+    /* On a tie the coarser shells win, because a shell that comes in whole is a
+       ring right round and one that comes in halves is not. The floret's flower
+       lattice is the case: laid over at 41° it steps 1, 7, 13, 19 flowers and
+       square on at 30° it steps 1, 7, 19, 37 — the same boards to look at, and
+       the second is the honeycomb. Fewer sizes, but every one of them a ring. */
+    if (!best || sol > best.sol + 1e-3 ||
+        (Math.abs(sol - best.sol) <= 1e-3 && levels.length < best.raw))
+      best = { order, levels: thinSizes(use, SHAPE_RINGS), full, sol, raw: levels.length };
   }
   return best || { order: [], levels: [], full: true, sol: 0 };
 }
@@ -2482,7 +2531,7 @@ function shapePlan(t) {
        radius only estimated: thirteen tilings quietly lost their outer ring. */
     const rim = polys.map(() => false);
     for (const e of topo.edgeMap.values()) if (e.length === 1) rim[e[0]] = true;
-    const comb = regionLayers(polys, rim, C), hex = hexLayers(polys, rim, C);
+    const comb = regionLayers(polys, rim, C, src), hex = hexLayers(polys, rim, C);
     plan = { C, comb, hex };
     // capped means the hexagons ran out at the size limit rather than at the rim
     const capped = !hex || hex.full;
