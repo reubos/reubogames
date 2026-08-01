@@ -350,10 +350,7 @@
 
         <div id="outlineBox" style="display:none">
           <p class="label" style="margin-top:16px">Board shape</p>
-          <div class="seg">
-            <button id="outRect" onclick="setOutline('rect')">Rectangle</button>
-            <button id="outAlt" onclick="setOutline('alt')">Shape</button>
-          </div>
+          <div class="seg" id="outlineSeg"></div>
           <p class="note" id="outlineNote"></p>
         </div>
       </div>
@@ -2068,6 +2065,25 @@ function trianglePatch(src, side) {
   return out;
 }
 
+/* A regular hexagon of side r centred on a vertex of the tiling. Its six edges
+   run along lattice lines, so again nothing straddles the boundary, and the
+   region is six side-r triangles — 6r² of them. */
+function hexRegionPatch(src, r) {
+  const V = [];
+  for (let m = 0; m < 6; m++)
+    V.push([r * Math.cos(m * Math.PI / 3), r * Math.sin(m * Math.PI / 3)]);
+  const inside = p => {
+    for (let m = 0; m < 6; m++) {
+      const a = V[m], b = V[(m + 1) % 6];
+      if ((b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0]) < 0) return false;
+    }
+    return true;
+  };
+  const out = [];
+  for (const p of src.raw(r + 3)) if (inside(centroidOf(p))) out.push(p);
+  return out;
+}
+
 /* Rings of hexagons about a middle one, counted through the tiling's own
    adjacency rather than by measuring — a ring is a step in the board graph,
    which is exactly what the game means by one. */
@@ -2576,7 +2592,7 @@ const state = {
   tiling: TILINGS[1],
   size: 6,                                   // index into BOARD_SIZES; set at boot
   mode: 'edge',
-  outline: 'alt',                              // 'rect', or the tiling's own shape
+  outline: 'tri',                              // 'rect', or a shape key from OUTLINES
   wrap: 'flat',                                // what the player asked for
   wrapping: 'flat',                            // what this board actually does
   canWrap: true,
@@ -3046,7 +3062,7 @@ const kernelCache = new Map();
 let scanTimer = 0;
 
 const configKey = () => state.tiling.id + '|' + state.wrapping + '|' + state.mode +
-                       '|' + (activeOutline() ? 'alt' : 'rect');
+                       '|' + (activeOutline() ? activeOutline().key : 'rect');
 
 function kernelAt(sizeIndex) {
   const t = state.tiling, shape = activeOutline();
@@ -3295,23 +3311,31 @@ function setOutline(v) {
   rebuild();
 }
 
-/* The row appears only for a tiling that has a shape of its own, and the shape
-   is offered only while the board is flat — the wrap buttons and this one are
-   asking the same question from two sides, so one has to give way. */
+/* The row appears only for a tiling that has shapes of its own, and they are
+   offered only while the board is flat — the wrap buttons and these are asking
+   the same question from two sides, so one has to give way. */
 function updateOutlineUI() {
-  const o = OUTLINES[state.tiling.id];
-  document.getElementById('outlineBox').style.display = o ? '' : 'none';
-  if (!o) return;
+  const list = OUTLINES[state.tiling.id];
+  document.getElementById('outlineBox').style.display = list ? '' : 'none';
+  if (!list) return;
   const flat = state.wrap === 'flat';
-  const alt = document.getElementById('outAlt');
-  alt.textContent = o.label;
-  alt.disabled = !flat;
-  alt.classList.toggle('sel', flat && state.outline === 'alt');
-  document.getElementById('outRect').classList.toggle('sel', !(flat && state.outline === 'alt'));
+  const here = activeOutline();
+  const seg = document.getElementById('outlineSeg');
+  const want = ['rect', ...list.map(o => o.key)].join(',');
+  if (seg.dataset.keys !== want) {                 // only rebuild when it changes
+    seg.dataset.keys = want;
+    seg.innerHTML = `<button onclick="setOutline('rect')">Rectangle</button>` +
+      list.map(o => `<button onclick="setOutline('${o.key}')">${o.label}</button>`).join('');
+  }
+  [...seg.children].forEach((b, i) => {
+    const key = i === 0 ? 'rect' : list[i - 1].key;
+    b.disabled = i > 0 && !flat;
+    b.classList.toggle('sel', here ? here.key === key : key === 'rect');
+  });
   document.getElementById('outlineNote').textContent = !flat
-    ? `${o.label} boards cannot be wrapped — a rectangle is the only shape that repeats.`
-    : state.outline === 'alt'
-      ? `Sizes are whole ${o.label.toLowerCase()}s, so the slider steps through the ${o.unit} count.`
+    ? 'Only a rectangle repeats, so only a rectangle can be wrapped.'
+    : here
+      ? `Sizes are whole ${here.label.toLowerCase()}s, so the slider steps through the ${here.unit} count.`
       : 'A rectangle cut from the tiling, the same as every other board.';
   const slider = document.getElementById('sizeSlider');
   slider.max = sizeList().length - 1;
@@ -3390,20 +3414,30 @@ for (let k = 2; k <= 17; k++) BOARD_SIZES.push(k * k);
    domain, so both are offered only while the board is flat; the rectangle
    stays available everywhere and is what cylinder and torus always use. */
 const OUTLINES = {
-  triangle: { label: 'Triangle',  unit: 'side',
-              params: Array.from({ length: 16 }, (_, i) => i + 2),
-              tiles: k => k * k,
-              build: (src, k) => trianglePatch(src, k) },
-  hexagon:  { label: 'Honeycomb', unit: 'rings',
-              params: Array.from({ length: 9 }, (_, i) => i + 1),
-              tiles: r => 1 + 3 * r * (r + 1),
-              build: (src, r) => honeycombPatch(src, r) }
+  triangle: [
+    { key: 'tri', label: 'Triangle', unit: 'side',
+      params: Array.from({ length: 16 }, (_, i) => i + 2),
+      tiles: k => k * k,
+      build: (src, k) => trianglePatch(src, k) },
+    // six side-r triangles round a vertex, so 6r^2 of them
+    { key: 'hex', label: 'Hexagon', unit: 'side',
+      params: Array.from({ length: 7 }, (_, i) => i + 1),
+      tiles: r => 6 * r * r,
+      build: (src, r) => hexRegionPatch(src, r) }
+  ],
+  hexagon: [
+    { key: 'comb', label: 'Honeycomb', unit: 'rings',
+      params: Array.from({ length: 9 }, (_, i) => i + 1),
+      tiles: r => 1 + 3 * r * (r + 1),
+      build: (src, r) => honeycombPatch(src, r) }
+  ]
 };
 
 // the shaped outline in force right now, or null for the rectangle
 function activeOutline() {
-  const o = OUTLINES[state.tiling.id];
-  return (o && state.outline === 'alt' && state.wrap === 'flat') ? o : null;
+  const list = OUTLINES[state.tiling.id];
+  if (!list || state.wrap !== 'flat') return null;
+  return list.find(o => o.key === state.outline) || null;
 }
 function sizeList() {
   const o = activeOutline();
