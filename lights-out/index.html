@@ -362,6 +362,11 @@
           <button onclick="restart()">Restart</button>
           <button id="solveBtn" onclick="toggleSolution()">Solution</button>
         </div>
+        <div class="stat-grid" style="margin-top:14px">
+          <div class="stat"><div class="v" id="statMoves">0</div><div class="k">Moves</div></div>
+          <div class="stat"><div class="v" id="statLit">0</div><div class="k">Lit</div></div>
+        </div>
+        <p class="note" id="optNote"></p>
         <p class="label" style="margin-top:16px">Shape</p>
         <div class="btn-row">
           <button id="editBtn" onclick="toggleEditing()"
@@ -373,11 +378,6 @@
            on a hole puts back. Removing clears the lights; New puzzle deals a
            position on the shape you have made. Changing tiling, size or edges
            starts it over.</p>
-        <div class="stat-grid" style="margin-top:14px">
-          <div class="stat"><div class="v" id="statMoves">0</div><div class="k">Moves</div></div>
-          <div class="stat"><div class="v" id="statLit">0</div><div class="k">Lit</div></div>
-        </div>
-        <p class="note" id="optNote"></p>
       </div>
 
     </div>
