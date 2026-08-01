@@ -60,6 +60,8 @@
   /* A removed tile is still drawn, faintly, so the hole can be clicked back.
      It takes no other state — never lit, never shaded as a neighbour. */
   .cell.hole { fill: transparent; stroke: #2a4a30; stroke-dasharray: 0.12 0.12; }
+  /* a drag across the board has to paint tiles rather than scroll the page */
+  #board.editing { touch-action: none; }
   #board.editing .cell { cursor: crosshair; }
   #board.editing .cell:hover { stroke: var(--gold); stroke-width: 0.09; }
   /* preview of what a press would toggle: the tile under the cursor and its
@@ -365,8 +367,10 @@
           <button id="resetShapeBtn" onclick="resetShape()">Reset shape</button>
         </div>
         <p class="note">Right-click a tile to remove it, or turn on Edit shape and
-           tap. Removing clears the lights — New puzzle deals a position on the
-           shape you have made. Changing tiling, size or edges starts it over.</p>
+           drag across as many as you like — starting on a tile removes, starting
+           on a hole puts back. Removing clears the lights; New puzzle deals a
+           position on the shape you have made. Changing tiling, size or edges
+           starts it over.</p>
         <div class="stat-grid" style="margin-top:14px">
           <div class="stat"><div class="v" id="statMoves">0</div><div class="k">Moves</div></div>
           <div class="stat"><div class="v" id="statLit">0</div><div class="k">Lit</div></div>
@@ -2526,7 +2530,8 @@ const state = {
   liveOf: null,                                // full index -> live index, or -1
   fullOf: null,                                // live index -> full index
   editing: false,
-  blank: false                                 // cleared by an edit, awaiting a deal
+  blank: false,                                // cleared by an edit, awaiting a deal
+  paint: null                                  // a drag in progress, and which way
 };
 
 function neighbours(i) {
@@ -2598,7 +2603,40 @@ function resetShape() {
 
 function toggleEditing() {
   state.editing = !state.editing;
+  // whatever a press was about to toggle is no longer the question
+  for (const nd of state.nodes) nd.cell.classList.remove('affect');
   updateShapeUI();
+}
+
+/* Dragging paints rather than toggles: which way it goes is settled by the
+   tile it starts on, so running back over your own path does not undo it and a
+   stroke that crosses itself still reads as one stroke.
+
+   Only the outline changes while the drag runs. Cutting a tile properly means
+   renumbering the board and redrawing it, which would destroy the element the
+   pointer is over and with it the events the rest of the stroke depends on —
+   so the board is rebuilt once, when the drag ends. */
+function startPaint(f) {
+  state.paint = { removing: !state.removed.has(f), touched: false };
+  paintTile(f);
+  addEventListener('pointerup', endPaint, { once: true });
+  addEventListener('pointercancel', endPaint, { once: true });
+}
+
+function paintTile(f) {
+  const p = state.paint;
+  if (!p || p.removing === state.removed.has(f)) return;
+  if (p.removing && state.removed.size >= state.full.cells.length - 1) return;
+  if (p.removing) state.removed.add(f); else state.removed.delete(f);
+  state.nodes[f].cell.classList.toggle('hole', p.removing);
+  p.touched = true;
+  updateShapeUI();
+}
+
+function endPaint() {
+  const p = state.paint;
+  state.paint = null;
+  if (p && p.touched) shapeChanged();
 }
 
 function updateShapeUI() {
@@ -2607,9 +2645,10 @@ function updateShapeUI() {
   document.getElementById('board').classList.toggle('editing', state.editing);
 }
 
-// a click on a tile means press, or cut, depending on the mode the board is in
+// In edit mode the cut already happened on pointerdown, so that a stroke and a
+// single tap are the same gesture with different lengths.
 function tileClick(f) {
-  if (state.editing) { toggleTile(f); return; }
+  if (state.editing) return;
   const i = state.liveOf[f];
   if (i >= 0) press(i);
 }
@@ -3054,8 +3093,15 @@ function render() {
     el.setAttribute('class', 'cell' + (state.removed.has(f) ? ' hole' : ''));
     el.addEventListener('click', () => tileClick(f));
     el.addEventListener('contextmenu', e => { e.preventDefault(); toggleTile(f); });
-    el.addEventListener('pointerenter', () => highlight(f, true));
-    el.addEventListener('pointerleave', () => highlight(f, false));
+    el.addEventListener('pointerdown', e => {
+      if (!state.editing || e.button === 2) return;   // right-click cuts on its own
+      e.preventDefault();                             // no text selection, no drag image
+      startPaint(f);
+    });
+    el.addEventListener('pointerenter', () => {
+      if (state.paint) paintTile(f); else highlight(f, true);
+    });
+    el.addEventListener('pointerleave', () => { if (!state.paint) highlight(f, false); });
     gCells.appendChild(el);
 
     const m = document.createElementNS(SVGNS, 'circle');
