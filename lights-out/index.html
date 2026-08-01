@@ -2266,7 +2266,15 @@ function hexLayers(polys, rim, C) {
       if (Math.abs(cum - want) > HEX_FILL * want) continue;               // does not fill it
       counts.push(i + 1);
     }
-    if (counts.length && (!best || counts.length > best.counts.length))
+    /* Most sizes wins, and on a tie the one whose boards go largest. Counting
+       alone is decided by the size limit rather than by the tiling: the kite and
+       right trapezium tiling has a direction giving 6 and 18 and stopping there,
+       and another giving 54k² for ever, and both show two sizes under the limit.
+       Reaching further is what tells the endless family from the dead end. */
+    const better = !best || counts.length > best.counts.length ||
+      (counts.length === best.counts.length &&
+       counts[counts.length - 1] > best.counts[best.counts.length - 1]);
+    if (counts.length && better)
       best = { order: ord.map(i => polys[i]), counts, full };
   }
   return best;
