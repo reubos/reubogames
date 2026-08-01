@@ -2195,12 +2195,12 @@ function trianglePatch(src, side) {
 }
 
 /* The tilings that fill such a triangle exactly, and how many of their tiles go
-   in one triangle of the lattice. All three are the triangular tiling or a
-   subdivision of it — triakis cuts each triangle in three about its centre,
-   kisrhombille in six — so the lattice lines survive as chains of tile edges and
-   the cut falls between tiles rather than through them. Checked at every size
+   in one triangle of the lattice. Each carries the triangular lattice's lines as
+   chains of its own tile edges — triakis cuts each triangle in three about its
+   centre, kisrhombille in six, the kites and right trapeziums in nine — so the
+   cut falls between tiles rather than through them. Checked at every size
    against the area of the triangle, which the tiles come to exactly. */
-const TRIANGLE_BOARDS = { triangle: 1, triakis: 3, kisrhombille: 6 };
+const TRIANGLE_BOARDS = { triangle: 1, triakis: 3, kisrhombille: 6, n5d: 9 };
 
 /* Tilings built by attaching one tile to the next accumulate about 5e-4 of
    drift across a patch this size, so points that ought to coincide have to be
@@ -2592,7 +2592,18 @@ function hexLayers(polys, rim, C) {
    not the boards themselves. Below four sizes that is a poor trade, and at one
    it is no choice at all. */
 const HEX_MIN_SIZES = 4;
-const hexUsable = hex => !!hex && hex.counts.length >= HEX_MIN_SIZES;
+
+/* Counting sizes is a rough test and it undersells a tiling whose hexagons are
+   genuinely a family cut short by the size limit. The kites and right trapeziums
+   go 54 and 216, which is 54k² and would carry on to 486 were there room, so two
+   is all the limit allows rather than all the tiling has. Named here rather than
+   made a rule, because no rule drawn tight enough to catch this one leaves the
+   rest alone: asking for c·k² would revive the single-size hexagons and would
+   drop the trihexagonal's 19, 55, 109, 181, 271, 379, which is a family by any
+   reading but not that one. */
+const HEX_ANYWAY = new Set(['n5d']);
+const hexUsable = (hex, id) =>
+  !!hex && (hex.counts.length >= HEX_MIN_SIZES || HEX_ANYWAY.has(id));
 
 /* One patch per tiling answers everything: where the centre is, what the
    honeycomb holds and which hexagons close up. Holding on to it makes every size
@@ -2639,7 +2650,7 @@ function shapePlan(t) {
     const capped = !hex || hex.full;
     if (!capped && hex.counts.length < HEX_MIN_SIZES && attempt === 0) continue;
     const climbing = !capped && hex.counts[hex.counts.length - 1] > SHAPE_TILES / 3;
-    if (hexUsable(hex) ? !climbing : comb.full) break;
+    if (hexUsable(hex, t.id) ? !climbing : comb.full) break;
   }
   shapeCache.set(t.id, plan);
   return plan;
@@ -3989,7 +4000,7 @@ function outlinesFor(t) {
        be cut it is the better shape, straight sided where the honeycomb is
        ragged, and the two would only be the same idea drawn twice. So it is
        kept for the tilings that admit no usable hexagon. */
-    if (plan && hexUsable(plan.hex)) {
+    if (plan && hexUsable(plan.hex, t.id)) {
       const hex = plan.hex;
       list.push({
         key: 'hex', label: 'Hexagon', unit: 'bands',
@@ -4734,10 +4745,10 @@ const BOARD_REGISTRY = 165;                  // the registry this was taken from
 const RECT_ONLY = ['rect'];
 const BOARD_SHAPES = {};
 for (const [keys, ids] of [
-  ['tri hex', 'triangle triakis kisrhombille'],
+  ['tri hex', 'triangle triakis kisrhombille n5d'],
   ['hex', 'trihex deltoidal n10 n19 n20 n1d k43 k58 k42 k59 k60 k4d k7d'],
   ['comb', 'hexagon truncHex rhombitrihex truncTrihex snubTrihex rhombille floret ' +
-           'n18 n8 n9 n5 n13 n1 n18d n19d n20d n8d n9d n10d n13d n5d ' +
+           'n18 n8 n9 n5 n13 n1 n18d n19d n20d n8d n9d n10d n13d ' +
            'k57 k54 k4 k1 fcb k24 k36 k26 k47 k7 k5 ' +
            'fcbd k26d k58d k59d k60d k1d k5d k24d k36d k43d k42d k47d k54d k57d']
 ]) for (const id of ids.split(' ')) BOARD_SHAPES[id] = keys.split(' ');
