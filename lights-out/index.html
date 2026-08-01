@@ -2245,12 +2245,30 @@ function trianglePatch(src, tri, k) {
    usually to turn the triangle over rather than to throw the run away. Pinned by
    a base corner the apex is O + b·s, a fresh spot at every size: Kites and
    Triangles 2 alternated a kite and a triangle at the point, Hexagons and
-   Triangles 14 a hexagon and a triangle. Pinning the apex instead leaves the
-   same triangles — the same counts, the same sides — with the top of the board
-   standing still and each size the last one with a row joined along the bottom.
+   Triangles 14 a hexagon and a triangle, Kites, Quadrilaterals and Triangles 2 a
+   kite alone and then a kite beside a triangle. Pinning the apex instead leaves
+   the same triangles — the same counts, the same sides — with the top of the
+   board standing still and each size the last one with a row joined along the
+   bottom.
+
+   Which corner is pinned is a choice too, and where the tiling offers several
+   the one to take is the corner that reads as a corner. Kisrhombille and Kites
+   and Triangles 2 are pinned on a vertex where two triangles meet, so the point
+   of the board is a triangle split down the middle rather than one tile with the
+   next tucked in behind it; Kites, Quadrilaterals and Triangles 2 on the one
+   that gives a kite, two quadrilaterals under it and a triangle under those.
+   Hexagons and Triangles 4 wanted a different run as well as a different corner:
+   the sides go 1, 3, 4, 6, 7, ... , two runs of step three interleaved, and the
+   one through 3 gives 4, 21, 51, 94 with a hexagon directly under the point,
+   where the old 20, 49, 91 was triangles the whole way down the middle.
    Hexagons and Triangles 15 was the one that needed a different run altogether,
    its old one going 20, 39, 66 with a hexagon under the point and then a
    triangle twice.
+
+   Where a run reaches is a matter of how far it was looked for, not of the
+   tiling: Kites and Right Trapeziums 1 was written down as far as 144 because
+   the patch searched stopped there, and it goes on to 324 within the same
+   400-tile ceiling.
 
    Checked by cutting and requiring
    that no tile crosses the boundary and that the tiles come to the triangle's
@@ -2268,8 +2286,8 @@ const TRIANGLE_BOARDS = {
   triakis: { O: [-3.7321, 0], u: [1, 0], w: [0.5, 0.866025],
     sides: [3.7321, 7.4641, 11.1962, 14.9282, 18.6603, 22.3923, 26.1244, 29.8564, 33.5885, 37.3205, 41.0526],
     tiles: [3, 12, 27, 48, 75, 108, 147, 192, 243, 300, 363] },
-  kisrhombille: { O: [-4.7321, 0], u: [0.866025, 0.500001], w: [-0.000001, 1],
-    sides: [2.7321, 5.4641, 8.1962, 10.9282, 13.6603, 16.3923, 19.1244, 21.8564, 24.5885, 27.3205, 30.0526, 32.7846, 35.5167, 38.2487],
+  kisrhombille: { O: [0, 0], u: [0.866025, 0.5], w: [0, 1], apex: 1,
+    sides: [2.7321, 5.4642, 8.1963, 10.9284, 13.6605, 16.3926, 19.1247, 21.8568, 24.5889, 27.321, 30.0531, 32.7852, 35.5173, 38.2494],
     tiles: [2, 8, 18, 32, 50, 72, 98, 128, 162, 200, 242, 288, 338, 392] },
   deltoidal: { O: [-2.366, -1.366], u: [0.866025, 0.500001], w: [-0.000001, 1],
     sides: [2.7321, 5.4641, 8.1962, 10.9282, 13.6603, 16.3923, 19.1244, 21.8564, 24.5885, 27.3205, 30.0526],
@@ -2277,14 +2295,15 @@ const TRIANGLE_BOARDS = {
   n10: { O: [1.276, -3.0625], u: [1, 0], w: [0.5, 0.866025],
     sides: [3, 6, 9, 12, 15, 18, 21, 24, 27],
     tiles: [4, 16, 36, 64, 100, 144, 196, 256, 324] },
-  n19: { O: [-0.4148, 3.2312], u: [1, 0], w: [0.5, 0.866025],
-    sides: [5, 8, 11, 14, 17, 20, 23],
-    tiles: [20, 49, 91, 146, 214, 295, 389] },
+  n19: { O: [0.0852, 0.6331], u: [1, 0.000001], w: [0.500001, -0.866025], apex: 1,
+    sides: [3.0001, 6.0001, 9.0001, 12.0001, 15.0001, 18.0001, 21.0001, 24.0001],
+    tiles: [4, 21, 51, 94, 150, 219, 301, 396] },
   n5d: { O: [4.4366, -1.5368], u: [1, 0], w: [0.5, 0.866025],
-    sides: [4.7321, 9.4642, 14.1963, 18.9284], tiles: [9, 36, 81, 144] },
-  n1d: { O: [-4.826, 2.7912], u: [-0.499994, -0.866029], w: [-1, -0.000007], apex: 1,
-    sides: [5.4642, 8.1963, 10.9284, 13.6605, 16.3926, 19.1247, 21.8568, 24.5889, 27.321, 30.0531, 32.7852],
-    tiles: [9, 20, 36, 56, 81, 110, 144, 182, 225, 272, 324] },
+    sides: [4.7321, 9.4642, 14.1963, 18.9284, 23.6605, 28.3926],
+    tiles: [9, 36, 81, 144, 225, 324] },
+  n1d: { O: [-0.728, 0.4251], u: [1, 0], w: [0.5, 0.866025], apex: 1,
+    sides: [5.4642, 8.1963, 10.9284, 13.6605, 16.3926, 19.1247, 21.8568, 24.5889, 27.321, 30.0531, 32.7852, 35.5173],
+    tiles: [9, 20, 36, 56, 81, 110, 144, 182, 225, 272, 324, 380] },
   k43: { O: [-3.3403, -1.2143], u: [-0.866028, 0.499995], w: [-0.866022, -0.500005], apex: 1,
     sides: [3.0001, 5.0001, 7.0001, 9.0001, 11.0001, 13.0001, 15.0001, 17.0001, 19.0001, 21.0001, 23.0001, 25.0001],
     tiles: [4, 15, 29, 46, 71, 99, 130, 169, 211, 256, 309, 365] },
@@ -2297,9 +2316,9 @@ const TRIANGLE_BOARDS = {
     sides: [4, 8, 12, 16, 20], tiles: [11, 49, 114, 206, 325] },
   k4d: { O: [1.0585, -1.8333], u: [-1, -0.000007], w: [-0.499994, -0.866029],
     sides: [5.1961, 8.6602, 12.1243, 15.5884, 19.0525], tiles: [10, 28, 55, 91, 136] },
-  k7d: { O: [1.866, -3.5399], u: [-0.500004, 0.866023], w: [-1, -0.000005],
-    sides: [3.7321, 7.4641, 11.1961, 14.9282, 18.6602, 22.3922, 26.1243],
-    tiles: [4, 16, 36, 64, 100, 144, 196] }
+  k7d: { O: [0, -0.3078], u: [1, 0], w: [0.5, 0.866025], apex: 1,
+    sides: [3.7321, 7.4642, 11.1963, 14.9284, 18.6605, 22.3926, 26.1247, 29.8568, 33.5889, 37.321],
+    tiles: [4, 16, 36, 64, 100, 144, 196, 256, 324, 400] }
 };
 
 /* Tilings built by attaching one tile to the next accumulate about 5e-4 of
