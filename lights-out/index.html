@@ -2275,6 +2275,13 @@ function hexLayers(polys, rim, C) {
 /* One patch per tiling answers everything: where the centre is, what the rings
    hold and which hexagons close up. Holding on to it makes every size after the
    first free, which matters because the solution-count scan builds them all. */
+/* A hexagon has to come in more than one size to be worth offering: a slider
+   that cannot move is no choice at all. Fifteen tilings close up at exactly one
+   radius and no other, nine of them a board of six or seven tiles, where the
+   honeycomb runs to ten sizes or more — and in several of those the honeycomb's
+   first ring is that same board, so nothing is given up by preferring it. */
+const hexUsable = hex => !!hex && hex.counts.length > 1;
+
 const shapeCache = new Map();
 function shapePlan(t) {
   if (shapeCache.has(t.id)) return shapeCache.get(t.id);
@@ -2306,7 +2313,7 @@ function shapePlan(t) {
     plan = { C, rings: rings.layers, hex };
     const climbing = hex && !hex.full &&
                      hex.counts[hex.counts.length - 1] > SHAPE_TILES / 3;
-    if (hex ? !climbing : rings.full) break;
+    if (hexUsable(hex) ? !climbing : rings.full) break;
   }
   shapeCache.set(t.id, plan);
   return plan;
@@ -3646,8 +3653,8 @@ function outlinesFor(t) {
     /* The honeycomb is the fallback, not a second offering: where a hexagon can
        be cut it is the better shape, straight sided where the honeycomb is
        ragged, and the two would only be the same idea drawn twice. So it is
-       kept for the ten tilings that admit no hexagon at all. */
-    if (plan && plan.hex) {
+       kept for the tilings that admit no usable hexagon. */
+    if (plan && hexUsable(plan.hex)) {
       const hex = plan.hex;
       list.push({
         key: 'hex', label: 'Hexagon', unit: 'bands',
