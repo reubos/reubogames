@@ -426,10 +426,7 @@
           <div class="chips" id="ffaces"></div></details>
         <details class="fmore"><summary>Wallpaper groups<span class="badge" id="badgeGroups"></span></summary>
           <div class="chips" id="fgroups"></div></details>
-        <!-- Working out which shapes a tiling can be cut to means building a
-             patch of each, so it is left until someone opens this. -->
-        <details class="fmore" ontoggle="if (this.open) startBoardScan()">
-          <summary>Board shapes<span class="badge" id="badgeBoards"></span></summary>
+        <details class="fmore"><summary>Board shapes<span class="badge" id="badgeBoards"></span></summary>
           <div class="chips" id="fboards"></div></details>
         <details class="fmore"><summary>Orbit counts<span class="badge" id="badgeOrbits"></span></summary>
           <div class="orow"><span class="olab">Vertices <i>v</i></span><div class="chips" id="forbv"></div></div>
@@ -2281,18 +2278,28 @@ function thinSizes(levels, want) {
    A tiling of one kind of tile cannot have the problem and is left alone, and
    so is one where the rule would leave too few sizes to play with. */
 function bandLevels(levels, comp) {
-  const keep = [], kept = [];
-  for (let i = 0; i < levels.length; i++) {
-    const last = kept[kept.length - 1];
-    if (last) {
-      let grew = true;
-      for (const [k, n] of last) if ((comp[i].get(k) || 0) <= n) { grew = false; break; }
-      if (!grew) continue;
+  /* The biggest tile is what the eye counts across, so that is what has to grow:
+     a step that only sweeps up small tiles from the fringe is the same board
+     again. Asking every kind to grow says nearly the same thing and is stricter
+     for no gain — the two agree on all but one tiling, where this gives the
+     extra size — and it reads as what it is.
+
+     Where the run starts decides how many follow, so every start is tried and
+     the longest kept, the earliest of them if two tie. */
+  const big = Math.max(...comp[comp.length - 1].keys());
+  let best = [];
+  for (let s = 0; s < levels.length; s++) {
+    const keep = [], kept = [];
+    for (let i = s; i < levels.length; i++) {
+      const last = kept[kept.length - 1];
+      if (last && (comp[i].get(big) || 0) <= (last.get(big) || 0)) continue;
+      keep.push(levels[i]);
+      kept.push(comp[i]);
     }
-    keep.push(levels[i]);
-    kept.push(comp[i]);
+    if (keep.length > best.length ||
+        (keep.length === best.length && keep.length && keep[0] < best[0])) best = keep;
   }
-  return keep;
+  return best;
 }
 
 /* The honeycomb: the tiles whose centres fall in a hexagon about the centre.
@@ -2347,8 +2354,14 @@ function regionLayers(polys, rim, C) {
       comp.push(new Map(run));
     }
     if (!levels.length) continue;
+    /* Consistency is worth more than choice, so the banded run is taken even
+       when it is much the shorter: the dodecagon tilings come down to three or
+       four sizes where the raw levels offer a dozen — but a dozen of which half
+       repeat the one before. Only where banding leaves too few to be a range at
+       all does the raw list stand, which is a fact about those tilings: their
+       dodecagons are so far apart that two shells is all that fits. */
     const band = bandLevels(levels, comp);
-    const use = band.length >= 4 ? band : levels;
+    const use = band.length >= 3 ? band : levels;
     const order = ord.map(i => polys[i]);
     const sol = solidity(order.slice(0, use[use.length - 1]));
     if (!best || sol > best.sol)
@@ -4517,56 +4530,54 @@ function allOrbits(k) {
   return [...n.entries()].sort((a, b) => a[0] - b[0]);
 }
 
-/* Which shapes a tiling can be cut to. Deriving that means building a patch and
-   hunting for the six-fold centre, twenty-odd seconds over the whole registry,
-   so it waits until the facet is opened and then runs in slices like the
-   symmetry scan. Only the keys are wanted here, and they are all that is kept:
-   the plans behind them hold thousands of polygons apiece, so they are dropped
-   as they are read and rebuilt if the tiling is actually chosen. */
+/* Which shapes each tiling can be cut to. Deriving it means building a patch and
+   hunting the six-fold centre for every one of them, twenty-odd seconds, which
+   is far too much to spend on a filter — so it is worked out once and written
+   down. Every tiling not named here takes the rectangle and nothing else, which
+   is the great majority and not worth listing.
+
+   checkBoards() in the console derives the lot and reports any disagreement, so
+   the table can be trusted to have kept up with the shapes it describes. */
 const BOARD_LABEL = { rect: 'Rectangle only', tri: 'Triangle',
                       hex: 'Hexagon', comb: 'Honeycomb' };
-const boardCache = new Map();
-let boardQueue = null, boardsReady = false, boardScanning = false;
+const BOARD_REGISTRY = 165;                  // the registry this was taken from
+const RECT_ONLY = ['rect'];
+const BOARD_SHAPES = {};
+for (const [keys, ids] of [
+  ['tri hex', 'triangle triakis kisrhombille'],
+  ['hex', 'trihex deltoidal n10 n19 n20 n1d k43 k58 k42 k59 k60 k4d k7d'],
+  ['comb', 'hexagon truncHex rhombitrihex truncTrihex snubTrihex rhombille floret ' +
+           'n18 n8 n9 n5 n13 n1 n18d n19d n20d n8d n9d n10d n13d n5d ' +
+           'k57 k54 k4 k1 fcb k24 k36 k26 k47 k7 k5 ' +
+           'fcbd k26d k58d k59d k60d k1d k5d k24d k36d k43d k42d k47d k54d k57d']
+]) for (const id of ids.split(' ')) BOARD_SHAPES[id] = keys.split(' ');
 
+const boardCache = new Map();
 function boardKeys(t) {
+  if (BOARD_SHAPES[t.id]) return BOARD_SHAPES[t.id];
+  // an unlisted tiling in the registry the table was taken from has no shapes;
+  // in any other registry the table cannot be trusted, so derive it
+  if (TILINGS.length === BOARD_REGISTRY) return RECT_ONLY;
   if (!boardCache.has(t.id)) {
     const keys = (outlinesFor(t) || []).map(o => o.key);
-    boardCache.set(t.id, keys.length ? keys : ['rect']);
-    if (t !== state.tiling) { shapeCache.delete(t.id); outlineCache.delete(t.id); }
+    boardCache.set(t.id, keys.length ? keys : RECT_ONLY);
   }
   return boardCache.get(t.id);
 }
 
-function startBoardScan() {
-  if (boardsReady || boardScanning) return;
-  boardScanning = true;
-  scanBoards();
-}
-function scanBoards() {
-  if (!symReady) { setTimeout(scanBoards, 200); return; }   // it reads the groups
-  if (!boardQueue) boardQueue = TILINGS.filter(t => !boardCache.has(t.id));
-  const until = performance.now() + 25;
-  while (boardQueue.length && performance.now() < until) boardKeys(boardQueue.shift());
-  if (boardQueue.length) { setTimeout(scanBoards, 0); return; }
-  boardsReady = true;
-  saveBoardCache();
-  if (pickerOpen()) refilter();
-}
-function loadBoardCache() {
-  try {
-    const raw = JSON.parse(localStorage.getItem('lightsout.boards') || 'null');
-    if (raw && raw.version === SYM_VERSION && raw.count === TILINGS.length) {
-      for (const [k, v] of Object.entries(raw.data)) boardCache.set(k, v);
-      boardsReady = true;
-    }
-  } catch (e) {}
-}
-function saveBoardCache() {
-  try {
-    localStorage.setItem('lightsout.boards', JSON.stringify(
-      { version: SYM_VERSION, count: TILINGS.length,
-        data: Object.fromEntries(boardCache) }));
-  } catch (e) {}
+// derives every tiling's shapes and checks the table against them
+function checkBoards() {
+  const wrong = [];
+  for (const t of TILINGS) {
+    const keys = (outlinesFor(t) || []).map(o => o.key);
+    const want = keys.length ? keys : RECT_ONLY;
+    const got = BOARD_SHAPES[t.id] || RECT_ONLY;
+    if (want.join(' ') !== got.join(' '))
+      wrong.push(`${t.id}: table says ${got.join('+')}, derives ${want.join('+')}`);
+    // the plans are thousands of polygons apiece; only the current one is kept
+    if (t !== state.tiling) { shapeCache.delete(t.id); outlineCache.delete(t.id); }
+  }
+  return wrong.length ? wrong : `all ${TILINGS.length} agree`;
 }
 
 function allBoards() {
@@ -4684,8 +4695,7 @@ function renderFilters() {
   pickList('ftypes', types.filter(([k]) => !isFace(k)), filters.types, shapesReady);
   pickList('ffaces', types.filter(([k]) => isFace(k)), filters.types, shapesReady);
   pickList('fgroups', symReady ? allGroups() : [], filters.groups, symReady);
-  pickList('fboards', boardsReady ? allBoards() : [], filters.boards, boardsReady,
-           k => BOARD_LABEL[k]);
+  pickList('fboards', allBoards(), filters.boards, true, k => BOARD_LABEL[k]);
   for (const k of ORBIT_KEYS) {
     pickList('forb' + k, symReady ? allOrbits(k) : [], filters.orbits[k], symReady);
   }
@@ -4886,7 +4896,6 @@ document.getElementById('fmain').open = filters.shown;
 
 setTimeout(scanShapes, 200);           // indexes the shapes, warming the previews
 loadSymCache();
-loadBoardCache();
 setTimeout(scanSymmetry, 400);         // derives the groups and orbits, once per browser
 </script>
 </body>
