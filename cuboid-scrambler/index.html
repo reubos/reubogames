@@ -206,7 +206,7 @@
       input[type="number"], .slider-num { background: #2a2a28; border-color: #444; color: #e8e8e4; }
       button { background: #2a2a28; border-color: #444; color: #e8e8e4; }
       button:hover { background: #333330; }
-      label, .phase-label, .scramble-header span, .slider-row span { color: #999; }
+      label, .phase-label, .scramble-header span, .slider-row span, #outside-numbering-note { color: #999; }
       .phase-label strong { color: #e8e8e4; }
       .move { background: #2a2a28; border-color: #444; color: #e8e8e4; }
       .move.qt { background: #0c2a44; border-color: #185fa5; color: #78b4e8; }
@@ -249,7 +249,12 @@
         <input type="checkbox" id="efficient-toggle" onchange="clearScramble()">
         Efficient mode
       </label>
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;user-select:none;" title="Layer numbers count distance from the outside of each axis's own full size, never renumbered per phase, instead of the current reduction's movable layers. Not currently combined with efficient mode.">
+        <input type="checkbox" id="outside-numbering-toggle" onchange="clearScramble()">
+        Outside-numbered layers
+      </label>
     </div>
+    <div id="outside-numbering-note" style="display:none;font-size:12px;color:#666;margin-top:-6px;margin-bottom:8px;"></div>
 
     <div id="out"></div>
   </div>
@@ -427,9 +432,104 @@
       return pool;
     }
     function isWide() { return document.getElementById('wide-toggle').checked; }
-    function moveStr(face, layer, mod) {
-      const w = layer > 1 && isWide();
+    // mandatoryWide (if passed) forces the "w" flag regardless of the wide
+    // toggle -- used for outside-numbered layers whose own group is
+    // genuinely bandaged (no single-slice interpretation is physically valid).
+    function moveStr(face, layer, mod, mandatoryWide) {
+      const w = layer > 1 && (mandatoryWide || isWide());
       return (layer > 1 ? String(layer) : '') + face + (w ? 'w' : '') + mod;
+    }
+    function isOutsideNumbered() { return document.getElementById('outside-numbering-toggle').checked; }
+
+    // ---- minimal cubie engine (position + functional coordinate only) ----
+    // Needed to detect outside-numbered layers whose true physical width has
+    // been inflated by rotation history: fc merges on whichever axis is being
+    // reduced at a given phase, and a LATER rotation on a DIFFERENT axis can
+    // import that already-merged group via a 90-degree swap, even onto an
+    // axis that never reduced on its own. This is a runtime property of the
+    // actual rotation sequence, not derivable from a static formula, so a
+    // real (if minimal -- no orientation/stickers needed, nothing here is
+    // rendered as cubies) simulation is required.
+    const AXIS = { R:'x', L:'x', U:'y', D:'y', F:'z', B:'z' };
+    const IDX = { x:0, y:1, z:2 };
+    const POSITIVE = new Set(['R','U','F']);
+    function baseSign(f) { return POSITIVE.has(f) ? -1 : 1; }
+    const P = { x:[[1,0,0],[0,0,-1],[0,1,0]], y:[[0,0,1],[0,1,0],[-1,0,0]], z:[[0,-1,0],[1,0,0],[0,0,1]] };
+    function transpose(M) { return [0,1,2].map(i => [M[0][i],M[1][i],M[2][i]]); }
+    function matVec(M,v) { return [0,1,2].map(i => M[i][0]*v[0]+M[i][1]*v[1]+M[i][2]*v[2]); }
+    function matMul(A,B) { const Bt=transpose(B); return A.map(row => Bt.map(col => row[0]*col[0]+row[1]*col[1]+row[2]*col[2])); }
+    function matPow(M,e) { return e===1 ? M : e===-1 ? transpose(M) : matMul(M,M); }
+    function span(n) { return Array.from({length:n}, (_,i) => -(n-1)+2*i); }
+    function buildFC(w,h,d) {
+      const cubies=[];
+      for (const x of span(w)) for (const y of span(h)) for (const z of span(d)) cubies.push({ pos:[x,y,z], fc:[x,y,z] });
+      return cubies;
+    }
+    function coarsenFC(cubies, eff) {
+      const lim = eff.map(e => e-1);
+      for (const c of cubies) c.fc = c.fc.map((v,k) => Math.max(-lim[k], Math.min(lim[k], v)));
+    }
+    // Outside-numbered "distance from outside": layer L's target fc, clamping
+    // its native-size doubled position straight down to the CURRENT phase's
+    // effective dimension for that axis.
+    function virtualLayerFc(L, N, eff, positive) {
+      const p = N-(2*L-1), signed = positive?p:-p, lim = eff-1;
+      return Math.max(-lim, Math.min(lim, signed));
+    }
+    function constCubeLayerAvailable(L, N, eff, positive) {
+      const maxN = Math.floor(N/2);
+      if (L >= maxN) return true;
+      return virtualLayerFc(L,N,eff,positive) !== virtualLayerFc(L+1,N,eff,positive);
+    }
+    function selectCoordsCC(cubies, mv, Nper, eff) {
+      const { face, layer, wide } = mv;
+      const k = IDX[AXIS[face]], positive = POSITIVE.has(face);
+      const target = virtualLayerFc(layer, Nper[k], eff[k], positive);
+      const sel = new Set();
+      for (const c of cubies) { const fc=c.fc[k]; if (wide ? (positive?fc>=target:fc<=target) : fc===target) sel.add(fc); }
+      return sel;
+    }
+    function applyMoveFC(cubies, mv, Nper, eff) {
+      const ax = AXIS[mv.face], k = IDX[ax];
+      const sel = selectCoordsCC(cubies, mv, Nper, eff);
+      const sign = baseSign(mv.face), exp = mv.mod==='2'?2:mv.mod==="'"?-sign:sign, R = matPow(P[ax], exp);
+      for (const c of cubies) { if (!sel.has(c.fc[k])) continue; c.pos=matVec(R,c.pos); c.fc=matVec(R,c.fc); }
+    }
+    // Outside-numbered pool: layer numbers count from the outside of each
+    // axis's own native size (Nper), never renumbered per phase.
+    function getConstantCubePool(Nper, eff) {
+      const pool = [];
+      for (const face of ['R','L','U','D','F','B']) {
+        const k = IDX[AXIS[face]], positive = POSITIVE.has(face);
+        const N = Nper[k], maxN = Math.floor(N/2);
+        if (maxN < 1) continue;
+        const qt = faceQT(face, ...eff);
+        const secondary = face==='L'||face==='D'||face==='B';
+        for (let l=1; l<=maxN; l++) {
+          if (!constCubeLayerAvailable(l,N,eff[k],positive)) continue;
+          const hasEquiv = N%2===0 && l*2===N;
+          if (secondary && hasEquiv) continue;
+          for (const mod of (qt?['',"'",'2']:['2'])) pool.push({ face, layer:l, mod, qt, hasEquiv });
+        }
+      }
+      return pool;
+    }
+    // Two separate counts for the display label: cumulative depth (every
+    // distinct raw physical layer from the face through and including this
+    // move's target -- an OUTER group can widen even when this move's own
+    // group hasn't, which still pushes this move's true depth deeper) drives
+    // the NUMBER; own-group width (this move's target fc only) drives
+    // whether "w" is MANDATORY.
+    function outsideNumberedInfo(cubies, mv, Nper, eff) {
+      const k = IDX[AXIS[mv.face]], positive = POSITIVE.has(mv.face);
+      const target = virtualLayerFc(mv.layer, Nper[k], eff[k], positive);
+      const ownRaw=new Set(), cumRaw=new Set();
+      for (const c of cubies) {
+        const fc=c.fc[k];
+        if (fc===target) ownRaw.add(c.pos[k]);
+        if (positive ? fc>=target : fc<=target) cumRaw.add(c.pos[k]);
+      }
+      return { depth: cumRaw.size, ownWide: ownRaw.size>1 };
     }
     function applyEquiv(face, mod) {
       const opp = { R:'L', L:'R', U:'D', D:'U', F:'B', B:'F' }[face];
@@ -659,9 +759,22 @@
       const lastRef = { axis: null, blocked: new Set(), lastFace: null, lastLayer: null };
       const phasesData = [];
       let prevQTFaces = new Set();
+      // Outside-numbered layers: layer numbers count from the outside of
+      // each axis's own native size (Nper=[W,H,D]), never renumbered per
+      // phase, instead of the current reduction's movable layers. Needs a
+      // real (minimal) rotation simulation alongside generation, since a
+      // layer's true bandaged width is a runtime property of the rotation
+      // history, not derivable from a static formula (see buildFC etc above).
+      const outsideNum = isOutsideNumbered();
+      const Nper = [W, H, D];
+      const cubies = outsideNum ? buildFC(W, H, D) : null;
+      const note = document.getElementById('outside-numbering-note');
+      note.style.display = outsideNum && isEfficient() ? 'block' : 'none';
+      if (outsideNum && isEfficient()) note.textContent = 'Efficient mode is not currently combined with outside-numbered layers -- efficient-mode layer restriction is skipped while outside-numbering is on.';
       for (let i = 0; i < stages.length; i++) {
         const [w, h, d] = stages[i].dims;
-        const canonPool = getCanonicalPool(w, h, d);
+        const canonPool = outsideNum ? getConstantCubePool(Nper, [w, h, d]) : getCanonicalPool(w, h, d);
+        if (outsideNum && cubies) coarsenFC(cubies, [w, h, d]);
         if (!canonPool.length) continue;
         const curQTFaces = new Set(canonPool.filter(t => t.qt).map(t => t.face));
         const forcedFirstPool = i > 0 ? canonPool.filter(t => t.qt && !prevQTFaces.has(t.face) && t.mod !== '2') : null;
@@ -669,9 +782,10 @@
         // Efficient mode: for the axis that bandages next phase, keep only the
         // outermost Δ layers (the ones about to be frozen); deeper layers survive
         // and are mixed in later phases under their renumbered identity.
+        // (Not combined with outside-numbered layers -- see note above.)
         let effPool = canonPool;
         let effLabel = '';
-        if (isEfficient() && i < stages.length - 1) {
+        if (!outsideNum && isEfficient() && i < stages.length - 1) {
           const bi = bandageInfo(stages[i].dims, stages[i + 1].dims);
           if (bi && bi.delta >= 1) {
             const restricted = canonPool.filter(t => !(faceAxis(t.face) === bi.axis && t.layer > bi.delta));
@@ -680,7 +794,18 @@
         }
         const phaseLabel = `Phase ${i + 1} · ${w}×${h}×${d}${effLabel}`;
         const n = ns[i] ?? ns[ns.length - 1];
-        const moves = scramblePhase(effPool, n, lastRef, phaseLabel, forcedFirstPool && forcedFirstPool.length ? forcedFirstPool : null);
+        let moves = scramblePhase(effPool, n, lastRef, phaseLabel, forcedFirstPool && forcedFirstPool.length ? forcedFirstPool : null);
+        if (outsideNum && cubies && moves.length) {
+          // Re-derive each move's true depth/width against the live cubie
+          // state, right before applying it, and relabel accordingly.
+          moves = moves.map(m => {
+            const pm = parseMove(m);
+            const { depth, ownWide } = outsideNumberedInfo(cubies, pm, Nper, [w, h, d]);
+            applyMoveFC(cubies, pm, Nper, [w, h, d]);
+            const correctedLayer = depth > 1 ? depth : pm.layer;
+            return moveStr(pm.face, correctedLayer, pm.mod, ownWide);
+          });
+        }
         if (moves.length) phasesData.push({ dims: stages[i].dims, qt: stages[i].qt, moves });
       }
       const out = document.getElementById('out');
@@ -693,9 +818,15 @@
       phasesData.forEach(p => {
         const [w, h, d] = p.dims;
         html += `<div class="phase-label"><strong>${w}×${h}×${d}</strong> — ${phaseDesc(p.dims, p.qt)}</div><div>`;
+        // Hover-diagram dims: when outside-numbered, layer numbers are
+        // relative to each axis's NATIVE size (Nper), not this phase's own
+        // (possibly reduced) dims -- a corrected layer number can exceed the
+        // phase's own w/h/d, so the diagram must use Nper to stay in bounds
+        // and stay consistent with what the notation actually means.
+        const [hw, hh, hd] = outsideNum ? Nper : [w, h, d];
         p.moves.forEach(m => {
           const pm = parseMove(m);
-          const da = pm ? ` data-face="${pm.face}" data-layer="${pm.layer}" data-mod="${pm.mod}" data-wide="${pm.wide}" data-w="${w}" data-h="${h}" data-d="${d}"` : '';
+          const da = pm ? ` data-face="${pm.face}" data-layer="${pm.layer}" data-mod="${pm.mod}" data-wide="${pm.wide}" data-w="${hw}" data-h="${hh}" data-d="${hd}"` : '';
           html += `<span class="move${pm && pm.mod !== '2' ? ' qt' : ''}"${da}>${m}</span>`;
         });
         html += `</div>`;
