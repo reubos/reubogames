@@ -4192,6 +4192,20 @@ function workPatch(t, H) {
   return fresh;
 }
 
+/* Tilings whose rectangles end on their larger tiles, the smaller ones kept only
+   where they are wholly enclosed. The truncated square asks for it: whether the
+   squares came along round the outside depended on where the window happened to
+   fall, so 13, 25, 61, 145 and 221 tiles had none and every other size had a
+   scattering, which reads as carelessness rather than choice.
+
+   Named one at a time rather than made a rule, because as a rule it takes too
+   much. Trimming every kind below the largest cascades — one small tile going
+   leaves the next size short, and the rhombitrihexagonal falls from 287 tiles to
+   46. Trimming only the smallest kind is safe enough but still reshapes tilings
+   that never asked: the snub square is mostly triangles and would lose a sixth
+   of every board. */
+const RIM_TRIM = new Set(['truncSquare']);
+
 /* `exact` decides whether to try the half-pitch offsets. The board wants them:
    its tile count is what the size control promises. A preview does not — it
    only has to look like the tiling — and searching four times over for a
@@ -4234,6 +4248,27 @@ function windowPatch(t, target, aspect, exact = true) {
      It belongs inside the search rather than after it, so that the window is
      chosen for the count it will actually draw. A preview is not a board and
      keeps its fringe: it is there to show the tiling, not to be played. */
+  /* A tile of the smallest kind belongs to the board only when every neighbour
+     it would have in the plane is there too, so the edge is left to the larger
+     ones. Dropping one can leave another short, so it repeats. */
+  const small = Math.min(...all.map(p => p.length));
+  const trimRim = exact && RIM_TRIM.has(t.id) &&
+                  all.some(p => p.length !== small);
+  const trim = run => {
+    const keepSet = new Set(run);
+    let go = true;
+    while (go) {
+      go = false;
+      for (const i of keepSet) {
+        if (all[i].length !== small) continue;
+        let n = 0;
+        for (const j of adj[i]) if (keepSet.has(j)) n++;
+        if (n < small) { keepSet.delete(i); go = true; }
+      }
+    }
+    return [...keepSet];
+  };
+
   const peel = run => {
     const keepSet = new Set(run), deg = new Map();
     for (const i of run) {
@@ -4274,7 +4309,8 @@ function windowPatch(t, target, aspect, exact = true) {
        off, and then the unpeeled one stands — but it is marked, so the search
        can pay a couple of tiles to reach a window that does have a core. */
     let clean = true;
-    if (exact) {
+    if (trimRim && best.length) best = trim(best);
+    if (exact && best.length) {
       const core = peel(best);
       if (core) best = core; else clean = false;
     }
