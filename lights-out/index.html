@@ -4092,6 +4092,37 @@ function windowPatch(t, target, aspect, exact = true) {
   const seen = w.seen;
   let pass = w.pass;
 
+  /* Straightening the edge: a tile left holding on by a single edge is a spur
+     poking off the board, and dropping it can leave the one behind it holding
+     by a single edge in turn, so it repeats until none are left — the 2-core of
+     the board graph. Dropping a leaf never breaks the rest apart, so what is
+     left is still one piece. 144 of the 165 tilings had one somewhere, the
+     trihexagonal up to 39 on a board at once.
+
+     It belongs inside the search rather than after it, so that the window is
+     chosen for the count it will actually draw. A preview is not a board and
+     keeps its fringe: it is there to show the tiling, not to be played. */
+  const peel = run => {
+    const keepSet = new Set(run), deg = new Map();
+    for (const i of run) {
+      let d = 0;
+      for (const j of adj[i]) if (keepSet.has(j)) d++;
+      deg.set(i, d);
+    }
+    const q = run.filter(i => deg.get(i) <= 1);
+    while (q.length) {
+      const i = q.pop();
+      if (!keepSet.has(i)) continue;
+      keepSet.delete(i);
+      for (const j of adj[i]) if (keepSet.has(j)) {
+        const d = deg.get(j) - 1;
+        deg.set(j, d);
+        if (d <= 1) q.push(j);
+      }
+    }
+    return keepSet.size ? [...keepSet] : null;
+  };
+
   const inBox = (hx, hy, ox, oy) => {
     const keep = all.map(p => p.every(q =>
       q[0] - ox >= -hx && q[0] - ox <= hx && q[1] - oy >= -hy && q[1] - oy <= hy));
@@ -4107,7 +4138,15 @@ function windowPatch(t, target, aspect, exact = true) {
       }
       if (run.length > best.length) best = run;
     }
-    return best.map(i => all[i]);
+    /* A board small enough to be all spur has nothing left once they are taken
+       off, and then the unpeeled one stands — but it is marked, so the search
+       can pay a couple of tiles to reach a window that does have a core. */
+    let clean = true;
+    if (exact) {
+      const core = peel(best);
+      if (core) best = core; else clean = false;
+    }
+    return { list: best.map(i => all[i]), clean };
   };
 
   /* A tile or two off the requested count is worth trading for a squarer
@@ -4116,7 +4155,7 @@ function windowPatch(t, target, aspect, exact = true) {
      different shapes, so taking the first one that hit the count — which is
      what this used to do — threw away the choice. */
   const score = c => Math.abs(c.count - target) * 4 / target +
-                     Math.abs(Math.log(c.ratio / aspect));
+                     Math.abs(Math.log(c.ratio / aspect)) + (c.clean ? 0 : 1.5);
 
   const searchAt = a => {
     let found = null;
@@ -4127,13 +4166,13 @@ function windowPatch(t, target, aspect, exact = true) {
       let hi = Math.min((w.H - half) * Math.min(1, a), need * slack * Math.sqrt(a));
       for (let i = 0; i < 8; i++) {
         const hx = (lo + hi) / 2, hy = hx / a;
-        const polys = inBox(hx, hy, ox, oy);
+        const { list: polys, clean } = inBox(hx, hy, ox, oy);
         if (polys.length) {
           // recentre on the window, not the lattice, so the board sits central
           // a preview is framed by its window, not by the tiles, so it has no
           // use for the board's shape — don't pay to measure it
           const cand = { polys: polys.map(p => translate(p, -ox, -oy)), hx, hy,
-                         count: polys.length,
+                         count: polys.length, clean,
                          ratio: exact ? boardRatio(polys) : aspect };
           if (!found || score(cand) < score(found)) found = cand;
         }
