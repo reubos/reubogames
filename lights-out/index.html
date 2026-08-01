@@ -2493,7 +2493,19 @@ function hexCellAt(polys, cent, src, C) {
    its hull best is kept. That is also what recovers the classic honeycomb: for
    the hexagonal tiling the turned hexagon gives 1, 7, 19, 37, 61 … exactly, the
    rings the board graph gave. */
-function regionLayers(polys, rim, C, src, adj) {
+/* Tilings whose honeycomb sizes come two to a band, one of them a half-step with
+   tiles jutting out of the outline. The rhombille is the case: its sizes run 6,
+   12, 30, 42, 72, 90 … and the second of each pair is the fuller board every
+   time — 1.000 against 0.667 of its hull, 0.933 against 0.833, 0.937 against
+   0.889. Keeping the ones no less solid than the size after them leaves 12, 42,
+   90, 156, 240 and 342.
+
+   Opt-in, because as a rule it takes too much: on a tiling whose boards grow
+   steadily rounder — the hexagonal climbs 0.875, 0.905, 0.925 and on — every
+   size is less solid than the next and only the largest would survive. */
+const COMB_PEAKS = new Set(['rhombille']);
+
+function regionLayers(polys, rim, C, src, adj, id) {
   const S = Math.PI / 3, dirs = [];
   const add = x => {
     let d = x % S;
@@ -2570,8 +2582,13 @@ function regionLayers(polys, rim, C, src, adj) {
        all does the raw list stand, which is a fact about those tilings: their
        dodecagons are so far apart that two shells is all that fits. */
     const band = bandLevels(pick, picked);
-    const use = band.length >= 3 ? band : pick;
+    let use = band.length >= 3 ? band : pick;
     const order = ord.map(i => polys[i]);
+    if (COMB_PEAKS.has(id) && use.length > 2) {
+      const sols = use.map(n => solidity(order.slice(0, n)));
+      const peaks = use.filter((_, i) => i === use.length - 1 || sols[i] >= sols[i + 1]);
+      if (peaks.length >= 3) use = peaks;
+    }
     const sol = solidity(order.slice(0, use[use.length - 1]));
     /* On a tie the coarser shells win, because a shell that comes in whole is a
        ring right round and one that comes in halves is not. The floret's flower
@@ -2711,7 +2728,7 @@ function shapePlan(t) {
       if (e.length === 1) rim[e[0]] = true;
       else if (e.length === 2) { adj[e[0]].push(e[1]); adj[e[1]].push(e[0]); }
     }
-    const comb = regionLayers(polys, rim, C, src, adj), hex = hexLayers(polys, rim, C);
+    const comb = regionLayers(polys, rim, C, src, adj, t.id), hex = hexLayers(polys, rim, C);
     plan = { C, comb, hex };
     // capped means the hexagons ran out at the size limit rather than at the rim
     const capped = !hex || hex.full;
