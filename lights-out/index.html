@@ -2169,38 +2169,157 @@ const centroidOf = p => {
   return [x / p.length, y / p.length];
 };
 
-/* A big triangle with a corner on a vertex of the tiling and its sides along
-   two of the tiling's edge directions. Every edge of it therefore runs along
-   tile edges, so no tile straddles the boundary and the count is exact.
+/* A big triangle with a corner on a vertex of the tiling and its sides along two
+   of its edge directions, so every edge of it runs along tile edges, no tile
+   straddles the boundary and the count is exact.
 
-   The apex is at negative y so the board sits point up on screen, base along
-   the bottom — screen y runs downward, so building it point up in the maths
-   would draw it upside down. The lattice is unchanged by the flip: negating y
-   sends its second vector to the difference of the two, which is a lattice
-   vector already, so the triangle still lands squarely on the tiles. */
-function trianglePatch(src, side) {
-  const S3 = Math.sqrt(3);
-  const A = [0, 0], B = [side, 0], C = [side / 2, -side * S3 / 2];
-  const sign = (p, a, b) => (b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0]);
+   Where that triangle sits is the tiling's business, not ours: the deltoidal
+   trihexagonal's lies at 30° to the axes and the kites and right trapeziums' at
+   120°, and each wants its own corner to start from. Cutting them all at the one
+   placement gave the deltoidal a ragged edge, because the triangle it was handed
+   was not one the tiling can fill. So each carries its own corner and pair of
+   side vectors, and the tiles are turned afterwards to bring every board to the
+   same orientation — base along the bottom, apex up, which on a screen whose y
+   runs downward means the third corner at negative y.
+
+   Which corner the tiling is pinned by decides what the slider does. Pin a base
+   corner and the apex is O + b·s, so it slides to a fresh spot at every size and
+   the tile at the point of the board keeps changing. Pin the apex and the base
+   is what slides: each size is the last one with another row joined along the
+   bottom, and the top of the board never moves. That is the better board, but
+   only some tilings have their corner at the apex, so it is a flag. */
+function trianglePatch(src, tri, k) {
+  const O = tri.O, s = tri.sides[k - 1];
+  // the pair wound so the third corner comes out below the base, then squared up
+  let [a, b] = (tri.u[0] * tri.w[1] - tri.u[1] * tri.w[0]) < 0
+             ? [tri.u, tri.w] : [tri.w, tri.u];
+  a = [a[0] * s, a[1] * s]; b = [b[0] * s, b[1] * s];
+  const A = O, B = [O[0] + a[0], O[1] + a[1]], C = [O[0] + b[0], O[1] + b[1]];
+  // the two that make the base, then the one left over at the point
+  const [P, Q] = tri.apex ? [B, C] : [A, B];
+  const th = -Math.atan2(Q[1] - P[1], Q[0] - P[0]);
+  const co = Math.cos(th), si = Math.sin(th);
+  const sign = (p, u, v) => (v[0] - u[0]) * (p[1] - u[1]) - (v[1] - u[1]) * (p[0] - u[0]);
   const inside = p => {
     const s1 = sign(p, A, B), s2 = sign(p, B, C), s3 = sign(p, C, A);
     return (s1 > 0 && s2 > 0 && s3 > 0) || (s1 < 0 && s2 < 0 && s3 < 0);
   };
-  const out = [];
+  const turn = p => p.map(q => {
+    const x = q[0] - O[0], y = q[1] - O[1];
+    return [x * co - y * si, x * si + y * co];
+  });
   /* Generously: raw fills a parallelogram of cells, so how far out it can be
      trusted depends on the direction, and asking for the side length alone
      leaves the far corner short — triakis lost a fifth of its tiles that way. */
-  for (const p of src.raw(side + 3)) if (inside(centroidOf(p))) out.push(p);
+  const reach = Math.hypot(O[0], O[1]) + s + 3;
+  const out = [];
+  for (const p of src.raw(reach)) if (inside(centroidOf(p))) out.push(turn(p));
   return out;
 }
 
-/* The tilings that fill such a triangle exactly, and how many of their tiles go
-   in one triangle of the lattice. All three are the triangular tiling or a
-   subdivision of it — triakis cuts each triangle in three about its centre,
-   kisrhombille in six — so the lattice lines survive as chains of tile edges and
-   the cut falls between tiles rather than through them. Checked at every size
-   against the area of the triangle, which the tiles come to exactly. */
-const TRIANGLE_BOARDS = { triangle: 1, triakis: 3, kisrhombille: 6 };
+/* The tilings that fill a triangle exactly: the corner it starts from, unit
+   vectors along its two sides, and the side lengths that work with the tile
+   count each gives.
+
+   The sides are not multiples of anything convenient. A triangle of the lattice
+   holds half a cell, so the obvious quantum is a lattice vector — but the
+   trihexagonal's triangles have odd sides in tile edges, where its lattice
+   vector is two, and a subdivided tiling's are multiples of the parent's unit,
+   which need be no whole number of its own edges. What is always true is that
+   the far corner lands on a vertex, so the lengths worth trying are the
+   distances to the vertices lying along the ray, and that finds them all.
+
+   Kept as one family per tiling: the sides step evenly, so each size adds a row
+   to the last, and no board is a single tile. Every kind of tile the tiling has
+   must be on the board and must grow at every step, or the run is not one thing
+   getting bigger — four of these had families of pure triangles that never
+   reached a hexagon at all, the squares and triangles going 4, 9, 16 like a
+   plain triangular grid, which is not what that tiling looks like.
+
+   The run must also carry on, not merely happen a few times. Two tilings had
+   runs that stopped dead after two and three sizes with the next side failing to
+   close, and those are a coincidence rather than a family, so they keep the
+   hexagon board alone.
+
+   What sits at the apex has to hold too, and where it does not the cure is
+   usually to turn the triangle over rather than to throw the run away. Pinned by
+   a base corner the apex is O + b·s, a fresh spot at every size: Kites and
+   Triangles 2 alternated a kite and a triangle at the point, Hexagons and
+   Triangles 14 a hexagon and a triangle, Kites, Quadrilaterals and Triangles 2 a
+   kite alone and then a kite beside a triangle. Pinning the apex instead leaves
+   the same triangles — the same counts, the same sides — with the top of the
+   board standing still and each size the last one with a row joined along the
+   bottom.
+
+   Which corner is pinned is a choice too, and where the tiling offers several
+   the one to take is the corner that reads as a corner. Kisrhombille and Kites
+   and Triangles 2 are pinned on a vertex where two triangles meet, so the point
+   of the board is a triangle split down the middle rather than one tile with the
+   next tucked in behind it; Kites, Quadrilaterals and Triangles 2 on the one
+   that gives a kite, two quadrilaterals under it and a triangle under those.
+   Hexagons and Triangles 4 wanted a different run as well as a different corner:
+   the sides go 1, 3, 4, 6, 7, ... , two runs of step three interleaved, and the
+   one through 3 gives 4, 21, 51, 94 with a hexagon directly under the point,
+   where the old 20, 49, 91 was triangles the whole way down the middle.
+   Hexagons and Triangles 15 was the one that needed a different run altogether,
+   its old one going 20, 39, 66 with a hexagon under the point and then a
+   triangle twice.
+
+   Where a run reaches is a matter of how far it was looked for, not of the
+   tiling: Kites and Right Trapeziums 1 was written down as far as 144 because
+   the patch searched stopped there, and it goes on to 324 within the same
+   400-tile ceiling.
+
+   Checked by cutting and requiring
+   that no tile crosses the boundary and that the tiles come to the triangle's
+   area. Neither test alone will do — a tile poking out cancels one poking in,
+   so area passed forty-four tilings when seventeen fill one; and a tile whose
+   inner corners sit exactly on the boundary reads as wholly inside, so
+   straddling has to be judged from which side the centre falls. */
+const TRIANGLE_BOARDS = {
+  triangle: { O: [-1, 0], u: [1, 0], w: [0.5, 0.866025],
+    sides: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20],
+    tiles: [4, 9, 16, 25, 36, 49, 64, 81, 100, 121, 144, 169, 196, 225, 256, 289, 324, 361, 400] },
+  trihex: { O: [-1.5, -0.866], u: [1, 0], w: [0.5, 0.866025],
+    sides: [3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23, 25, 27, 29, 31],
+    tiles: [4, 10, 19, 31, 46, 64, 85, 109, 136, 166, 199, 235, 274, 316, 361] },
+  triakis: { O: [-3.7321, 0], u: [1, 0], w: [0.5, 0.866025],
+    sides: [3.7321, 7.4641, 11.1962, 14.9282, 18.6603, 22.3923, 26.1244, 29.8564, 33.5885, 37.3205, 41.0526],
+    tiles: [3, 12, 27, 48, 75, 108, 147, 192, 243, 300, 363] },
+  kisrhombille: { O: [0, 0], u: [0.866025, 0.5], w: [0, 1], apex: 1,
+    sides: [2.7321, 5.4642, 8.1963, 10.9284, 13.6605, 16.3926, 19.1247, 21.8568, 24.5889, 27.321, 30.0531, 32.7852, 35.5173, 38.2494],
+    tiles: [2, 8, 18, 32, 50, 72, 98, 128, 162, 200, 242, 288, 338, 392] },
+  deltoidal: { O: [-2.366, -1.366], u: [0.866025, 0.500001], w: [-0.000001, 1],
+    sides: [2.7321, 5.4641, 8.1962, 10.9282, 13.6603, 16.3923, 19.1244, 21.8564, 24.5885, 27.3205, 30.0526],
+    tiles: [3, 12, 27, 48, 75, 108, 147, 192, 243, 300, 363] },
+  n10: { O: [1.276, -3.0625], u: [1, 0], w: [0.5, 0.866025],
+    sides: [3, 6, 9, 12, 15, 18, 21, 24, 27],
+    tiles: [4, 16, 36, 64, 100, 144, 196, 256, 324] },
+  n19: { O: [0.0852, 0.6331], u: [1, 0.000001], w: [0.500001, -0.866025], apex: 1,
+    sides: [3.0001, 6.0001, 9.0001, 12.0001, 15.0001, 18.0001, 21.0001, 24.0001],
+    tiles: [4, 21, 51, 94, 150, 219, 301, 396] },
+  n5d: { O: [4.4366, -1.5368], u: [1, 0], w: [0.5, 0.866025],
+    sides: [4.7321, 9.4642, 14.1963, 18.9284, 23.6605, 28.3926],
+    tiles: [9, 36, 81, 144, 225, 324] },
+  n1d: { O: [-0.728, 0.4251], u: [1, 0], w: [0.5, 0.866025], apex: 1,
+    sides: [5.4642, 8.1963, 10.9284, 13.6605, 16.3926, 19.1247, 21.8568, 24.5889, 27.321, 30.0531, 32.7852, 35.5173],
+    tiles: [9, 20, 36, 56, 81, 110, 144, 182, 225, 272, 324, 380] },
+  k43: { O: [-3.3403, -1.2143], u: [-0.866028, 0.499995], w: [-0.866022, -0.500005], apex: 1,
+    sides: [3.0001, 5.0001, 7.0001, 9.0001, 11.0001, 13.0001, 15.0001, 17.0001, 19.0001, 21.0001, 23.0001, 25.0001],
+    tiles: [4, 15, 29, 46, 71, 99, 130, 169, 211, 256, 309, 365] },
+  k58: { O: [1.732, 0], u: [-0.866028, 0.499995], w: [-0.866022, -0.500005],
+    sides: [3, 9, 15.0001, 21.0001], tiles: [4, 61, 175, 346] },
+  k42: { O: [-2.3943, 3.1471], u: [0.866025, 0.500001], w: [-0.000001, 1],
+    sides: [3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23, 25, 27],
+    tiles: [4, 10, 24, 36, 61, 79, 115, 139, 186, 216, 274, 310, 379] },
+  k59: { O: [4.3301, -0.6481], u: [-0.000004, 1], w: [-0.866027, 0.499997],
+    sides: [4, 8, 12, 16, 20], tiles: [11, 49, 114, 206, 325] },
+  k4d: { O: [1.0585, -1.8333], u: [-1, -0.000007], w: [-0.499994, -0.866029],
+    sides: [5.1961, 8.6602, 12.1243, 15.5884, 19.0525], tiles: [10, 28, 55, 91, 136] },
+  k7d: { O: [0, -0.3078], u: [1, 0], w: [0.5, 0.866025], apex: 1,
+    sides: [3.7321, 7.4642, 11.1963, 14.9284, 18.6605, 22.3926, 26.1247, 29.8568, 33.5889, 37.321],
+    tiles: [4, 16, 36, 64, 100, 144, 196, 256, 324, 400] }
+};
 
 /* Tilings built by attaching one tile to the next accumulate about 5e-4 of
    drift across a patch this size, so points that ought to coincide have to be
@@ -2399,15 +2518,59 @@ function rosetteAnchors(polys, src, C) {
   const cent = polys.map(centroidOf);
   const d = cent.map(c => Math.hypot(c[0] - C[0], c[1] - C[1]));
   const near = Math.min(...d);
-  if (d.filter(v => v < near + 1e-2).length !== perCell) return null;
+  const rosette = d.filter(v => v < near + 1e-2).length === perCell;
+  if (!rosette && !hexCellAt(polys, cent, src, C)) return null;
   const det = a[0] * b[1] - a[1] * b[0];
   const inv = [[b[1] / det, -b[0] / det], [-a[1] / det, a[0] / det]];
+  /* The nearest lattice point, not the rounded one: rounding sorts the tiles
+     into parallelograms, and it is the Voronoi cell — a hexagon on a lattice
+     like this — that the tiles actually fall into whole. */
   return cent.map(c => {
     const x = c[0] - C[0], y = c[1] - C[1];
-    const u = Math.round(inv[0][0] * x + inv[0][1] * y);
-    const w = Math.round(inv[1][0] * x + inv[1][1] * y);
-    return [C[0] + u * a[0] + w * b[0], C[1] + u * a[1] + w * b[1]];
+    const u0 = inv[0][0] * x + inv[0][1] * y, w0 = inv[1][0] * x + inv[1][1] * y;
+    let best = null, bd = Infinity;
+    for (let du = -1; du <= 1; du++) for (let dw = -1; dw <= 1; dw++) {
+      const u = Math.round(u0) + du, w = Math.round(w0) + dw;
+      const px = u * a[0] + w * b[0], py = u * a[1] + w * b[1];
+      const dd = (x - px) * (x - px) + (y - py) * (y - py);
+      if (dd < bd) { bd = dd; best = [C[0] + px, C[1] + py]; }
+    }
+    return best;
   });
+}
+
+/* Does one whole repeating cell sit on the centre, as a hexagon? On a lattice
+   with a six-fold centre the Voronoi cell is a regular hexagon of exactly one
+   cell's area, and a tiling that fills it — no tile straddling the boundary —
+   can be cut by whole cells, so its honeycomb comes out a true ball of them
+   rather than a hexagon sawn across whatever lies under it. Twenty-one tilings
+   have such a cell; eleven of them have it centred on the six-fold point, which
+   is what a board built out from there needs. */
+function hexCellAt(polys, cent, src, C) {
+  const [a, b] = [src.v1, src.v2];
+  const s = (p, q) => [p[0] + q[0], p[1] + q[1]], m = (p, q) => [p[0] - q[0], p[1] - q[1]];
+  const vs = [a, b, s(a, b), m(a, b)];
+  let side = Infinity;
+  for (const v of vs) { const l = Math.hypot(v[0], v[1]); if (l > 1e-9) side = Math.min(side, l); }
+  const near = vs.concat(vs.map(v => [-v[0], -v[1]]))
+    .filter(v => Math.abs(Math.hypot(v[0], v[1]) - side) < 1e-3 * side);
+  if (near.length < 6) return false;
+  const N = near.map(v => { const l = Math.hypot(v[0], v[1]); return [v[0] / l, v[1] / l]; });
+  const r = side / 2;
+  const depth = q => {
+    let v = Infinity;
+    for (const n of N) v = Math.min(v, r - ((q[0] - C[0]) * n[0] + (q[1] - C[1]) * n[1]));
+    return v;
+  };
+  const perCell = Math.round(src.density * Math.abs(a[0] * b[1] - a[1] * b[0]));
+  let inside = 0;
+  for (let i = 0; i < polys.length; i++) {
+    let lo = Infinity, hi = -Infinity;
+    for (const q of polys[i]) { const v = depth(q); lo = Math.min(lo, v); hi = Math.max(hi, v); }
+    if (lo < -HEX_TOL && hi > HEX_TOL) return false;      // a tile crosses the cell wall
+    if (depth(cent[i]) > HEX_TOL) inside++;
+  }
+  return inside === perCell;
 }
 
 /* The honeycomb: the tiles whose centres fall in a hexagon about the centre.
@@ -2426,7 +2589,19 @@ function rosetteAnchors(polys, src, C) {
    its hull best is kept. That is also what recovers the classic honeycomb: for
    the hexagonal tiling the turned hexagon gives 1, 7, 19, 37, 61 … exactly, the
    rings the board graph gave. */
-function regionLayers(polys, rim, C, src, adj) {
+/* Tilings whose honeycomb sizes come two to a band, one of them a half-step with
+   tiles jutting out of the outline. The rhombille is the case: its sizes run 6,
+   12, 30, 42, 72, 90 … and the second of each pair is the fuller board every
+   time — 1.000 against 0.667 of its hull, 0.933 against 0.833, 0.937 against
+   0.889. Keeping the ones no less solid than the size after them leaves 12, 42,
+   90, 156, 240 and 342.
+
+   Opt-in, because as a rule it takes too much: on a tiling whose boards grow
+   steadily rounder — the hexagonal climbs 0.875, 0.905, 0.925 and on — every
+   size is less solid than the next and only the largest would survive. */
+const COMB_PEAKS = new Set(['rhombille']);
+
+function regionLayers(polys, rim, C, src, adj, id) {
   const S = Math.PI / 3, dirs = [];
   const add = x => {
     let d = x % S;
@@ -2503,8 +2678,13 @@ function regionLayers(polys, rim, C, src, adj) {
        all does the raw list stand, which is a fact about those tilings: their
        dodecagons are so far apart that two shells is all that fits. */
     const band = bandLevels(pick, picked);
-    const use = band.length >= 3 ? band : pick;
+    let use = band.length >= 3 ? band : pick;
     const order = ord.map(i => polys[i]);
+    if (COMB_PEAKS.has(id) && use.length > 2) {
+      const sols = use.map(n => solidity(order.slice(0, n)));
+      const peaks = use.filter((_, i) => i === use.length - 1 || sols[i] >= sols[i + 1]);
+      if (peaks.length >= 3) use = peaks;
+    }
     const sol = solidity(order.slice(0, use[use.length - 1]));
     /* On a tie the coarser shells win, because a shell that comes in whole is a
        ring right round and one that comes in halves is not. The floret's flower
@@ -2592,7 +2772,18 @@ function hexLayers(polys, rim, C) {
    not the boards themselves. Below four sizes that is a poor trade, and at one
    it is no choice at all. */
 const HEX_MIN_SIZES = 4;
-const hexUsable = hex => !!hex && hex.counts.length >= HEX_MIN_SIZES;
+
+/* Counting sizes is a rough test and it undersells a tiling whose hexagons are
+   genuinely a family cut short by the size limit. The kites and right trapeziums
+   go 54 and 216, which is 54k² and would carry on to 486 were there room, so two
+   is all the limit allows rather than all the tiling has. Named here rather than
+   made a rule, because no rule drawn tight enough to catch this one leaves the
+   rest alone: asking for c·k² would revive the single-size hexagons and would
+   drop the trihexagonal's 19, 55, 109, 181, 271, 379, which is a family by any
+   reading but not that one. */
+const HEX_ANYWAY = new Set(['n5d']);
+const hexUsable = (hex, id) =>
+  !!hex && (hex.counts.length >= HEX_MIN_SIZES || HEX_ANYWAY.has(id));
 
 /* One patch per tiling answers everything: where the centre is, what the
    honeycomb holds and which hexagons close up. Holding on to it makes every size
@@ -2633,13 +2824,13 @@ function shapePlan(t) {
       if (e.length === 1) rim[e[0]] = true;
       else if (e.length === 2) { adj[e[0]].push(e[1]); adj[e[1]].push(e[0]); }
     }
-    const comb = regionLayers(polys, rim, C, src, adj), hex = hexLayers(polys, rim, C);
+    const comb = regionLayers(polys, rim, C, src, adj, t.id), hex = hexLayers(polys, rim, C);
     plan = { C, comb, hex };
     // capped means the hexagons ran out at the size limit rather than at the rim
     const capped = !hex || hex.full;
     if (!capped && hex.counts.length < HEX_MIN_SIZES && attempt === 0) continue;
     const climbing = !capped && hex.counts[hex.counts.length - 1] > SHAPE_TILES / 3;
-    if (hexUsable(hex) ? !climbing : comb.full) break;
+    if (hexUsable(hex, t.id) ? !climbing : comb.full) break;
   }
   shapeCache.set(t.id, plan);
   return plan;
@@ -3970,18 +4161,13 @@ const outlineCache = new Map();
 function outlinesFor(t) {
   if (outlineCache.has(t.id)) return outlineCache.get(t.id);
   const list = [];
-  const per = TRIANGLE_BOARDS[t.id];
-  if (per) {
-    // v1 is along the screen axis by now, and spans one edge of the lattice
-    const side = Math.hypot(t.src.v1[0], t.src.v1[1]);
-    const most = Math.floor(Math.sqrt(SHAPE_TILES / per));
-    list.push({
-      key: 'tri', label: 'Triangle', unit: 'side',
-      params: Array.from({ length: most - 1 }, (_, i) => i + 2),
-      tiles: k => per * k * k,
-      build: (src, k) => trianglePatch(src, k * side)
-    });
-  }
+  const tri = TRIANGLE_BOARDS[t.id];
+  if (tri) list.push({
+    key: 'tri', label: 'Triangle', unit: 'rows',
+    params: tri.sides.map((_, i) => i + 1),
+    tiles: k => tri.tiles[k - 1],
+    build: (src, k) => trianglePatch(src, tri, k)
+  });
   const g = (symInfo(t) || {}).group;
   if (g === 'p6' || g === 'p6m') {
     const plan = shapePlan(t);
@@ -3989,7 +4175,7 @@ function outlinesFor(t) {
        be cut it is the better shape, straight sided where the honeycomb is
        ragged, and the two would only be the same idea drawn twice. So it is
        kept for the tilings that admit no usable hexagon. */
-    if (plan && hexUsable(plan.hex)) {
+    if (plan && hexUsable(plan.hex, t.id)) {
       const hex = plan.hex;
       list.push({
         key: 'hex', label: 'Hexagon', unit: 'bands',
@@ -4137,6 +4323,20 @@ function workPatch(t, H) {
   return fresh;
 }
 
+/* Tilings whose rectangles end on their larger tiles, the smaller ones kept only
+   where they are wholly enclosed. The truncated square asks for it: whether the
+   squares came along round the outside depended on where the window happened to
+   fall, so 13, 25, 61, 145 and 221 tiles had none and every other size had a
+   scattering, which reads as carelessness rather than choice.
+
+   Named one at a time rather than made a rule, because as a rule it takes too
+   much. Trimming every kind below the largest cascades — one small tile going
+   leaves the next size short, and the rhombitrihexagonal falls from 287 tiles to
+   46. Trimming only the smallest kind is safe enough but still reshapes tilings
+   that never asked: the snub square is mostly triangles and would lose a sixth
+   of every board. */
+const RIM_TRIM = new Set(['truncSquare']);
+
 /* `exact` decides whether to try the half-pitch offsets. The board wants them:
    its tile count is what the size control promises. A preview does not — it
    only has to look like the tiling — and searching four times over for a
@@ -4179,6 +4379,27 @@ function windowPatch(t, target, aspect, exact = true) {
      It belongs inside the search rather than after it, so that the window is
      chosen for the count it will actually draw. A preview is not a board and
      keeps its fringe: it is there to show the tiling, not to be played. */
+  /* A tile of the smallest kind belongs to the board only when every neighbour
+     it would have in the plane is there too, so the edge is left to the larger
+     ones. Dropping one can leave another short, so it repeats. */
+  const small = Math.min(...all.map(p => p.length));
+  const trimRim = exact && RIM_TRIM.has(t.id) &&
+                  all.some(p => p.length !== small);
+  const trim = run => {
+    const keepSet = new Set(run);
+    let go = true;
+    while (go) {
+      go = false;
+      for (const i of keepSet) {
+        if (all[i].length !== small) continue;
+        let n = 0;
+        for (const j of adj[i]) if (keepSet.has(j)) n++;
+        if (n < small) { keepSet.delete(i); go = true; }
+      }
+    }
+    return [...keepSet];
+  };
+
   const peel = run => {
     const keepSet = new Set(run), deg = new Map();
     for (const i of run) {
@@ -4219,7 +4440,8 @@ function windowPatch(t, target, aspect, exact = true) {
        off, and then the unpeeled one stands — but it is marked, so the search
        can pay a couple of tiles to reach a window that does have a core. */
     let clean = true;
-    if (exact) {
+    if (trimRim && best.length) best = trim(best);
+    if (exact && best.length) {
       const core = peel(best);
       if (core) best = core; else clean = false;
     }
@@ -4734,10 +4956,11 @@ const BOARD_REGISTRY = 165;                  // the registry this was taken from
 const RECT_ONLY = ['rect'];
 const BOARD_SHAPES = {};
 for (const [keys, ids] of [
-  ['tri hex', 'triangle triakis kisrhombille'],
-  ['hex', 'trihex deltoidal n10 n19 n20 n1d k43 k58 k42 k59 k60 k4d k7d'],
+  ['tri hex', 'triangle trihex triakis deltoidal kisrhombille ' +
+              'n10 n19 n5d n1d k43 k58 k42 k59 k4d k7d'],
+  ['hex', 'n20 k60'],
   ['comb', 'hexagon truncHex rhombitrihex truncTrihex snubTrihex rhombille floret ' +
-           'n18 n8 n9 n5 n13 n1 n18d n19d n20d n8d n9d n10d n13d n5d ' +
+           'n18 n8 n9 n5 n13 n1 n18d n19d n20d n8d n9d n10d n13d ' +
            'k57 k54 k4 k1 fcb k24 k36 k26 k47 k7 k5 ' +
            'fcbd k26d k58d k59d k60d k1d k5d k24d k36d k43d k42d k47d k54d k57d']
 ]) for (const id of ids.split(' ')) BOARD_SHAPES[id] = keys.split(' ');
