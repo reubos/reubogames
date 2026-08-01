@@ -1960,7 +1960,81 @@ function symPatchFor(src) {
   return Math.max(SYM_PATCH, Math.ceil(6 * L / src.pitch));
 }
 
+/* The group and orbit counts of every tiling, worked out once and written down.
+
+   These are facts about a tiling and never change, but deriving them means a
+   symmetry search over a patch of each: seventy seconds of solid work across the
+   registry, which is what the browser was spending on a first visit. Until it
+   finished the picker could only show "…" for the group and orbit rows, and
+   everything else was fighting it for the processor.
+
+   checkSymData() in the console derives them all and reports disagreements, so
+   the table can be trusted to have kept up. A tiling not listed here is derived
+   as before, so adding one still works. */
+const SYM_DATA = {};
+for (const row of `
+triangle p6m 1 1 1, square p4m 1 1 1, hexagon p6m 1 1 1, trihex p6m 1 2 1
+truncSquare p4m 1 2 2, truncHex p6m 1 2 2, rhombitrihex p6m 1 3 2, truncTrihex p6m 1 3 3
+snubSquare p4g 1 2 2, elongTri cmm 1 2 3, snubTrihex p6 1 3 3, tetrakis p4m 2 1 2
+triakis p6m 2 1 2, kisrhombille p6m 3 1 3, rhombille p6m 2 1 1, deltoidal p6m 3 1 2
+cairo p4g 2 1 2, floret p6 3 1 3, prismatic cmm 2 1 3, penrose none, ammann none
+dodeca none, tetradeca none, n14 pmm 2 3 4, n4 cmm 2 2 4, n15 cmm 2 4 5, n3 cmm 2 3 5
+n18 p6m 2 3 3, n17 pgg 2 3 6, n16 p4g 2 4 5, n11 pmm 2 2 3, n12 cmm 2 2 4, n10 p6m 2 2 3
+n19 p6m 2 3 3, n20 p6 2 5 6, n6 cmm 2 3 4, n7 pmm 2 4 4, n8 p6m 2 4 4, n9 p6m 2 4 4
+n5 p6m 2 5 5, n2 p4m 2 3 3, n13 p6m 2 4 4, n1 p6m 2 4 4, n16d p4g 4 2 5, n17d pgg 3 2 6
+n14d pmm 3 2 4, n15d cmm 4 2 5, n18d p6m 3 2 3, n19d p6m 3 2 3, n20d p6 5 2 6
+n4d cmm 2 2 4, n3d cmm 3 2 5, n8d p6m 4 2 4, n9d p6m 4 2 4, n12d cmm 2 2 4, n10d p6m 2 2 3
+n13d p6m 4 2 4, n11d pmm 2 2 3, n7d pmm 4 2 4, n6d cmm 3 2 4, n5d p6m 5 2 5, n2d p4m 3 2 3
+n1d p6m 4 2 4, k20 pmm 3 3 5, k49 pmm 3 5 6, k51 cmm 3 4 6, k14 cmm 3 4 6, k19 pmm 3 4 6
+k21 pmm 3 4 6, k16 cmm 3 3 6, k50 cmm 3 6 7, k52 pmg 3 5 7, k15 cmm 3 5 7, k13 pmm 3 5 7
+k10 cmm 3 4 7, k23 p4 3 4 6, k53 pgg 3 5 8, k57 p6m 3 4 5, k54 p6m 3 4 5, k45 p2 3 4 7
+k40 pmm 3 3 5, k2 cmm 3 2 4, k41 cmm 3 3 6, k39 cmm 3 3 5, k3 pmg 3 2 5, k61 cmm 3 4 6
+k4 p6m 3 2 3, k43 p6m 3 3 3, k58 p6m 3 3 4, k38 pmg 3 5 8, k42 p6m 3 4 4, k59 p6m 3 5 5
+k60 p6 3 7 9, k1 p6m 3 4 5, k18 pmm 3 4 6, k33 pmm 3 5 7, k25 cmm 3 4 6, k30 pmg 3 4 6
+k32 cmm 3 5 6, k31 pmm 3 5 7, k11 cmm 3 5 7, k12 pmm 3 6 7, k27 cmm 3 5 8, k28 cmm 3 6 8
+k22 p4g 3 3 4, fcb p6m 3 5 6, k24 p6m 3 5 6, k36 p6m 3 6 6, k26 p6m 3 6 6, k9 cmm 3 4 7
+k47 p6m 3 6 7, k6 p3m1 3 5 6, k7 p6m 3 5 6, k5 p6m 3 6 7, fcbd p6m 5 3 6, k26d p6m 6 3 6
+k61d cmm 4 3 6, k58d p6m 3 3 4, k59d p6m 5 3 5, k60d p6 7 3 9, k2d cmm 2 3 4
+k1d p6m 4 3 5, k3d pmg 2 3 5, k4d p6m 2 3 3, k5d p6m 6 3 7, k6d p3m1 5 3 6, k9d cmm 4 3 7
+k7d p6m 5 3 6, k19d pmm 4 3 6, k16d cmm 3 3 6, k13d pmm 5 3 7, k10d cmm 4 3 7
+k18d pmm 4 3 6, k11d cmm 5 3 7, k12d pmm 6 3 7, k20d pmm 3 3 5, k14d cmm 4 3 6
+k21d pmm 4 3 6, k15d cmm 5 3 7, k22d p4g 3 3 4, k23d p4 4 3 6, k24d p6m 5 3 6
+k25d cmm 4 3 6, k27d cmm 5 3 8, k30d pmg 4 3 6, k32d cmm 5 3 6, k28d cmm 6 3 8
+k31d pmm 5 3 7, k33d pmm 5 3 7, k36d p6m 6 3 6, k40d pmm 3 3 5, k41d cmm 3 3 6
+k38d pmg 5 3 8, k39d cmm 3 3 5, k43d p6m 3 3 3, k42d p6m 4 3 4, k45d p2 4 3 7
+k47d p6m 6 3 7, k49d pmm 5 3 6, k51d cmm 4 3 6, k50d cmm 6 3 7, k52d pmg 5 3 7
+k53d pgg 5 3 8, k54d p6m 4 3 5, k57d p6m 4 3 5
+`.trim().split(/[\n,]/)) {
+  const [id, g, v, t, e] = row.trim().split(' ');
+  SYM_DATA[id] = g === 'none' ? null : { group: g, v: +v, t: +t, e: +e };
+}
+
+/* Derives them all afresh and checks the table against them. The table is
+   emptied for the duration, so that a dual is measured rather than read off its
+   parent's stored entry — otherwise it would only be checking itself. */
+function checkSymData() {
+  const saved = { ...SYM_DATA };
+  for (const k of Object.keys(SYM_DATA)) delete SYM_DATA[k];
+  symCache.clear();
+  const show = s => s ? `${s.group} ${s.v} ${s.t} ${s.e}` : 'none';
+  const wrong = [];
+  for (const t of TILINGS) {
+    const want = symInfo(t);
+    if (!(t.id in saved)) { wrong.push(`${t.id}: missing, derives ${show(want)}`); continue; }
+    if (show(want) !== show(saved[t.id]))
+      wrong.push(`${t.id}: table ${show(saved[t.id])}, derives ${show(want)}`);
+  }
+  Object.assign(SYM_DATA, saved);
+  symCache.clear();
+  return wrong.length ? wrong : `all ${TILINGS.length} agree`;
+}
+
 function symInfo(t) {
+  if (t.id in SYM_DATA) return SYM_DATA[t.id];
+  return symInfoFrom(t);
+}
+
+function symInfoFrom(t) {
   if (symCache.has(t.id)) return symCache.get(t.id);
   let out = null;
   const parent = dualParent(t);
@@ -1979,7 +2053,8 @@ function symInfo(t) {
   return out;
 }
 
-// Deriving all 32 costs about fifteen seconds, so it survives a reload.
+// Only a tiling the table does not cover is ever derived, so this is a spare
+// wheel now; it still saves what it works out, in case one is ever added.
 function loadSymCache() {
   try {
     const raw = JSON.parse(localStorage.getItem('lightsout.sym') || 'null');
@@ -1997,7 +2072,8 @@ function saveSymCache() {
 
 let symQueue = null, symReady = false;
 function scanSymmetry() {
-  if (!symQueue) symQueue = TILINGS.filter(t => !symCache.has(t.id));
+  // whatever the table answers needs no deriving, which is all of them
+  if (!symQueue) symQueue = TILINGS.filter(t => !(t.id in SYM_DATA) && !symCache.has(t.id));
   const until = performance.now() + 25;
   while (symQueue.length && performance.now() < until) symInfo(symQueue.shift());
   if (symQueue.length) { setTimeout(scanSymmetry, 0); return; }
