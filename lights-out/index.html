@@ -2349,7 +2349,7 @@ function rosetteAnchors(polys, src, C) {
    its hull best is kept. That is also what recovers the classic honeycomb: for
    the hexagonal tiling the turned hexagon gives 1, 7, 19, 37, 61 … exactly, the
    rings the board graph gave. */
-function regionLayers(polys, rim, C, src) {
+function regionLayers(polys, rim, C, src, adj) {
   const S = Math.PI / 3, dirs = [];
   const add = x => {
     let d = x % S;
@@ -2384,27 +2384,49 @@ function regionLayers(polys, rim, C, src) {
     let lim = Infinity;
     for (let i = 0; i < polys.length; i++) if (rim[i] && hc[i] < lim) lim = hc[i];
     const ord = Array.from(polys.keys()).sort((a, b) => hc[a] - hc[b]);
-    const levels = [], comp = [], run = new Map();
+    /* A tile holding on to the board by one edge is a bit poking out, and a size
+       with none of them is the one that looks cut rather than crumbled. Counting
+       them as the board grows costs nothing: each tile added tells its
+       neighbours, and a neighbour reaching two stops being one. */
+    const held = new Int32Array(polys.length), inside = new Uint8Array(polys.length);
+    let hanging = 0;
+    const levels = [], comp = [], loose = [], run = new Map();
     let full = false;
     for (let i = 0; i < ord.length; i++) {
-      const s = polys[ord[i]].length;
+      const x = ord[i], s = polys[x].length;
       run.set(s, (run.get(s) || 0) + 1);
+      inside[x] = 1;
+      let n = 0;
+      for (const j of adj[x]) if (inside[j]) { n++; if (++held[j] === 2) hanging--; }
+      held[x] = n;
+      if (n <= 1) hanging++;
       if (hc[ord[i]] >= lim) break;
       // one orbit of six or twelve comes in together, and has to be cut whole
       if (i + 1 < ord.length && hc[ord[i + 1]] <= hc[ord[i]] + HEX_TOL) continue;
       if (i + 1 > SHAPE_TILES) { full = true; break; }
       levels.push(i + 1);
       comp.push(new Map(run));
+      loose.push(i === 0 ? 0 : hanging);      // one tile alone pokes out of nothing
     }
     if (!levels.length) continue;
+    /* Keep the sizes with nothing poking out, where there are enough of them to
+       be a range. Squares and Triangles 5 is the plain case: 6, 42, 150 and 324
+       have not a tile hanging by one edge between them, and every other size it
+       offered had six apiece. */
+    let pick = levels, picked = comp;
+    const clean = levels.filter((_, i) => !loose[i]);
+    if (clean.length >= 3) {
+      pick = clean;
+      picked = comp.filter((_, i) => !loose[i]);
+    }
     /* Consistency is worth more than choice, so the banded run is taken even
        when it is much the shorter: the dodecagon tilings come down to three or
        four sizes where the raw levels offer a dozen — but a dozen of which half
        repeat the one before. Only where banding leaves too few to be a range at
        all does the raw list stand, which is a fact about those tilings: their
        dodecagons are so far apart that two shells is all that fits. */
-    const band = bandLevels(levels, comp);
-    const use = band.length >= 3 ? band : levels;
+    const band = bandLevels(pick, picked);
+    const use = band.length >= 3 ? band : pick;
     const order = ord.map(i => polys[i]);
     const sol = solidity(order.slice(0, use[use.length - 1]));
     /* On a tie the coarser shells win, because a shell that comes in whole is a
@@ -2529,9 +2551,12 @@ function shapePlan(t) {
        from one comes out short too, so the rim is where both shapes have to
        stop — and it says exactly where that is, which measuring against the
        radius only estimated: thirteen tilings quietly lost their outer ring. */
-    const rim = polys.map(() => false);
-    for (const e of topo.edgeMap.values()) if (e.length === 1) rim[e[0]] = true;
-    const comb = regionLayers(polys, rim, C, src), hex = hexLayers(polys, rim, C);
+    const rim = polys.map(() => false), adj = polys.map(() => []);
+    for (const e of topo.edgeMap.values()) {
+      if (e.length === 1) rim[e[0]] = true;
+      else if (e.length === 2) { adj[e[0]].push(e[1]); adj[e[1]].push(e[0]); }
+    }
+    const comb = regionLayers(polys, rim, C, src, adj), hex = hexLayers(polys, rim, C);
     plan = { C, comb, hex };
     // capped means the hexagons ran out at the size limit rather than at the rim
     const capped = !hex || hex.full;
