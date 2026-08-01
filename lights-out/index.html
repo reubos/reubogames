@@ -2425,11 +2425,11 @@ function verify() {
     } else if (t.aperiodic) {
       // no vertex or face uniformity to lean on: check it is a sound tiling and
       // that both rhombus shapes are present
-      const areas = new Set(faces.map(f => {
-        const p = f.poly;
-        return Math.round(Math.abs((p[1][0]-p[0][0])*(p[3][1]-p[0][1]) -
-                                   (p[1][1]-p[0][1])*(p[3][0]-p[0][0])) * 1000);
-      }));
+      /* The real area, not the cross product of two edges. For a rhombus the
+         two agree, which is why this went unnoticed, but the shortcut assumes
+         a parallelogram and would give an answer depending on which corner the
+         polygon started at for any aperiodic tiling not made of rhombi. */
+      const areas = new Set(faces.map(f => Math.round(Math.abs(polyArea(f.poly)) * 1000)));
       ok = badEdge === 0 && closed > 0 && sides.size === 1 && [...sides][0] === 4 &&
            areas.size === (t.rhombi || 2);
       detail = `rhombi=${[...areas].sort((a,b)=>a-b).map(a=>(a/1000).toFixed(3)).join('/')}`;
