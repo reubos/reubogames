@@ -6,12 +6,11 @@
 <title>Rotating Puzzle — Rhombitrihexagonal</title>
 <style>
   :root {
-    --bg: #1a3a1a;
-    --panel-2: #1c3a20;
-    --line: #2f5c38;
-    --text: #d4e8d4;
-    --muted: #86a886;
-    --accent: #4ade80;
+    --bg: #17181a;
+    --panel-2: #202225;
+    --line: #34373c;
+    --text: #e6e7e9;
+    --muted: #9a9da3;
   }
 
   * { box-sizing: border-box; }
@@ -39,11 +38,18 @@
 
   #board { width: 100%; height: auto; display: block; touch-action: manipulation; }
 
-  /* stroke-width is set on the <g> in render(): the tiling is built on edge
+  /* stroke-width is set on the <g>s in render(): the tiling is built on edge
      length 1, so it is a constant in user units and must not be set here. */
+
+  /* The parts carry a hairline of their own fill, so two halves of a tile meet
+     without the background showing through the seam between them. */
+  .part { stroke-linejoin: round; }
+
+  /* Tile outlines go over the parts, so a tile edge reads harder than the
+     split inside it. */
   .cell {
-    fill: #24422a;
-    stroke: #17301b;
+    fill: none;
+    stroke: #17181a;
     stroke-linejoin: round;
   }
 
@@ -53,7 +59,8 @@
 <body>
 <div class="wrap">
   <h1>Rotating Puzzle</h1>
-  <p class="sub">The rhombitrihexagonal tiling, 3.4.6.4, cut to the 61-tile honeycomb.</p>
+  <p class="sub">The rhombitrihexagonal tiling, 3.4.6.4, cut to the 61-tile honeycomb.
+    Every tile is divided between the hexagons around it.</p>
 
   <div class="panel">
     <svg id="board" xmlns="http://www.w3.org/2000/svg"></svg>
@@ -88,10 +95,36 @@ const B = [0, PITCH];
 const at = (a, b) => [a * A[0] + b * B[0], a * A[1] + b * B[1]];
 const key = (a, b) => a + ',' + b;
 
-// the centre and its six neighbours
-const HEXES = [[0, 0], [1, 0], [0, 1], [-1, 1], [-1, 0], [0, -1], [1, -1]];
-const hexSet = new Set(HEXES.map(h => key(h[0], h[1])));
-const isHex = (a, b) => hexSet.has(key(a, b));
+/* The centre and its six neighbours, and the colour each one owns. Clockwise
+   from the top on screen, which — since the board is drawn with y running up —
+   is the six neighbour directions taken in falling order of angle: 90°, 30°,
+   -30°, -90°, 150°... the last two being (-1,0) at 210° and (-1,1) at 150°. */
+const COLOURS = {
+  white:  '#f2f3f5',
+  red:    '#e5484d',
+  orange: '#f76b15',
+  yellow: '#f5cf24',
+  green:  '#3dbb63',
+  blue:   '#3b82f6',
+  purple: '#a855f7',
+  grey:   '#5a5e66'                         // off the board: no hexagon there
+};
+
+const HEXES = [
+  [ 0,  0, 'white'],
+  [ 0,  1, 'red'],                          // 90°, straight up
+  [ 1,  0, 'orange'],                       // 30°
+  [ 1, -1, 'yellow'],                       // -30°
+  [ 0, -1, 'green'],                        // -90°, straight down
+  [-1,  0, 'blue'],                         // -150°
+  [-1,  1, 'purple']                        // 150°
+];
+
+const hexColour = new Map(HEXES.map(h => [key(h[0], h[1]), h[2]]));
+const isHex = (a, b) => hexColour.has(key(a, b));
+// a lattice point off the board has no hexagon on it, so nothing to take a
+// colour from — the halves and kites facing it go grey
+const colourAt = (a, b) => hexColour.get(key(a, b)) || 'grey';
 
 const RANGE = 2;                            // far enough to reach every collar
 
@@ -123,6 +156,14 @@ const unit = (p, q) => {
   return [x / l, y / l];
 };
 
+const mid = (p, q) => [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2];
+
+/* A tile is one shape and a list of coloured parts. Every part faces one
+   lattice point and takes its colour from the hexagon standing there, so the
+   three tile shapes are three ways of dividing a tile between the hexagons
+   around it — the hexagon keeps itself, the square splits in half across the
+   lattice edge it straddles, and the triangle splits into three kites, one to
+   each corner. */
 const tiles = [];
 
 // hexagon: side 1, corners at 0°, 60°, ... so its edges face the neighbours
@@ -133,20 +174,32 @@ for (const [a, b] of HEXES) {
     const t = k * Math.PI / 3;
     poly.push([c[0] + Math.cos(t), c[1] + Math.sin(t)]);
   }
-  tiles.push({ sides: 6, cell: [a, b], centre: c, poly });
+  tiles.push({ sides: 6, cell: [a, b], centre: c, poly,
+               parts: [{ poly, colour: colourAt(a, b) }] });
 }
 
-// square: astride a lattice edge, one edge shared with each hexagon
+/* square: astride a lattice edge, one edge shared with each hexagon. Built on
+   the axis running from one lattice point to the other, so cutting it at the
+   middle of that axis is the split, and each half is the one nearer its end. */
 for (const [p, q] of EDGES) {
   const P = at(...p), Q = at(...q);
-  const m = [(P[0] + Q[0]) / 2, (P[1] + Q[1]) / 2];
+  const m = mid(P, Q);
   const [ux, uy] = unit(P, Q), wx = -uy, wy = ux;
-  const poly = [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([s, t]) =>
-    [m[0] + (s * ux + t * wx) / 2, m[1] + (s * uy + t * wy) / 2]);
-  tiles.push({ sides: 4, centre: m, poly });
+  const corner = (s, t) =>
+    [m[0] + (s * ux + t * wx) / 2, m[1] + (s * uy + t * wy) / 2];
+  const poly = [corner(-1, -1), corner(1, -1), corner(1, 1), corner(-1, 1)];
+  tiles.push({ sides: 4, centre: m, poly, parts: [
+    { poly: [corner(-1, -1), corner(0, -1), corner(0, 1), corner(-1, 1)],
+      colour: colourAt(...p) },
+    { poly: [corner(0, -1), corner(1, -1), corner(1, 1), corner(0, 1)],
+      colour: colourAt(...q) }
+  ] });
 }
 
-// triangle: on a lattice face, a corner pointing at each of the three hexagons
+/* triangle: on a lattice face, a corner pointing at each of the three hexagons.
+   The kite on a corner is that corner, the halves of the two edges meeting
+   there, and the centre — so the three kites divide the tile between the three
+   hexagons its corners point at. */
 for (const tri of FACES) {
   const C = tri.map(p => at(...p));
   const f = [(C[0][0] + C[1][0] + C[2][0]) / 3, (C[0][1] + C[1][1] + C[2][1]) / 3];
@@ -154,12 +207,24 @@ for (const tri of FACES) {
     const [ux, uy] = unit(f, c);
     return [f[0] + ux / S3, f[1] + uy / S3];
   });
-  tiles.push({ sides: 3, centre: f, poly });
+  const parts = poly.map((v, k) => ({
+    poly: [mid(poly[(k + 2) % 3], v), v, mid(v, poly[(k + 1) % 3]), f],
+    colour: colourAt(...tri[k])
+  }));
+  tiles.push({ sides: 3, centre: f, poly, parts });
 }
 
 // --- drawing ----------------------------------------------------------
 
+const NS = 'http://www.w3.org/2000/svg';
 const PAD = 0.2;
+
+const svgEl = (name, attrs) => {
+  const el = document.createElementNS(NS, name);
+  for (const k in attrs) el.setAttribute(k, attrs[k]);
+  return el;
+};
+const pts = poly => poly.map(p => p[0].toFixed(4) + ',' + p[1].toFixed(4)).join(' ');
 
 function render() {
   const svg = document.getElementById('board');
@@ -170,19 +235,31 @@ function render() {
     if (x > x1) x1 = x;
     if (y > y1) y1 = y;
   }
+  /* The maths has y running up, the way the angles above are written, and SVG
+     has it running down, so the board is flipped once here rather than every
+     coordinate being negated at the point it is worked out. The viewBox is in
+     the flipped frame, so its top edge is -y1. */
   svg.setAttribute('viewBox',
-    [x0 - PAD, y0 - PAD, x1 - x0 + 2 * PAD, y1 - y0 + 2 * PAD].join(' '));
+    [x0 - PAD, -y1 - PAD, x1 - x0 + 2 * PAD, y1 - y0 + 2 * PAD].join(' '));
+  const root = svgEl('g', { transform: 'scale(1,-1)' });
 
-  const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-  g.setAttribute('stroke-width', '0.05');
+  const fills = svgEl('g', { 'stroke-width': '0.01' });
+  for (const t of tiles)
+    for (const part of t.parts) {
+      const c = COLOURS[part.colour];
+      part.el = svgEl('polygon',
+        { class: 'part', points: pts(part.poly), fill: c, stroke: c });
+      fills.appendChild(part.el);
+    }
+
+  const edges = svgEl('g', { 'stroke-width': '0.05' });
   for (const t of tiles) {
-    const el = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
-    el.setAttribute('class', 'cell');
-    el.setAttribute('points', t.poly.map(p => p[0].toFixed(4) + ',' + p[1].toFixed(4)).join(' '));
-    g.appendChild(el);
-    t.el = el;
+    t.el = svgEl('polygon', { class: 'cell', points: pts(t.poly) });
+    edges.appendChild(t.el);
   }
-  svg.replaceChildren(g);
+
+  root.append(fills, edges);
+  svg.replaceChildren(root);
 
   const n = s => tiles.filter(t => t.sides === s).length;
   document.getElementById('counts').textContent =
