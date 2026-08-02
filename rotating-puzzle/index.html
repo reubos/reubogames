@@ -127,9 +127,21 @@
     color: var(--muted);
     user-select: none; -webkit-user-select: none;
   }
-  .plan span { padding: 1px 4px; border-radius: 4px; }
+  .plan span { padding: 1px 4px; border-radius: 4px; cursor: pointer; }
+  .plan span:hover { background: #2f333a; color: var(--text); }
   .plan .done { opacity: 0.3; }
   .plan .next { color: #fff; background: #3a3f47; }
+
+  /* stepping through the answer: back, where we are, forward */
+  .nav { display: inline-flex; align-items: center; gap: 8px; }
+  .nav button { padding: 8px 12px; line-height: 1; }
+  .nav #where {
+    font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+    font-size: 0.85rem;
+    color: var(--muted);
+    min-width: 4.5em;
+    text-align: center;
+  }
 </style>
 </head>
 <body>
@@ -147,7 +159,11 @@
     <button type="button" id="scramble">Scramble</button>
     <button type="button" id="reset">Reset puzzle</button>
     <button type="button" id="solve">Solve</button>
-    <button type="button" id="step" style="display:none">Step</button>
+    <span class="nav" id="nav" style="display:none">
+      <button type="button" id="back" title="Back one move">&#9664;</button>
+      <span id="where"></span>
+      <button type="button" id="step" title="Forward one move">&#9654;</button>
+    </span>
     <label class="toggle"><input type="checkbox" id="invert">Invert controls</label>
     <label class="toggle"><input type="checkbox" id="bandaged">Bandaged</label>
     <label class="toggle"><input type="checkbox" id="three">Three circles</label>
@@ -967,7 +983,7 @@ function buildKit() {
       library.push({ p: c, seq: X.seq.concat(Y.seq, back(X.seq), back(Y.seq)) });
     }
   }
-  return { parts, n, gens, library,
+  return { parts, n, gens, library, short, compose, invert,
            /* A colouring is one letter to a part, so the string is both the
               board and the key it is remembered by. Colour names would not do:
               they are words, and a string of them cannot be indexed by part,
@@ -998,6 +1014,47 @@ function simplifySolution(seq) {
       i = j;
     }
     out = next;
+  }
+  return out;
+}
+
+/* Window optimisation. The answer is a run of commutators laid end to end, and
+   where one ends and the next begins they undo a good deal of each other, so
+   stretches of it are longer than they need to be.
+
+   Every permutation within six turns is already written down — the library was
+   sifted out of that table — so tightening is a lookup and not a search. Take
+   a stretch of the answer, work out what it does, and if the table knows a
+   shorter run of turns that does the same, swap it in. What the stretch does
+   is read off prefix permutations: if P[k] is what the first k turns come to,
+   the stretch from i to j does P[i] undone and then P[j].
+
+   Longest stretches first, since a long one swapped for six turns is the
+   biggest win, and round again from the start after each swap: a swap changes
+   what its neighbours sit next to, and the stretch that would not tighten
+   before may tighten now. */
+const TIGHTEN_WINDOW = 14;
+
+function tightenSolution(seq) {
+  const { n, gens, short, compose, invert } = kit;
+  const ident = new Int8Array(n);
+  for (let i = 0; i < n; i++) ident[i] = i;
+  let out = seq.slice(), again = true;
+  while (again) {
+    again = false;
+    const P = [ident];
+    for (let k = 0; k < out.length; k++) P.push(compose(P[k], gens[out[k]]));
+    for (let i = 0; i < out.length && !again; i++) {
+      const undo = invert(P[i]);
+      const far = Math.min(out.length, i + TIGHTEN_WINDOW);
+      for (let j = far; j > i + 1; j--) {
+        const found = short.get(compose(undo, P[j]).join(','));
+        if (!found || found.length >= j - i) continue;
+        out = out.slice(0, i).concat(found, out.slice(j));
+        again = true;
+        break;
+      }
+    }
   }
   return out;
 }
@@ -1207,36 +1264,56 @@ const tokenText = t =>
   boardHexes[t.hex].parts[0].colour[0].toUpperCase() + (t.dir > 0 ? '+' : '-').repeat(t.n);
 
 function showPlan() {
-  const box = document.getElementById('plan');
-  const step = document.getElementById('step');
+  const box = document.getElementById('plan'), nav = document.getElementById('nav');
   if (!plan) {
     box.style.display = 'none';
     box.replaceChildren();
-    step.style.display = 'none';
+    nav.style.display = 'none';
     return;
   }
   box.style.display = '';
-  step.style.display = '';
-  step.disabled = planAt >= plan.length;
-  step.textContent = planAt >= plan.length ? 'Done' : `Step (${planAt + 1}/${plan.length})`;
+  nav.style.display = '';
+  document.getElementById('back').disabled = planAt <= 0;
+  document.getElementById('step').disabled = planAt >= plan.length;
+  document.getElementById('where').textContent = `${planAt} / ${plan.length}`;
   box.replaceChildren(...plan.map((t, i) => {
     const el = document.createElement('span');
     el.textContent = tokenText(t);
     el.className = i < planAt ? 'done' : i === planAt ? 'next' : '';
+    el.title = `Wind the board back to just before this move`;
+    // clicking a move winds to just before it, so it is the one coming next
+    el.addEventListener('click', () => goTo(i));
     return el;
   }));
 }
 
-function stepPlan() {
-  if (!plan || planAt >= plan.length) return;
-  const t = plan[planAt];
-  const hex = boardHexes[t.hex];
+/* Anywhere in the answer, forwards or back. Every turn undoes, so winding back
+   is the same walk the other way about. One move either side is shown turning;
+   a longer jump is not, since watching forty of them go by is no use. */
+function goTo(target) {
+  if (!plan) return;
+  target = Math.max(0, Math.min(plan.length, target));
+  if (target === planAt) return;
+  const single = Math.abs(target - planAt) === 1;
   settle();
-  for (let k = 0; k < t.n; k++) move(hex, t.dir);
+  let last = null, way = 0;
+  while (planAt < target) {
+    last = plan[planAt];
+    way = 1;
+    for (let k = 0; k < last.n; k++) move(boardHexes[last.hex], last.dir);
+    planAt++;
+  }
+  while (planAt > target) {
+    planAt--;
+    last = plan[planAt];
+    way = -1;
+    for (let k = 0; k < last.n; k++) move(boardHexes[last.hex], -last.dir);
+  }
   repaint(); refresh();
-  // wound back the whole run, so two turns sweep 120° and three sweep 180°
-  spin(hex, -t.dir * 60 * t.n, SPIN_MS + 70 * (t.n - 1));
-  planAt++;
+  if (single && last) {
+    const turn = last.dir * way;           // undoing a move runs it the other way
+    spin(boardHexes[last.hex], -turn * 60 * last.n, SPIN_MS + 70 * (last.n - 1));
+  }
   showPlan();
 }
 
@@ -1277,13 +1354,19 @@ document.getElementById('solve').addEventListener('click', async () => {
   const raw = await findSolution(n => say(`Working out an answer — ${n} parts still out of place.`));
   showSolveButton();
   if (!raw) { say('No answer found. Scramble again and try once more.'); return; }
-  plan = asPlan(simplifySolution(raw));
+  const loose = simplifySolution(raw);
+  say('Working out an answer — tightening it.');
+  await new Promise(r => setTimeout(r, 0));
+  const tight = simplifySolution(tightenSolution(loose));
+  plan = asPlan(tight);
   planAt = 0;
   showPlan();
   const turns = plan.reduce((n, t) => n + t.n, 0);
-  say(`${turns} turns in ${plan.length} moves. Step through them, or turn the board yourself.`);
+  say(`${turns} turns in ${plan.length} moves, down from ${raw.length}. ` +
+      `Step through them with the arrows, or click a move to wind there.`);
 });
-document.getElementById('step').addEventListener('click', stepPlan);
+document.getElementById('step').addEventListener('click', () => goTo(planAt + 1));
+document.getElementById('back').addEventListener('click', () => goTo(planAt - 1));
 document.getElementById('reset').addEventListener('click', () => {
   settle(); clearPlan(); reset(); repaint(); refresh(); showHint(); showSolveButton();
 });
