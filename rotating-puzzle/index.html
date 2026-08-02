@@ -51,7 +51,17 @@
     fill: none;
     stroke: #17181a;
     stroke-linejoin: round;
+    pointer-events: none;
   }
+
+  /* transparent, not none: a hexagon has to be there to be clicked */
+  .hit {
+    fill: transparent;
+    stroke: none;
+    stroke-linejoin: round;
+    cursor: pointer;
+  }
+  .hit:hover { stroke: rgba(255, 255, 255, 0.75); }
 
   .counts { color: var(--muted); font-size: 0.9rem; margin: 16px 0 0; }
 </style>
@@ -65,6 +75,9 @@
   <div class="panel">
     <svg id="board" xmlns="http://www.w3.org/2000/svg"></svg>
   </div>
+
+  <p class="counts">Click a hexagon to turn its collar anticlockwise, right-click to
+    turn it clockwise.</p>
 
   <p class="counts" id="counts"></p>
 </div>
@@ -174,7 +187,7 @@ for (const [a, b] of HEXES) {
     const t = k * Math.PI / 3;
     poly.push([c[0] + Math.cos(t), c[1] + Math.sin(t)]);
   }
-  tiles.push({ sides: 6, cell: [a, b], centre: c, poly,
+  tiles.push({ sides: 6, on: [[a, b]], centre: c, poly,
                parts: [{ poly, colour: colourAt(a, b) }] });
 }
 
@@ -188,7 +201,7 @@ for (const [p, q] of EDGES) {
   const corner = (s, t) =>
     [m[0] + (s * ux + t * wx) / 2, m[1] + (s * uy + t * wy) / 2];
   const poly = [corner(-1, -1), corner(1, -1), corner(1, 1), corner(-1, 1)];
-  tiles.push({ sides: 4, centre: m, poly, parts: [
+  tiles.push({ sides: 4, on: [p, q], centre: m, poly, parts: [
     { poly: [corner(-1, -1), corner(0, -1), corner(0, 1), corner(-1, 1)],
       colour: colourAt(...p) },
     { poly: [corner(0, -1), corner(1, -1), corner(1, 1), corner(0, 1)],
@@ -211,7 +224,78 @@ for (const tri of FACES) {
     poly: [mid(poly[(k + 2) % 3], v), v, mid(v, poly[(k + 1) % 3]), f],
     colour: colourAt(...tri[k])
   }));
-  tiles.push({ sides: 3, centre: f, poly, parts });
+  tiles.push({ sides: 3, on: tri, centre: f, poly, parts });
+}
+
+/* =====================================================================
+   THE COLLARS
+
+   A tile sits on the lattice points its parts face — the hexagon on its own
+   point, the square on the two ends of its edge, the triangle on the three
+   corners of its face. Turn that round and each hexagon's collar is the tiles
+   sitting on its point: itself, six squares and six triangles.
+
+   Those thirteen have a dodecagon for an outline. Every square gives one edge
+   to it, the one facing the hexagon next door, its other three going to the
+   hexagon and the two triangles beside it; and every triangle gives one, the
+   one facing away, its other two going to the two squares. Six and six.
+
+   The outline is carried to itself by a sixth-turn, so a collar can be turned
+   without the board changing shape, and squares land on squares and triangles
+   on triangles. The board is the seven collars, and they overlap: every square
+   is in two of them and every triangle in three, which is what makes turning
+   one collar disturb the next.
+   ===================================================================== */
+
+const hexTiles = tiles.filter(t => t.sides === 6);
+const hexAt = new Map(hexTiles.map(t => [key(...t.on[0]), t]));
+for (const h of hexTiles) h.collar = [];
+for (const t of tiles)
+  for (const p of t.on) {
+    const h = hexAt.get(key(...p));
+    if (h) h.collar.push(t);              // no hexagon off the board to collar it
+  }
+
+const centroid = poly => {
+  let x = 0, y = 0;
+  for (const p of poly) { x += p[0]; y += p[1]; }
+  return [x / poly.length, y / poly.length];
+};
+for (const t of tiles) for (const part of t.parts) part.centre = centroid(part.poly);
+
+// Parts are far wider than the drift in the arithmetic that places them, so a
+// part is found by whichever centre is nearest and the tolerance is only there
+// to catch a lookup that has missed altogether.
+const allParts = tiles.flatMap(t => t.parts);
+function partAt(x, y) {
+  let best = null, bd = Infinity;
+  for (const p of allParts) {
+    const d = (p.centre[0] - x) ** 2 + (p.centre[1] - y) ** 2;
+    if (d < bd) { bd = d; best = p; }
+  }
+  return bd < 1e-6 ? best : null;
+}
+
+/* Turning a collar moves whole tiles onto tiles of the same shape, so nothing
+   about the board changes but which colour is where. That is fixed by the
+   geometry, so it is worked out once: for every part of the collar, the part it
+   takes its colour from — which lies the other way round from the turn, so the
+   angle here is the turn reversed.
+
+   The board is drawn with y running up, so a turn that reads as clockwise is
+   a turn through a negative angle, and its parts come from +60°. */
+function turnMap(hex, ang) {
+  const C = hex.centre, co = Math.cos(ang), si = Math.sin(ang);
+  return hex.collar.flatMap(t => t.parts).map(part => {
+    const x = part.centre[0] - C[0], y = part.centre[1] - C[1];
+    const src = partAt(C[0] + x * co - y * si, C[1] + x * si + y * co);
+    if (!src) throw new Error('a collar that does not turn onto itself');
+    return [part, src];
+  });
+}
+for (const h of hexTiles) {
+  h.cw = turnMap(h, Math.PI / 3);
+  h.acw = turnMap(h, -Math.PI / 3);
 }
 
 // --- drawing ----------------------------------------------------------
@@ -225,6 +309,22 @@ const svgEl = (name, attrs) => {
   return el;
 };
 const pts = poly => poly.map(p => p[0].toFixed(4) + ',' + p[1].toFixed(4)).join(' ');
+
+// the hairline is the fill again, so the two halves of a tile meet without the
+// background showing through the seam between them
+function paint(part) {
+  const c = COLOURS[part.colour];
+  part.el.setAttribute('fill', c);
+  part.el.setAttribute('stroke', c);
+}
+
+/* A turn is read off before any of it is written back: every part takes the
+   colour its source had when the turn began, and a part's source is itself
+   another part of the same collar. */
+function turn(hex, map) {
+  const taken = map.map(([part, src]) => [part, src.colour]);
+  for (const [part, colour] of taken) { part.colour = colour; paint(part); }
+}
 
 function render() {
   const svg = document.getElementById('board');
@@ -244,13 +344,11 @@ function render() {
   const root = svgEl('g', { transform: 'scale(1,-1)' });
 
   const fills = svgEl('g', { 'stroke-width': '0.01' });
-  for (const t of tiles)
-    for (const part of t.parts) {
-      const c = COLOURS[part.colour];
-      part.el = svgEl('polygon',
-        { class: 'part', points: pts(part.poly), fill: c, stroke: c });
-      fills.appendChild(part.el);
-    }
+  for (const part of allParts) {
+    part.el = svgEl('polygon', { class: 'part', points: pts(part.poly) });
+    paint(part);
+    fills.appendChild(part.el);
+  }
 
   const edges = svgEl('g', { 'stroke-width': '0.05' });
   for (const t of tiles) {
@@ -258,8 +356,21 @@ function render() {
     edges.appendChild(t.el);
   }
 
-  root.append(fills, edges);
+  /* What is clicked is the hexagon, so the hexagons get a layer of their own
+     over the top: the parts underneath would do for a target, but a hexagon is
+     one part today and need not stay that way. */
+  const hits = svgEl('g', { 'stroke-width': '0.06' });
+  for (const h of hexTiles) {
+    h.hit = svgEl('polygon', { class: 'hit', points: pts(h.poly) });
+    h.hit.addEventListener('click', () => turn(h, h.acw));
+    h.hit.addEventListener('contextmenu', e => { e.preventDefault(); turn(h, h.cw); });
+    hits.appendChild(h.hit);
+  }
+
+  root.append(fills, edges, hits);
   svg.replaceChildren(root);
+  // right-clicking is a move, so the menu never wants to come up over the board
+  svg.addEventListener('contextmenu', e => e.preventDefault());
 
   const n = s => tiles.filter(t => t.sides === s).length;
   document.getElementById('counts').textContent =
