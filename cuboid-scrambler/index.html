@@ -851,6 +851,29 @@
         const stroke=f.isSel?'#bbbbbb':'#111';
         body+=`<polygon points="${f.corners.map(T).join(' ')}" fill="${f.col}" stroke="${stroke}" stroke-width="1" stroke-linejoin="round"/>`;
       }
+      // Constant-cube stretches each axis by a different amount, so cell sizes
+      // differ wildly between sides and a near edge-on side becomes a sliver of
+      // many thin cells -- which reads as a separate plate stuck to the shape,
+      // because nothing marks where one side of the cube ends and the next
+      // begins. Draw the cube's own edges (silhouette plus the visible interior
+      // ones) so the solid reads unambiguously. Geometry is unchanged: these lie
+      // exactly on the box already being drawn.
+      if (view && constCube) {
+        const seen = dirs.reduce((s,d)=>(s[d]=1,s),{});
+        const AXNAME=['x','y','z'];
+        for (let a=0;a<3;a++) {
+          const [b,cx]=[0,1,2].filter(i=>i!==a);
+          for (const sb of [-1,1]) for (const sc of [-1,1]) {
+            // an edge is worth drawing if either side meeting along it is visible
+            const fb=(sb>0?'+':'-')+AXNAME[b], fc=(sc>0?'+':'-')+AXNAME[cx];
+            if(!seen[fb] && !seen[fc]) continue;
+            const p0=[0,0,0], p1=[0,0,0];
+            p0[b]=p1[b]=sb*E[b]; p0[cx]=p1[cx]=sc*E[cx];
+            p0[a]=-E[a]; p1[a]=E[a];
+            body+=`<line x1="${T(projectPt(p0,view)).split(',')[0]}" y1="${T(projectPt(p0,view)).split(',')[1]}" x2="${T(projectPt(p1,view)).split(',')[0]}" y2="${T(projectPt(p1,view)).split(',')[1]}" stroke="#111" stroke-width="2.2" stroke-linecap="round"/>`;
+          }
+        }
+      }
       if(arrow){
         const ac='#ff4500';
         const head=(pen,tip)=>{ const dx=tip[0]-pen[0],dy=tip[1]-pen[1],l=Math.hypot(dx,dy)||1,ux=dx/l,uy=dy/l,s2=10;
