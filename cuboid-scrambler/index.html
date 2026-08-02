@@ -692,17 +692,35 @@
     // angle where the two disagree. Sides stay distinguishable via their cell
     // outlines and sticker colours rather than via a lighting gradient.
     const AMBIENT=0.48, DIFFUSE=0.52;
+    // Eye distance for the free view, as a multiple of the puzzle's own radius.
+    // Smaller exaggerates the vanishing point, larger flattens towards
+    // orthographic. 4.5 renders the near edge ~1.14x the far one -- enough to
+    // read as a cube without looking like a wide-angle lens.
+    const PERSP=4.5;
+    // Worst-case magnification from the perspective divide, over the bounding
+    // sphere. Naively that looks like d/(d-R), but a point at full depth R sits
+    // on the view axis with zero lateral offset, so it cannot reach that.
+    // Maximising r/(1 - z/d) subject to r^2 + z^2 = R^2 gives cos(theta) = R/d
+    // and a bound of 1/sqrt(1 - (R/d)^2) -- barely above 1, rather than the ~1.3
+    // the naive figure would have cost in canvas size.
+    const PERSP_MAG = 1/Math.sqrt(1 - 1/(PERSP*PERSP));
     // Free view (bottom image only): rotate by yaw then pitch, then project
     // orthographically. +z in view space points at the camera.
     function viewMatrix(yaw, pitch) {
       const cy=Math.cos(yaw), sy=Math.sin(yaw), cp=Math.cos(pitch), sp=Math.sin(pitch);
       return matMul([[1,0,0],[0,cp,-sp],[0,sp,cp]], [[cy,0,sy],[0,1,0],[-sy,0,cy]]);
     }
-    // Orthographic: a linear map, so parallel edges stay parallel at every angle.
+    // The free view uses a weak perspective divide. Orthographic keeps parallel
+    // edges parallel, which is geometrically proper but leaves the solid reading
+    // flat and ambiguous (the Necker-cube effect) -- the far side is drawn just
+    // as large as the near one, so it looks like it flares outwards. Converging
+    // edges are precisely the cue that resolves it, so the two cannot both be
+    // had. `view.d` is the eye distance in world units; larger is weaker.
     function projectPt(p, view) {
       if (!view) return project(p);
-      const q = matVec(view, p);
-      return [q[0]*PS, -q[1]*PS];
+      const q = matVec(view.m, p);
+      const f = view.d / (view.d - q[2]);
+      return [q[0]*PS*f, -q[1]*PS*f];
     }
     function shade(hex,f) {
       const n=parseInt(hex.slice(1),16); let r=(n>>16)&255,g=(n>>8)&255,b=n&255;
@@ -755,21 +773,25 @@
     // shortcut. Without it the original fixed-view path runs unchanged.
     function renderStateSVG(cubies, hi, constCube, maxPx, fit, viewM) {
       const occ=new Set(cubies.map(c=>c.pos.join(',')));
-      const view = viewM || null;
-      // Per-axis half-extents of the drawn solid: sizes the fixed canvas, and in
-      // constant-cube mode also defines the cube's surface (see the cull below).
+      // Per-axis half-extents of the drawn solid: sets the eye distance and the
+      // fixed canvas, and in constant-cube mode also defines the cube's surface
+      // (see the cull below).
       const E=[0,0,0];
       for (const c of cubies) {
         const p = constCube ? c.vpos : c.pos, hh = constCube ? c.vhalf : [1,1,1];
         for (let k=0;k<3;k++) E[k]=Math.max(E[k], Math.abs(p[k])+hh[k]);
       }
+      const Rw = Math.hypot(E[0],E[1],E[2]) || 1;
+      // Eye distance scales with the puzzle, so the effect is the same strength
+      // whatever its size.
+      const view = viewM ? { m: viewM, d: PERSP*Rw } : null;
       // Facing depends only on the camera, so resolve it once rather than per cubie.
-      const dirs = view ? Object.keys(DIRS).filter(d => matVec(view, DIRS[d])[2] > 1e-9) : VIS;
+      const dirs = view ? Object.keys(DIRS).filter(d => matVec(view.m, DIRS[d])[2] > 1e-9) : VIS;
       // Same for brightness: one factor per visible side, not per cubie.
       const shadeFor = {};
       for (const d of dirs) {
         // nv[2] is exactly how face-on the side is (1 = square to the camera).
-        if (view) shadeFor[d] = AMBIENT + DIFFUSE*Math.max(0, matVec(view, DIRS[d])[2]);
+        if (view) shadeFor[d] = AMBIENT + DIFFUSE*Math.max(0, matVec(view.m, DIRS[d])[2]);
         else shadeFor[d] = SHADE[d];
       }
       const faces=[];
@@ -810,7 +832,7 @@
           // (the old "force body faces to the back" hack papered over the cull
           // bug fixed above, and is no longer needed).
           const depth = view
-            ? matVec(view, center)[2]
+            ? matVec(view.m, center)[2]
             : center[0]+center[1]+center[2] + (dir==='+z'?0.5:dir==='+y'?0.25:0);
           faces.push({corners,col,depth,isSel});
         }
@@ -841,8 +863,10 @@
       // zoom) at every angle, shifting the page around it. Size it once to the
       // bounding sphere instead -- the puzzle rotates about the origin, so a
       // square that fits the sphere fits every orientation, at a constant scale.
+      // Scale by the perspective divide's exact worst-case magnification, so the
+      // never-clips guarantee holds without wasting canvas.
       if (view) {
-        const R = (Math.hypot(E[0],E[1],E[2]) || 1) * PS;
+        const R = Rw * PS * PERSP_MAG;
         pad = 4; w = h = 2*R + 2*pad;
         T = p => `${(p[0]+R+pad).toFixed(1)},${(p[1]+R+pad).toFixed(1)}`;
       }
