@@ -69,6 +69,17 @@
     pointer-events: none;
   }
 
+  /* the no-turn mark, standing on a hexagon whose collar is locked. Dark
+     enough to read on all seven hexagon colours, none of which is dark. */
+  .mark {
+    fill: none;
+    stroke: #17181a;
+    stroke-width: 0.085;
+    stroke-linecap: round;
+    opacity: 0.9;
+    pointer-events: none;                 /* the hexagon under it is still the target */
+  }
+
   /* transparent, not none: a hexagon has to be there to be clicked */
   .hit {
     fill: transparent;
@@ -587,7 +598,11 @@ function refresh() {
     if (on) for (const t of s.tiles) glued.add(t);
   }
   for (const t of tiles) t.el.style.display = glued.has(t) ? 'none' : '';
-  for (const h of hexTiles) h.hit.classList.toggle('stuck', stuck(h));
+  for (const h of hexTiles) {
+    const locked = stuck(h);
+    h.hit.classList.toggle('stuck', locked);
+    h.mark.style.display = locked ? '' : 'none';
+  }
 }
 
 // the bandages a collar carries round with it
@@ -731,6 +746,23 @@ function render() {
     bandLayer.appendChild(s.el);
   }
 
+  /* The no-turn mark: a ring with a bar across it, standing at the centre of
+     each hexagon and shown while a bandage locks its collar. It never has to
+     turn — a hexagon is only ever in its own collar, and a collar that will not
+     turn does not move — so it sits in a layer of its own that nothing spins. */
+  const MARK_R = 0.28, bar = MARK_R / Math.SQRT2;
+  const marks = svgEl('g');
+  for (const h of hexTiles) {
+    const [cx, cy] = h.centre;
+    h.mark = svgEl('g', { class: 'mark' });
+    h.mark.append(
+      svgEl('circle', { cx, cy, r: MARK_R }),
+      // upper left to lower right on screen, so drawn the other way up here
+      svgEl('line', { x1: cx - bar, y1: cy + bar, x2: cx + bar, y2: cy - bar }));
+    h.mark.style.display = 'none';
+    marks.appendChild(h.mark);
+  }
+
   /* What is clicked is the hexagon, so the hexagons get a layer of their own
      over the top: the parts underneath would do for a target, but a hexagon is
      one part today and need not stay that way. */
@@ -743,7 +775,7 @@ function render() {
     hits.appendChild(h.hit);
   }
 
-  root.append(fills, edges, bandLayer, hits);
+  root.append(fills, edges, bandLayer, marks, hits);
   svg.replaceChildren(root);
   // right-clicking is a move, so the menu never wants to come up over the board
   svg.addEventListener('contextmenu', e => e.preventDefault());
