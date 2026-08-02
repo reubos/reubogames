@@ -213,6 +213,61 @@
       .full-scramble { background: #2a2a28; border-color: #444; color: #e8e8e4; }
       h1 { color: #e8e8e4; }
     }
+
+    /* ---- settings dialog ---- */
+    #settings-overlay {
+      position: fixed; inset: 0; z-index: 2000;
+      background: rgba(0,0,0,0.35);
+      display: flex; align-items: center; justify-content: center; padding: 1rem;
+    }
+    #settings-overlay[hidden] { display: none; }
+
+    .modal {
+      background: #f5f5f0;
+      border: 0.5px solid #ccc;
+      border-radius: 12px;
+      width: 100%; max-width: 540px; max-height: 85vh;
+      overflow-y: auto;
+      padding: 18px 20px 20px;
+      box-shadow: 0 8px 30px rgba(0,0,0,0.18);
+    }
+    .modal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+    .modal-head h2 { font-size: 17px; font-weight: 500; }
+    .modal-head button { border: none; background: none; font-size: 20px; line-height: 1; padding: 4px 8px; color: #666; }
+    .modal-head button:hover { background: none; color: #1a1a18; }
+
+    .setting { display: flex; align-items: flex-start; gap: 16px; padding: 13px 0; border-top: 0.5px solid #e0e0da; }
+    .setting-text { flex: 1; }
+    .setting-name { font-size: 14px; font-weight: 500; margin-bottom: 3px; }
+    .setting-desc { font-size: 12px; color: #666; line-height: 1.45; }
+
+    /* toggle switch (replaces the plain checkbox) */
+    .switch { position: relative; display: inline-block; flex: none; width: 40px; height: 22px; margin: 2px 0 0; cursor: pointer; }
+    .switch input { position: absolute; opacity: 0; width: 0; height: 0; }
+    .switch .track { position: absolute; inset: 0; border-radius: 11px; background: #ccc; transition: background .15s; }
+    .switch .track::before {
+      content: ''; position: absolute; left: 2px; top: 2px; width: 18px; height: 18px;
+      border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,0.25);
+      transition: transform .15s;
+    }
+    .switch input:checked + .track { background: #1a1a18; }
+    .switch input:checked + .track::before { transform: translateX(18px); }
+    .switch input:focus-visible + .track { box-shadow: 0 0 0 3px rgba(0,0,0,0.15); }
+
+    @media (prefers-color-scheme: dark) {
+      .modal { background: #23231f; border-color: #444; }
+      .modal-head h2 { color: #e8e8e4; }
+      .modal-head button { color: #999; }
+      .modal-head button:hover { color: #e8e8e4; }
+      .setting { border-top-color: #3a3a36; }
+      .setting-name { color: #e8e8e4; }
+      .setting-desc { color: #999; }
+      .switch .track { background: #444; }
+      .switch .track::before { background: #e8e8e4; }
+      .switch input:checked + .track { background: #e8e8e4; }
+      .switch input:checked + .track::before { background: #1a1a18; }
+      .switch input:focus-visible + .track { box-shadow: 0 0 0 3px rgba(255,255,255,0.2); }
+    }
   </style>
 </head>
 <body>
@@ -239,34 +294,64 @@
 
     <div id="sliders-container"></div>
 
-    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
       <button onclick="doGenerate()">Generate scramble</button>
-      <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;user-select:none;">
-        <input type="checkbox" id="wide-toggle" checked onchange="clearScramble()">
-        Wide moves (e.g. 3Rw)
-      </label>
-      <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;user-select:none;" title="For the axis that bandages next phase, only scramble the outer layers about to be frozen; deeper layers are mixed in later phases.">
-        <input type="checkbox" id="efficient-toggle" onchange="clearScramble()">
-        Efficient mode
-      </label>
-      <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;user-select:none;" title="Layer numbers count distance from the outside of each axis's own full size, never renumbered per phase, instead of the current reduction's movable layers.">
-        <input type="checkbox" id="outside-numbering-toggle" onchange="clearScramble()">
-        Outside-numbered layers
-      </label>
-      <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;user-select:none;" title="All-even or all-odd puzzles only: draw as a fixed N=max(w,h,d) cube, with shorter axes' outer layers drawn thicker instead of shapeshifting. Display only -- the scramble and its reductions are unchanged.">
-        <input type="checkbox" id="constcube-toggle" onchange="onDisplayOptionChange()">
-        Constant-cube view
-      </label>
-      <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;user-select:none;" title="Hovering a move shows the coloured, shapeshifted puzzle state just before that move, with the turning layer highlighted. Unchecked shows the plain reduced-cuboid schematic instead.">
-        <input type="checkbox" id="state-diagram-toggle" checked onchange="onDisplayOptionChange()">
-        Show shapeshifted state for hovered moves
-      </label>
+      <button onclick="openSettings()" aria-haspopup="dialog"><i class="ti ti-settings" style="font-size:14px;margin-right:5px;vertical-align:-2px;"></i>Settings</button>
     </div>
-    <div id="constcube-note" style="display:none;font-size:12px;color:#666;margin-top:-6px;margin-bottom:8px;"></div>
 
     <div id="out"></div>
   </div>
   <div id="move-tooltip"><div id="move-tooltip-inner"></div></div>
+
+  <div id="settings-overlay" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+      <div class="modal-head">
+        <h2 id="settings-title">Settings</h2>
+        <button id="settings-close" aria-label="Close settings">&times;</button>
+      </div>
+
+      <div class="setting">
+        <div class="setting-text">
+          <div class="setting-name">Wide moves</div>
+          <div class="setting-desc">Write multi-layer turns as wide moves (<code>3Rw</code>), meaning every layer from that face inwards. When off they are written as single slices (<code>3R</code>), turning only that one layer. This changes which pieces you turn, not just how the move is written.</div>
+        </div>
+        <label class="switch"><input type="checkbox" id="wide-toggle" checked onchange="onSettingChange('clear')"><span class="track"></span></label>
+      </div>
+
+      <div class="setting">
+        <div class="setting-text">
+          <div class="setting-name">Efficient mode</div>
+          <div class="setting-desc">On the axis that bandages next phase, only scramble the layers whose independence is about to be lost. Deeper layers survive the reduction and get mixed in later phases, so no scrambling is wasted on pieces that will be rearranged anyway.</div>
+        </div>
+        <label class="switch"><input type="checkbox" id="efficient-toggle" onchange="onSettingChange('clear')"><span class="track"></span></label>
+      </div>
+
+      <div class="setting">
+        <div class="setting-text">
+          <div class="setting-name">Outside-numbered layers</div>
+          <div class="setting-desc">Number layers by their distance from the outside of the puzzle's full size, fixed for the whole scramble. By default layers are renumbered every phase to count only the ones currently movable, so the same name can mean a different layer later on.</div>
+        </div>
+        <label class="switch"><input type="checkbox" id="outside-numbering-toggle" onchange="onSettingChange('clear')"><span class="track"></span></label>
+      </div>
+
+      <div class="setting">
+        <div class="setting-text">
+          <div class="setting-name">Constant-cube view</div>
+          <div class="setting-desc">Draw the puzzle as a fixed cube, with the shorter axes' outer layers drawn thicker, so it never appears to change shape. Needs all-even or all-odd dimensions. Affects the diagrams only — the scramble itself is unchanged.</div>
+          <div id="constcube-note" style="display:none;font-size:12px;color:#666;margin-top:5px;"></div>
+        </div>
+        <label class="switch"><input type="checkbox" id="constcube-toggle" onchange="onSettingChange('display')"><span class="track"></span></label>
+      </div>
+
+      <div class="setting">
+        <div class="setting-text">
+          <div class="setting-name">Show shapeshifted state for hovered moves</div>
+          <div class="setting-desc">Hovering a move shows the coloured puzzle as it actually looks at that point in the scramble, with the layer about to turn highlighted. When off, hovering shows a plain schematic of the reduced cuboid instead.</div>
+        </div>
+        <label class="switch"><input type="checkbox" id="state-diagram-toggle" checked onchange="onSettingChange('display')"><span class="track"></span></label>
+      </div>
+    </div>
+  </div>
 
   <script>
     function isConstCube() { return document.getElementById('constcube-toggle').checked; }
@@ -307,6 +392,36 @@
       _tipCache = null; _replay = null;
       renderFinalState();
     }
+
+    // ---- settings persistence + dialog ----
+    const SETTING_IDS = ['wide-toggle', 'efficient-toggle', 'outside-numbering-toggle', 'constcube-toggle', 'state-diagram-toggle'];
+    const SETTINGS_KEY = 'cuboid-scrambler:settings';
+    // localStorage can throw outright (private modes, blocked file:// origins),
+    // so every access is guarded -- failing to persist should never break the page.
+    function loadSettings() {
+      let saved;
+      try { saved = JSON.parse(localStorage.getItem(SETTINGS_KEY) || 'null'); } catch (e) { return; }
+      if (!saved || typeof saved !== 'object') return;
+      for (const id of SETTING_IDS) {
+        if (typeof saved[id] === 'boolean') document.getElementById(id).checked = saved[id];
+      }
+    }
+    function saveSettings() {
+      const o = {};
+      for (const id of SETTING_IDS) o[id] = document.getElementById(id).checked;
+      try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(o)); } catch (e) { /* not persisted */ }
+    }
+    // 'display' settings only change how things are drawn, so the scramble is
+    // kept; 'clear' settings change which pieces actually turn, so it isn't.
+    function onSettingChange(kind) {
+      saveSettings();
+      if (kind === 'display') onDisplayOptionChange(); else clearScramble();
+    }
+    function openSettings() {
+      document.getElementById('settings-overlay').hidden = false;
+      document.getElementById('settings-close').focus();
+    }
+    function closeSettings() { document.getElementById('settings-overlay').hidden = true; }
 
     function getN() {
       return Array.from(document.querySelectorAll('.phase-slider')).map(s => parseInt(s.value));
@@ -1139,6 +1254,15 @@
       });
     })();
 
+    (function(){
+      const overlay = document.getElementById('settings-overlay');
+      document.getElementById('settings-close').addEventListener('click', closeSettings);
+      // click the backdrop (but not the panel itself) to dismiss
+      overlay.addEventListener('click', e => { if (e.target === overlay) closeSettings(); });
+      document.addEventListener('keydown', e => { if (e.key === 'Escape' && !overlay.hidden) closeSettings(); });
+    })();
+
+    loadSettings();   // must precede the first draw: the preview honours these
     drawCuboid();
   </script>
 </body>
