@@ -659,21 +659,23 @@ function reset() {
    backwards. Long enough that nothing is left where it started, which takes
    more than it looks: the seven collars overlap, so turns near enough to each
    other partly undo one another. */
-/* Long enough that the board reaches the mixed state instead of stopping
-   somewhere on the way to it. Counting how many of the 139 parts end up on a
-   colour other than the one they start with, and averaging over forty
-   scrambles, the plain puzzle climbs to about 106 and is there by 160 turns.
-   The bandaged one is still at 97 after 160 and does not level off until past
-   600: with a bandage lying across a collar there are often only a handful of
-   moves to pick from, and a good many of them undo one another, so the walk
-   keeps going back over its own ground. */
-const SCRAMBLE_TURNS = 200;
-const SCRAMBLE_TURNS_BANDAGED = 600;
+/* Long enough that either board reaches the mixed state rather than stopping
+   somewhere on the way to it. Counting how many of the 139 parts finish on a
+   colour other than the one they started on, averaged over forty scrambles,
+   the plain puzzle climbs to about 106 and is there by 160 turns. The bandaged
+   one is still at 97 after 160 and does not level off until past 600: with a
+   bandage lying across a collar there are often only a handful of moves to
+   pick from, and a good many of them undo one another, so the walk keeps going
+   back over its own ground.
+
+   A thousand clears both with room to spare, and one number does for the two
+   of them. It costs nothing worth counting: a move only touches the model, and
+   a thousand of them run in about ten milliseconds. */
+const SCRAMBLE_TURNS = 1000;
 
 function scramble() {
   settle();
-  const n = bandaged ? SCRAMBLE_TURNS_BANDAGED : SCRAMBLE_TURNS;
-  for (let i = 0; i < n; i++) {
+  for (let i = 0; i < SCRAMBLE_TURNS; i++) {
     // only from the collars that will turn, so a scramble is a run of real
     // moves and can always be walked back the way it came
     const free = hexTiles.filter(h => !stuck(h));
