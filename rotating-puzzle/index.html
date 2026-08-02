@@ -439,10 +439,73 @@ const repaint = () => allParts.forEach(paint);
 
 /* A turn is read off before any of it is written back: every part takes the
    colour its source had when the turn began, and a part's source is itself
-   another part of the same collar. */
-function turn(hex, map) {
+   another part of the same collar. `dir` is +1 for anticlockwise and -1 for
+   clockwise, which — the frame having y up — are the signs of the angle too. */
+function move(hex, dir) {
+  const map = dir > 0 ? hex.acw : hex.cw;
   const taken = map.map(([part, src]) => [part, src.colour]);
   for (const [part, colour] of taken) { part.colour = colour; paint(part); }
+}
+
+/* ---- showing a turn -------------------------------------------------
+
+   The collar fills the disc its circle bounds, exactly: the thirteen tiles
+   meet the circle and stop there, and no other tile crosses it. So turning
+   their elements about the centre is a shuffling of the disc among itself —
+   it stays covered the whole way round, the rest of the board is untouched,
+   and nothing can show through between them. Being a circle it holds at every
+   angle and not merely at the sixths, which is what makes it worth watching.
+
+   The move is made first and the picture wound back to where it came from,
+   then played forward. So the model is never behind what is on screen, and a
+   turn interrupted part way is already finished as far as the puzzle is
+   concerned — the next click only has to drop the transform and go. */
+const SPIN_MS = 200;
+const ease = u => 1 - (1 - u) ** 3;       // away quickly, settling onto the end
+
+let spinning = null;                      // undoes the turn being shown, if any
+const settle = () => { if (spinning) spinning(); };
+
+function spin(hex, from) {
+  const els = hex.collar.flatMap(t => [t.el, ...t.parts.map(p => p.el)]);
+  const [cx, cy] = hex.centre;
+  const place = a => {
+    const tr = `rotate(${a.toFixed(3)} ${cx.toFixed(4)} ${cy.toFixed(4)})`;
+    for (const el of els) el.setAttribute('transform', tr);
+  };
+  let raf = 0, backstop = 0;
+  const stop = () => {
+    cancelAnimationFrame(raf);
+    clearTimeout(backstop);
+    for (const el of els) el.removeAttribute('transform');
+    spinning = null;
+  };
+  const t0 = performance.now();
+  const step = now => {
+    /* Clamped at both ends. A frame carries the time it began, which can be
+       earlier than the moment the turn was asked for, and a negative fraction
+       run through the easing sends the collar back past where it started —
+       a sixth of a turn that jumps to a fifth before it comes down. */
+    const u = Math.min(1, Math.max(0, (now - t0) / SPIN_MS));
+    if (u < 1) { place(from * (1 - ease(u))); raf = requestAnimationFrame(step); }
+    else stop();
+  };
+  place(from);
+  spinning = stop;
+  raf = requestAnimationFrame(step);
+  /* Frames stop coming to a tab nobody is looking at, and the move is already
+     made, so without this the board would be found afterwards still wound back
+     a sixth from colours that had long since moved. A timer is not throttled
+     the same way, so it puts the picture straight whether the frames ran or
+     not — and if they did, it has nothing left to do. */
+  backstop = setTimeout(stop, SPIN_MS + 300);
+}
+
+// a turn, shown: made at once, then wound back a sixth and played forward
+function turn(hex, dir) {
+  settle();
+  move(hex, dir);
+  spin(hex, -dir * 60);
 }
 
 /* The colouring the board is solved in, and the one it starts from: every part
@@ -461,10 +524,10 @@ function reset() {
    other partly undo one another. */
 const SCRAMBLE_TURNS = 40;
 function scramble() {
-  for (let i = 0; i < SCRAMBLE_TURNS; i++) {
-    const h = hexTiles[Math.floor(Math.random() * hexTiles.length)];
-    turn(h, Math.random() < 0.5 ? h.cw : h.acw);
-  }
+  settle();
+  for (let i = 0; i < SCRAMBLE_TURNS; i++)
+    move(hexTiles[Math.floor(Math.random() * hexTiles.length)],
+         Math.random() < 0.5 ? 1 : -1);
 }
 
 function render() {
@@ -510,8 +573,8 @@ function render() {
   const hits = svgEl('g', { 'stroke-width': '0.06' });
   for (const h of hexTiles) {
     h.hit = svgEl('path', { class: 'hit', d: pathOf(h.outline) });
-    h.hit.addEventListener('click', () => turn(h, h.acw));
-    h.hit.addEventListener('contextmenu', e => { e.preventDefault(); turn(h, h.cw); });
+    h.hit.addEventListener('click', () => turn(h, 1));
+    h.hit.addEventListener('contextmenu', e => { e.preventDefault(); turn(h, -1); });
     hits.appendChild(h.hit);
   }
 
@@ -528,7 +591,9 @@ function render() {
 reset();
 render();
 document.getElementById('scramble').addEventListener('click', scramble);
-document.getElementById('reset').addEventListener('click', () => { reset(); repaint(); });
+document.getElementById('reset').addEventListener('click', () => {
+  settle(); reset(); repaint();
+});
 </script>
 </body>
 </html>
