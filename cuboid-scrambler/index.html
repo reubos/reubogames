@@ -312,10 +312,10 @@
 
       <div class="setting">
         <div class="setting-text">
-          <div class="setting-name">Wide moves</div>
-          <div class="setting-desc">Write multi-layer turns as wide moves (<code>3Rw</code>), meaning every layer from that face inwards. When off they are written as single slices (<code>3R</code>), turning only that one layer. This changes which pieces you turn, not just how the move is written.</div>
+          <div class="setting-name">Slice moves</div>
+          <div class="setting-desc">Scramble using slice moves (eg. <code>3R</code>), turning only that one layer. When off, scramble using wide moves, meaning every layer from the outside to that layer is turned. This changes which pieces you turn, not just how the move is written, but both settings should reach roughly equally random states.</div>
         </div>
-        <label class="switch"><input type="checkbox" id="wide-toggle" checked onchange="onSettingChange('clear')"><span class="track"></span></label>
+        <label class="switch"><input type="checkbox" id="slice-toggle" onchange="onSettingChange('clear')"><span class="track"></span></label>
       </div>
 
       <div class="setting">
@@ -337,7 +337,7 @@
       <div class="setting">
         <div class="setting-text">
           <div class="setting-name">Constant-cube view</div>
-          <div class="setting-desc">Draw the puzzle as a fixed cube, with the shorter axes' outer layers drawn thicker, so it never appears to change shape. Needs all-even or all-odd dimensions. Affects the diagrams only — the scramble itself is unchanged.</div>
+          <div class="setting-desc">Draw the puzzle as a fixed cube, with the shorter axes' outer layers drawn thicker, so it never appears to change shape. Needs all-even or all-odd dimensions. Affects the diagrams only — the scramble itself and the functionality is unchanged.</div>
           <div id="constcube-note" style="display:none;font-size:12px;color:#666;margin-top:5px;"></div>
         </div>
         <label class="switch"><input type="checkbox" id="constcube-toggle" onchange="onSettingChange('display')"><span class="track"></span></label>
@@ -394,7 +394,7 @@
     }
 
     // ---- settings persistence + dialog ----
-    const SETTING_IDS = ['wide-toggle', 'efficient-toggle', 'outside-numbering-toggle', 'constcube-toggle', 'state-diagram-toggle'];
+    const SETTING_IDS = ['slice-toggle', 'efficient-toggle', 'outside-numbering-toggle', 'constcube-toggle', 'state-diagram-toggle'];
     const SETTINGS_KEY = 'cuboid-scrambler:settings';
     // localStorage can throw outright (private modes, blocked file:// origins),
     // so every access is guarded -- failing to persist should never break the page.
@@ -513,7 +513,8 @@
       }
       return pool;
     }
-    function isWide() { return document.getElementById('wide-toggle').checked; }
+    // Wide is the default; the setting is expressed as its opposite (slice).
+    function isWide() { return !document.getElementById('slice-toggle').checked; }
     // mandatoryWide (if passed) forces the "w" flag regardless of the wide
     // toggle -- used for outside-numbered layers whose own group is
     // genuinely bandaged (no single-slice interpretation is physically valid).
@@ -679,13 +680,31 @@
     const PS=20, PAX=0.55, PAY=0.42;
     const project=([x,y,z])=>[ x*PS - z*PS*PAX, -y*PS + z*PS*PAY ];
     const VIS=['+x','+y','+z'];
-    const SHADE={ '+z':1.0, '+y':0.86, '+x':0.72 };
+    // Brightness is keyed to the WORLD face, not the camera, so it stays put
+    // while the free view rotates -- the puzzle reads consistently at any angle
+    // and matches the fixed-view diagrams exactly at the default orientation.
+    const SHADE={ '+z':1.0, '+y':0.86, '+x':0.72, '-z':0.80, '-y':0.62, '-x':0.56 };
+    // Free view (bottom image only): rotate by yaw then pitch, then project
+    // orthographically. +z in view space points at the camera.
+    function viewMatrix(yaw, pitch) {
+      const cy=Math.cos(yaw), sy=Math.sin(yaw), cp=Math.cos(pitch), sp=Math.sin(pitch);
+      return matMul([[1,0,0],[0,cp,-sp],[0,sp,cp]], [[cy,0,sy],[0,1,0],[-sy,0,cy]]);
+    }
+    function projectPt(p, view) {
+      if (!view) return project(p);
+      const q = matVec(view, p);
+      return [q[0]*PS, -q[1]*PS];
+    }
     function shade(hex,f) {
       const n=parseInt(hex.slice(1),16); let r=(n>>16)&255,g=(n>>8)&255,b=n&255;
       r=Math.round(r*f); g=Math.round(g*f); b=Math.round(b*f);
       return '#'+((1<<24)+(r<<16)+(g<<8)+b).toString(16).slice(1);
     }
-    const INPLANE={ '+x':[[0,1,0],[0,0,1]], '+y':[[1,0,0],[0,0,1]], '+z':[[1,0,0],[0,1,0]] };
+    // The two in-plane axes for each face normal. Negative faces reuse their
+    // positive counterpart's pair (winding doesn't matter -- filled polygons,
+    // no backface culling), and are only ever needed by the free view.
+    const INPLANE={ '+x':[[0,1,0],[0,0,1]], '+y':[[1,0,0],[0,0,1]], '+z':[[1,0,0],[0,1,0]],
+                    '-x':[[0,1,0],[0,0,1]], '-y':[[1,0,0],[0,0,1]], '-z':[[1,0,0],[0,1,0]] };
     // Bent arrow hugging one cube corner from outside; legs run parallel to the
     // two silhouette edges meeting there, so the bend matches the outline.
     const ARROW_CORNER={ U:[-1,+1,-1], D:[+1,-1,+1], R:[+1,-1,-1], L:[-1,+1,+1], F:[-1,-1,+1], B:[+1,+1,-1] };
@@ -721,13 +740,19 @@
       return { bx:ox, by:oy, paths: mv.mod==='2' ? [bracket(pushOut), bracket(pushOut+ringGap)] : [bracket(pushOut)] };
     }
     // Returns a self-contained <svg> string for the given state.
-    function renderStateSVG(cubies, hi, constCube, maxPx, fit) {
+    // `view` (optional) switches to the free rotatable camera used by the
+    // bottom image: all six faces become candidates and are culled by facing,
+    // and depth comes from the true view axis instead of the fixed-view x+y+z
+    // shortcut. Without it the original fixed-view path runs unchanged.
+    function renderStateSVG(cubies, hi, constCube, maxPx, fit, view) {
       const occ=new Set(cubies.map(c=>c.pos.join(',')));
+      // Facing depends only on the camera, so resolve it once rather than per cubie.
+      const dirs = view ? Object.keys(DIRS).filter(d => matVec(view, DIRS[d])[2] > 1e-9) : VIS;
       const faces=[];
       for (const c of cubies) {
         const isSel = hi && hi.sel.has(c.fc[hi.k]);
         const ws = worldStickers(c);
-        for (const dir of VIS) {
+        for (const dir of dirs) {
           const n=DIRS[dir];
           const nb=[c.pos[0]+2*n[0],c.pos[1]+2*n[1],c.pos[2]+2*n[2]];
           if(occ.has(nb.join(',')))continue;   // interior face (real adjacency, unaffected by display stretch)
@@ -741,20 +766,23 @@
             u=u0; v=v0;
           }
           const corners=[[+1,+1],[+1,-1],[-1,-1],[-1,+1]].map(([su,sv])=>
-            project([center[0]+su*u[0]+sv*v[0], center[1]+su*u[1]+sv*v[1], center[2]+su*u[2]+sv*v[2]]));
+            projectPt([center[0]+su*u[0]+sv*v[0], center[1]+su*u[1]+sv*v[1], center[2]+su*u[2]+sv*v[2]], view));
           const name=ws[dir]; const isBody=!name;
           let col=shade(HEX[name]||HEX.Body, SHADE[dir]);
           if(hi && !isSel) col=shade(col,0.4);   // dull everything but the turning layer
           // A body face should never be visibly exposed in constant-cube mode (it
           // only exists because the puzzle briefly shapeshifts, which this mode
-          // hides), so force it furthest back rather than trusting the scalar depth.
-          let depth = center[0]+center[1]+center[2] + (dir==='+z'?0.5:dir==='+y'?0.25:0);
+          // hides), so force it furthest back rather than trusting the depth key.
+          let depth = view
+            ? matVec(view, center)[2]
+            : center[0]+center[1]+center[2] + (dir==='+z'?0.5:dir==='+y'?0.25:0);
           if(constCube && isBody) depth -= 1000;
           faces.push({corners,col,depth,isSel});
         }
       }
       faces.sort((a,b)=>a.depth-b.depth);
-      const arrow = hi ? buildArrow(cubies, hi.mv, constCube) : null;
+      // The arrow's corner/silhouette geometry is built for the fixed view only.
+      const arrow = (hi && !view) ? buildArrow(cubies, hi.mv, constCube) : null;
       let dminX=1e9,dminY=1e9,dmaxX=-1e9,dmaxY=-1e9;
       for(const f of faces)for(const p of f.corners){ dminX=Math.min(dminX,p[0]);dminY=Math.min(dminY,p[1]);dmaxX=Math.max(dmaxX,p[0]);dmaxY=Math.max(dmaxY,p[1]); }
       if(!faces.length) return '';
@@ -1200,9 +1228,19 @@
         return;
       }
       if (!_sim) { el.innerHTML = ''; return; }
-      const c = stateAtIndex(_sim.moves.length);
+      el.innerHTML = `<span style="font-size:12px;color:#666;">Scrambled state — drag to rotate</span>`
+        + `<div id="final-canvas" style="touch-action:none;cursor:grab;user-select:none;"></div>`;
+      redrawFinalView();
+    }
+    // Free camera for the bottom image. Default is chosen to match the fixed
+    // projection used elsewhere, so it looks unchanged until you drag it.
+    let _finalView = { yaw: -0.583, pitch: 0.527 };
+    function redrawFinalView() {
+      const host = document.getElementById('final-canvas');
+      if (!host || !_sim) return;
+      const c = stateAtIndex(_sim.moves.length);   // O(1): the replay cache already sits at the end
       const N = constCubeN(_sim.W, _sim.H, _sim.D);
-      el.innerHTML = `<span style="font-size:12px;color:#666;">Scrambled state</span>` + renderStateSVG(c, null, !!N, 420, true);
+      host.innerHTML = renderStateSVG(c, null, !!N, 420, true, viewMatrix(_finalView.yaw, _finalView.pitch));
     }
     function copyScramble(btn) {
       navigator.clipboard.writeText(document.getElementById('full-scr').textContent).then(() => {
@@ -1252,6 +1290,37 @@
       document.addEventListener('touchstart', function(e) {
         if (!e.target.closest('#out') && !e.target.closest('#move-tooltip')) tt.style.display = 'none';
       });
+    })();
+
+    // Drag the bottom image to orbit it. Bound on document rather than the
+    // element, since #final-canvas is rebuilt on every generate.
+    (function(){
+      let dragging = false, lastX = 0, lastY = 0;
+      const SPEED = 0.011;
+      document.addEventListener('pointerdown', e => {
+        const host = e.target.closest && e.target.closest('#final-canvas');
+        if (!host) return;
+        dragging = true; lastX = e.clientX; lastY = e.clientY;
+        host.style.cursor = 'grabbing';
+        if (host.setPointerCapture) { try { host.setPointerCapture(e.pointerId); } catch (err) {} }
+        e.preventDefault();
+      });
+      document.addEventListener('pointermove', e => {
+        if (!dragging) return;
+        _finalView.yaw += (e.clientX - lastX) * SPEED;
+        // clamp short of the poles: at exactly +/-90 the view degenerates to an edge
+        _finalView.pitch = Math.max(-1.45, Math.min(1.45, _finalView.pitch + (e.clientY - lastY) * SPEED));
+        lastX = e.clientX; lastY = e.clientY;
+        redrawFinalView();
+      });
+      const endDrag = () => {
+        if (!dragging) return;
+        dragging = false;
+        const host = document.getElementById('final-canvas');
+        if (host) host.style.cursor = 'grab';
+      };
+      document.addEventListener('pointerup', endDrag);
+      document.addEventListener('pointercancel', endDrag);
     })();
 
     (function(){
