@@ -834,6 +834,7 @@ let onBoard = new Set();
 function setPuzzle(p) {
   puzzle = p;
   kit = null;                               // the solver's tables are one board's
+  bandKit = null;
   hexColour = new Map(p.hexes.map(h => [key(h[0], h[1]), h[2]]));
   boardHexes = p.hexes.map(h => hexAt.get(key(h[0], h[1])));
   onBoard = new Set();
@@ -911,13 +912,13 @@ function scramble() {
    half what they cost on the smaller board. */
 const RECIPE = {
   three: { depth: 6, macro: 4, seedLen: 6, seedSupport: 8, commSupport: 4, aimDepth: 3,
-           budget: 6000, tries: 4 },
+           budget: 6000, tries: 4, bandDepth: 5 },
   /* Seven circles takes far longer and is worth waiting on: it has 54 tiles to
      place against 28, over a library ten times the size. Measured over five
      scrambles it wants 28 to 47 seconds, so it is given ninety and two goes at
      it rather than four short ones. */
   seven: { depth: 4, macro: 3, seedLen: 3, seedSupport: 12, commSupport: 3, aimDepth: 3,
-           reduce: true, budget: 90000, tries: 2 }
+           reduce: true, budget: 90000, tries: 2, bandDepth: 6 }
 };
 
 /* Placing tiles rather than counting wrong parts, which the larger board needs.
@@ -958,8 +959,7 @@ const SOLVE_STALL = 12;                     // rounds without progress before re
    again; the beam carries on from where it is. */
 const SOLVE_SEEN_CAP = 300000;
 
-// both boards can be solved now; a bandaged one still cannot
-const solvable = () => !bandaged;
+const solvable = () => true;
 
 // one letter to a colour, so a whole colouring is a string of one char per part
 const TOKEN = { white: 'W', red: 'R', orange: 'O', yellow: 'Y',
@@ -1337,6 +1337,577 @@ async function placeSolution(from, goal, walk, miss, onStep) {
   return null;
 }
 
+/* =====================================================================
+   SOLVING A BANDAGED BOARD
+
+   A turn shifts the colours the same way whether or not anything is glued, so
+   every permutation already worked out still holds. What changes is which runs
+   of turns may be made at all, and where the bandages finish.
+
+   From a scrambled arrangement barely one move in fifty of the library is
+   playable; from the home arrangement it is one in three. So the bandages are
+   walked home first — there are only 153 arrangements on three circles and
+   72,259 on seven, so the shortest legal way home from every one of them is a
+   breadth-first search done once. After that the board is solved with runs
+   that put the bandages back where they found them. Those runs compose, so
+   among them the bandages can be forgotten.
+
+   And it cannot come unstuck for want of reach: a legal run from solved that
+   ends with the bandages home is itself one of those runs, so whatever
+   colouring the walk home leaves is one they can undo.
+
+   Three things the board then insists on.
+
+   The tiles under the bandages are not ordinary tiles. A glued trio travels as
+   one piece for ever, so no three-tile move can touch those places and they
+   have to be seated first — which is its own small puzzle, six blocks over six
+   places on seven circles, solved outright rather than searched.
+
+   The free tiles want moves aimed at them, and one aimed move per trio is not
+   enough: the same three tiles cycled with a different twist is a different
+   tool, and keeping only one threw away every twist the endgame needs.
+
+   And parity. Where every free triangle is a distinct piece, a residual that
+   swaps two of them is odd, and three-cycles and twists — all even — can never
+   finish it. It is read off the colours after seating and put right with one
+   odd move, after which only even moves may play or the fix is undone.
+   ===================================================================== */
+
+let bandKit = null;                         // built on demand, one board's
+
+async function buildBandKit(onStep) {
+  const breathe = async m => { if (onStep) onStep(m); await new Promise(r => setTimeout(r, 0)); };
+  const recipe = puzzle === PUZZLES.three ? RECIPE.three : RECIPE.seven;
+  const n = kit.n, tileOf = kit.tileOf, back = s => s.slice().reverse().map(g => g ^ 1);
+  const board = tiles.filter(t => onBoard.has(t));
+  const at = new Map(board.map((t, i) => [t, i]));
+
+  // the bandage model: what each collar holds, and where a turn takes it
+  const holds = boardHexes.map(h => new Set(h.collar.map(t => at.get(t))));
+  const goTile = boardHexes.map(h => [h.goACW, h.goCW].map(m => {
+    const a = new Int16Array(board.length);
+    for (let i = 0; i < board.length; i++) a[i] = i;
+    for (const [from, to] of m) a[at.get(from)] = at.get(to);
+    return a;
+  }));
+  const HOME = puzzle.bands().map(b => b.map(t => at.get(t)).sort((x, y) => x - y));
+  const cfgKey = cfg => cfg.map(b => b.join('.')).sort().join('|');
+  const HOMEKEY = cfgKey(HOME);
+  const canTurn = (cfg, h) => cfg.every(b => {
+    let m = 0;
+    for (const t of b) if (holds[h].has(t)) m++;
+    return m === 0 || m === b.length;
+  });
+  const shove = (cfg, h, dir) => {
+    const g = goTile[h][dir];
+    return cfg.map(b => b.every(t => holds[h].has(t))
+      ? b.map(t => g[t]).sort((x, y) => x - y) : b);
+  };
+  const playable = (cfg, seq) => {
+    let c = cfg;
+    for (const g of seq) {
+      if (!canTurn(c, g >> 1)) return null;
+      c = shove(c, g >> 1, g & 1);
+    }
+    return c;
+  };
+
+  // the shortest legal way home, from every arrangement there is
+  await breathe('finding the way home for the bandages');
+  const homeWay = new Map([[HOMEKEY, []]]);
+  {
+    let edge = [HOME];
+    while (edge.length) {
+      const next = [];
+      for (const cfg of edge) {
+        const from = homeWay.get(cfgKey(cfg));
+        for (let h = 0; h < boardHexes.length; h++) {
+          if (!canTurn(cfg, h)) continue;
+          for (const dir of [0, 1]) {
+            const c = shove(cfg, h, dir), key = cfgKey(c);
+            if (homeWay.has(key)) continue;
+            homeWay.set(key, [h * 2 + (dir ^ 1)].concat(from));
+            next.push(c);
+          }
+        }
+      }
+      edge = next;
+    }
+  }
+
+  /* Runs that put the bandages back are closed walks at home, and two ways out
+     to the same arrangement make one. The routes kept must come in by
+     different ways, though: routes sharing a last turn pair into walks where
+     that turn and its undoing cancel, leaving a shorter walk over again. */
+  await breathe('gathering the moves that put the bandages back');
+  const routes = new Map([[HOMEKEY, [[]]]]);
+  {
+    let edge = [{ cfg: HOME, key: HOMEKEY }];
+    for (let d = 0; d < recipe.bandDepth; d++) {
+      const next = [];
+      for (const { cfg, key } of edge) {
+        const way = routes.get(key)[0];
+        for (let h = 0; h < boardHexes.length; h++) {
+          if (!canTurn(cfg, h)) continue;
+          for (const dir of [0, 1]) {
+            const c = shove(cfg, h, dir), ck = cfgKey(c);
+            let list = routes.get(ck);
+            if (!list) { routes.set(ck, list = []); next.push({ cfg: c, key: ck }); }
+            if (list.length < 8) list.push(way.concat(h * 2 + dir));
+          }
+        }
+      }
+      edge = next;
+    }
+  }
+  const keepers = [], seenK = new Set();
+  const keep = (p, seq) => {
+    const pk = p.join(',');
+    if (seenK.has(pk)) return null;
+    seenK.add(pk);
+    const m = { p, seq, sup: kit.support(p) };
+    keepers.push(m);
+    return m;
+  };
+  const permOf = seq => {
+    let p = null;
+    for (const g of seq) p = p === null ? kit.gens[g] : kit.compose(p, kit.gens[g]);
+    return p;
+  };
+  for (const ways of routes.values())
+    for (let j = 1; j < ways.length; j++) {
+      const a = ways[0].concat(back(ways[j]));
+      if (a.length) keep(permOf(a), a);
+      const b = ways[j].concat(back(ways[0]));
+      if (b.length) keep(permOf(b), b);
+    }
+
+  // ---- the glued blocks ---------------------------------------------------
+  const tileParts = kit.tileParts;
+  const blockTiles = new Set();
+  for (const b of HOME) for (const t of b) blockTiles.add(t);
+  const blockParts = [];
+  for (const t of blockTiles) for (const i of tileParts[t]) blockParts.push(i);
+  const movable = [];
+  for (let t = 0; t < board.length; t++) if (tileParts[t] && tileParts[t].length > 1) movable.push(t);
+  const freeTiles = movable.filter(t => !blockTiles.has(t));
+
+  /* A glued block can only sit where a bandage sits, so a keeper projects to a
+     permutation of the block places alone. That puzzle is small enough to
+     solve outright: one Dijkstra out from the seated colouring gives the
+     cheapest seating for every block colouring that can arise. */
+  await breathe('working out how to seat the glued pieces');
+  const bpAt = new Int16Array(n).fill(-1);
+  blockParts.forEach((i, j) => { bpAt[i] = j; });
+  const actions = new Map();
+  for (const m of keepers) {
+    const bp = new Int16Array(blockParts.length);
+    let moves = false;
+    for (let j = 0; j < blockParts.length; j++) {
+      const to = bpAt[m.p[blockParts[j]]];
+      if (to < 0) throw new Error('a keeper that breaks a block');
+      bp[j] = to;
+      if (to !== j) moves = true;
+    }
+    if (!moves) continue;
+    const key = bp.join(',');
+    const had = actions.get(key);
+    if (!had || had.seq.length > m.seq.length) actions.set(key, { bp, p: m.p, seq: m.seq });
+  }
+  const goalBlocks = blockParts.map(i => kit.home[i]).join(GAP);
+  const seated = new Map([[goalBlocks, { cost: 0, act: null }]]);
+  {
+    const bApply = (str, bp) => {
+      let o = GAP;
+      for (let j = 0; j < bp.length; j++) o += str[bp[j]];
+      return o;
+    };
+    const undo = [...actions.values()].map(a => {
+      const r = new Int16Array(a.bp.length);
+      for (let j = 0; j < a.bp.length; j++) r[a.bp[j]] = j;
+      return { bp: r, a };
+    });
+    const q = [{ cost: 0, key: goalBlocks }];
+    const push = it => {
+      q.push(it);
+      let i = q.length - 1;
+      while (i > 0) {
+        const p = (i - 1) >> 1;
+        if (q[p].cost <= q[i].cost) break;
+        [q[p], q[i]] = [q[i], q[p]];
+        i = p;
+      }
+    };
+    const pop = () => {
+      const top = q[0], last = q.pop();
+      if (q.length) {
+        q[0] = last;
+        let i = 0;
+        for (;;) {
+          const l = 2 * i + 1, r = l + 1;
+          let m = i;
+          if (l < q.length && q[l].cost < q[m].cost) m = l;
+          if (r < q.length && q[r].cost < q[m].cost) m = r;
+          if (m === i) break;
+          [q[i], q[m]] = [q[m], q[i]];
+          i = m;
+        }
+      }
+      return top;
+    };
+    while (q.length) {
+      const { cost, key } = pop();
+      if (seated.get(key).cost !== cost) continue;
+      for (const { bp, a } of undo) {
+        const nk = bApply(key, bp), nc = cost + a.seq.length;
+        const had = seated.get(nk);
+        if (had && had.cost <= nc) continue;
+        seated.set(nk, { cost: nc, act: a });
+        push({ cost: nc, key: nk });
+      }
+    }
+  }
+
+  // ---- aimed cycles over the free tiles -----------------------------------
+  await breathe('building the moves that aim at single tiles');
+  const seeds = keepers.slice().sort((a, b) => a.sup - b.sup || a.seq.length - b.seq.length)
+    .slice(0, 700);
+  const cycles = [];
+  for (const X of seeds) {
+    const Xi = kit.invert(X.p);
+    for (const Y of seeds) {
+      const p = kit.compose(kit.compose(kit.compose(X.p, Y.p), Xi), kit.invert(Y.p));
+      if (kit.support(p) !== 3) continue;
+      const m = keep(p, X.seq.concat(Y.seq, back(X.seq), back(Y.seq)));
+      if (m) cycles.push(m);
+    }
+  }
+  const tripleOf = p => {
+    const s = new Set();
+    for (let i = 0; i < n; i++) if (p[i] !== i) s.add(tileOf[i]);
+    return [...s].sort((x, y) => x - y);
+  };
+  for (const c of cycles) c.t3 = tripleOf(c.p);
+  // the same three tiles twisted differently is a different tool, so keep them
+  const variants = new Map();
+  for (const c of cycles) {
+    const key = c.t3.join(',');
+    let list = variants.get(key);
+    if (!list) variants.set(key, list = new Map());
+    let sig = GAP;
+    for (const t of c.t3) for (const j of tileParts[t]) sig += ',' + c.p[j];
+    const had = list.get(sig);
+    if (!had || had.seq.length > c.seq.length) list.set(sig, c);
+  }
+
+  await breathe('carrying those moves round the board');
+  const conjMaps = new Map();
+  for (const m of keepers) {
+    if (m.seq.length > 26) continue;
+    const tm = new Int16Array(board.length);
+    for (let i = 0; i < n; i++) tm[tileOf[i]] = tileOf[m.p[i]];
+    const mk = tm.join(',');
+    const had = conjMaps.get(mk);
+    if (!had || had.m.seq.length > m.seq.length) conjMaps.set(mk, { tm, m });
+  }
+  const conjs = [...conjMaps.values()].filter(c => c.tm.some((v, i) => v !== i));
+
+  /* Which triples an aimed cycle can be carried to is the orbit of the ones
+     already had under those maps. Cheapest chain first, so a triple far from
+     any base cycle is still reached by as few turns as it can be. */
+  const reach = new Map();
+  {
+    const q = [];
+    const push = it => {
+      q.push(it);
+      let i = q.length - 1;
+      while (i > 0) {
+        const p = (i - 1) >> 1;
+        if (q[p].cost <= q[i].cost) break;
+        [q[p], q[i]] = [q[i], q[p]];
+        i = p;
+      }
+    };
+    const pop = () => {
+      const top = q[0], last = q.pop();
+      if (q.length) {
+        q[0] = last;
+        let i = 0;
+        for (;;) {
+          const l = 2 * i + 1, r = l + 1;
+          let m = i;
+          if (l < q.length && q[l].cost < q[m].cost) m = l;
+          if (r < q.length && q[r].cost < q[m].cost) m = r;
+          if (m === i) break;
+          [q[i], q[m]] = [q[m], q[i]];
+          i = m;
+        }
+      }
+      return top;
+    };
+    for (const [key, list] of variants) {
+      let cheap = Infinity;
+      for (const c of list.values()) cheap = Math.min(cheap, c.seq.length);
+      reach.set(key, { cost: cheap, base: true, via: null });
+    }
+    for (const [key, node] of reach) push({ cost: node.cost, key });
+    while (q.length) {
+      const { cost, key } = pop();
+      if (reach.get(key).cost !== cost) continue;
+      const t3 = key.split(',').map(Number);
+      for (const { tm, m } of conjs) {
+        const nk = [tm[t3[0]], tm[t3[1]], tm[t3[2]]].sort((x, y) => x - y).join(',');
+        const nc = cost + 2 * m.seq.length;
+        const had = reach.get(nk);
+        if (had && had.cost <= nc) continue;
+        reach.set(nk, { cost: nc, base: false, via: { from: key, by: m } });
+        push({ cost: nc, key: nk });
+      }
+    }
+  }
+  const built = new Map();
+  const make = key => {
+    if (built.has(key)) return built.get(key);
+    const node = reach.get(key);
+    let out;
+    if (node.base) out = [...variants.get(key).values()].slice(0, 12)
+      .map(c => ({ p: c.p, seq: c.seq }));
+    else {
+      const inner = make(node.via.from), P = node.via.by;
+      const Pi = kit.invert(P.p), Pb = back(P.seq);
+      out = inner.map(v => ({ p: kit.compose(kit.compose(P.p, v.p), Pi),
+                              seq: P.seq.concat(v.seq, Pb) }));
+    }
+    built.set(key, out);
+    return out;
+  };
+  const aimed = [], seenAim = new Set();
+  for (const key of reach.keys()) {
+    const t3 = key.split(',').map(Number);
+    for (const v of make(key))
+      for (const [p, seq] of [[v.p, v.seq], [kit.invert(v.p), back(v.seq)]]) {
+        const pk = p.join(',');
+        if (seenAim.has(pk)) continue;
+        seenAim.add(pk);
+        aimed.push({ p, seq, t3 });
+      }
+  }
+
+  /* A tile turned where it stands is wrong in every part and out of place in
+     none, and no three-tile move touches it alone. Two variants of one triple
+     compose to exactly that: the tile motion cancels, the twist is left. */
+  await breathe('building the moves that turn a tile in place');
+  const byTriple = new Map();
+  aimed.forEach((c, i) => {
+    const key = c.t3.join(',');
+    let l = byTriple.get(key);
+    if (!l) byTriple.set(key, l = []);
+    l.push(i);
+  });
+  let twists = [];
+  const seenTw = new Set();
+  for (const list of byTriple.values())
+    for (const ci of list) for (const cj of list) {
+      if (ci === cj) continue;
+      const p = kit.compose(aimed[ci].p, aimed[cj].p);
+      const sup = kit.support(p);
+      if (sup === 0 || sup > 2) continue;
+      const pk = p.join(',');
+      if (seenTw.has(pk)) continue;
+      seenTw.add(pk);
+      twists.push({ p, seq: aimed[ci].seq.concat(aimed[cj].seq), t3: tripleOf(p) });
+    }
+  {
+    const bestTw = new Map();
+    for (const tw of twists) {
+      const key = tw.t3.join(',');
+      const had = bestTw.get(key);
+      if (!had || had.seq.length > tw.seq.length) bestTw.set(key, tw);
+    }
+    const grow = [...bestTw.entries()].map(([key, tw]) => ({ key, tw }));
+    while (grow.length) {
+      const { key, tw } = grow.shift();
+      const spots = key.split(',').map(Number);
+      for (const { tm, m } of conjs) {
+        const nk = spots.map(t => tm[t]).sort((x, y) => x - y).join(',');
+        const nc = tw.seq.length + 2 * m.seq.length;
+        const had = bestTw.get(nk);
+        if (had && had.seq.length <= nc) continue;
+        const p = kit.compose(kit.compose(m.p, tw.p), kit.invert(m.p));
+        const nt = { p, seq: m.seq.concat(tw.seq, back(m.seq)), t3: nk.split(',').map(Number) };
+        bestTw.set(nk, nt);
+        grow.push({ key: nk, tw: nt });
+      }
+    }
+    twists = [];
+    for (const tw of bestTw.values()) {
+      twists.push(tw);
+      twists.push({ p: kit.invert(tw.p), seq: back(tw.seq), t3: tw.t3 });
+    }
+  }
+
+  // ---- parity over the free triangles -------------------------------------
+  const freeTri = freeTiles.filter(t => board[t].sides === 3);
+  const triName = t => tileParts[t].map(i => kit.home[i]).sort().join(GAP);
+  const triHome = new Map(freeTri.map(t => [triName(t), t]));
+  // where two free triangles look alike, a swap of them is no obstruction at
+  // all, and reading a parity off the colours would be reading it wrongly
+  const triTold = triHome.size === freeTri.length;
+  const cycleSign = to => {
+    const seen = new Set();
+    let sign = 0;
+    for (const t of freeTri) {
+      if (seen.has(t)) continue;
+      let len = 0, x = t;
+      do { seen.add(x); x = to.get(x); len++; } while (x !== t && !seen.has(x));
+      if (len % 2 === 0) sign ^= 1;
+    }
+    return sign;
+  };
+  const triParity = s => {
+    if (!triTold) return 0;
+    const to = new Map();
+    for (const t of freeTri) {
+      const home = triHome.get(tileParts[t].map(i => s[i]).sort().join(GAP));
+      if (home === undefined) return 0;
+      to.set(t, home);
+    }
+    return cycleSign(to);
+  };
+  const moveSign = p => {
+    if (!triTold) return 0;
+    const to = new Map();
+    for (const t of freeTri) to.set(t, tileOf[p[tileParts[t][0]]]);
+    return cycleSign(to);
+  };
+
+  const blockSafe = keepers.filter(m => {
+    for (const i of blockParts) if (m.p[i] !== i) return false;
+    return true;
+  });
+  let fixer = null;
+  for (const m of blockSafe) {
+    if (!moveSign(m.p)) continue;
+    if (!fixer || fixer.seq.length > m.seq.length) fixer = m;
+  }
+  // stage two must not undo the parity fix, so only even moves may play in it
+  const evenSafe = blockSafe.filter(m => !moveSign(m.p))
+    .map(m => ({ p: m.p, seq: m.seq, t3: null }));
+
+  // ---- the order the free tiles are placed in -----------------------------
+  const touch = new Map();
+  for (const c of aimed) for (const t of c.t3) touch.set(t, (touch.get(t) || 0) + 1);
+  const order = freeTiles.slice().sort((a, b) => (touch.get(a) || 0) - (touch.get(b) || 0));
+  const rank = new Int16Array(board.length).fill(9999);
+  order.forEach((t, j) => { rank[t] = j; });
+  const moves = aimed.concat(twists, evenSafe);
+  for (const m of moves) {
+    let low = 9999;
+    for (let i = 0; i < n; i++) if (m.p[i] !== i) low = Math.min(low, rank[tileOf[i]]);
+    m.low = low;
+  }
+
+  return { HOME, cfgKey, canTurn, shove, playable, homeWay, keepers, seated,
+           blockParts, goalBlocks, order, rank, moves, tileParts, fixer,
+           triParity, board };
+}
+
+/* Where the bandages are now, as the solver counts tiles. */
+function bandNow(bk) {
+  const board = bk.board, at = new Map(board.map((t, i) => [t, i]));
+  return bands.map(b => b.tiles.map(t => at.get(t)).sort((x, y) => x - y));
+}
+
+async function bandSolution(onStep) {
+  const bk = bandKit, n = kit.n, goal = kit.home, tileOf = kit.tileOf;
+  const walk = (s, p) => {
+    let o = GAP;
+    for (let i = 0; i < p.length; i++) o += s[p[i]];
+    return o;
+  };
+  const miss = s => {
+    let n2 = 0;
+    for (let i = 0; i < s.length; i++) if (s[i] !== goal[i]) n2++;
+    return n2;
+  };
+  const start = kit.read();
+  const way = bk.homeWay.get(bk.cfgKey(bandNow(bk)));
+  if (!way) return null;
+  let s = start, seq = way.slice();
+  for (const g of way) s = walk(s, kit.gens[g]);
+
+  // seat the glued blocks, straight off the table
+  for (;;) {
+    const node = bk.seated.get(bk.blockParts.map(i => s[i]).join(GAP));
+    if (!node) return null;
+    if (!node.act) break;
+    s = walk(s, node.act.p);
+    seq = seq.concat(node.act.seq);
+  }
+  if (bk.triParity(s) === 1) {
+    if (!bk.fixer) return null;
+    s = walk(s, bk.fixer.p);
+    seq = seq.concat(bk.fixer.seq);
+  }
+
+  const placed = t => {
+    let j = 0;
+    outer: for (; j < bk.order.length; j++)
+      for (const i of bk.tileParts[bk.order[j]]) if (t[i] !== goal[i]) break outer;
+    return j;
+  };
+  const score = (pre, w) => w <= PLACE_ENDGAME ? 100000 - w * 100 + pre : pre * 100 - w;
+  const trail = m => {
+    const out = [];
+    for (let node = m; node.via; node = node.back) out.unshift(...node.via);
+    return out;
+  };
+  for (let attempt = 0; attempt < kit.tries; attempt++) {
+    const t0 = performance.now();
+    const root = { s, via: null, back: null, pre: placed(s), w: miss(s) };
+    root.sc = score(root.pre, root.w);
+    let beam = [root], top = root, idle = 0, relax = 0, round = 0;
+    const seen = new Set([s]);
+    while (performance.now() - t0 < kit.budget) {
+      const endgame = beam[0].w <= PLACE_ENDGAME;
+      const bad = new Set();
+      if (endgame)
+        for (let i = 0; i < beam[0].s.length; i++)
+          if (beam[0].s[i] !== goal[i]) bad.add(tileOf[i]);
+      const cand = [];
+      for (const b of beam) {
+        const floor = Math.max(0, b.pre - relax);
+        const ceiling = b.pre + PLACE_FOCUS + relax * 4;
+        for (const m of bk.moves) {
+          if (endgame) { if (m.t3 && !m.t3.some(t => bad.has(t))) continue; }
+          else { if (m.low < floor) continue; if (m.t3 && m.low > ceiling) continue; }
+          const t = walk(b.s, m.p);
+          if (seen.has(t)) continue;
+          seen.add(t);
+          const w = miss(t);
+          if (w === 0) return seq.concat(trail({ via: m.seq, back: b }));
+          const pre = placed(t);
+          cand.push({ s: t, via: m.seq, back: b, pre, w, sc: score(pre, w), r: Math.random() });
+        }
+      }
+      if (!cand.length) break;
+      cand.sort((x, y) => y.sc - x.sc || x.r - y.r);
+      beam = cand.slice(0, SOLVE_BEAM);
+      if (seen.size > SOLVE_SEEN_CAP) { seen.clear(); for (const b of beam) seen.add(b.s); }
+      if (beam[0].sc > top.sc) { top = beam[0]; idle = 0; relax = 0; }
+      else {
+        idle++;
+        for (const [after, r] of PLACE_RELAX) if (idle === after) relax = r;
+        if (idle >= PLACE_GIVE_UP) break;
+        if (idle % 6 === 0 && beam[0].sc < top.sc) beam = [top];
+      }
+      if (onStep) onStep(beam[0].w, beam[0].pre, bk.order.length);
+      if (++round % 2 === 0) await new Promise(r => setTimeout(r, 0));
+    }
+  }
+  return null;
+}
+
 /* The descent. Yields to the page between rounds so the button can say what it
    is doing, and is tried again on a fresh tie-break if a round of it stalls —
    the time it takes varies a good deal from one scramble to the next. */
@@ -1353,6 +1924,7 @@ async function findSolution(onStep) {
     for (let i = 0; i < s.length; i++) if (s[i] !== goal[i]) n++;
     return n;
   };
+  if (bandaged) return bandSolution(onStep);
   if (kit.reduce) return placeSolution(from, goal, walk, miss, onStep);
   for (let attempt = 0; attempt < kit.tries; attempt++) {
     const t0 = performance.now();
@@ -1636,6 +2208,8 @@ document.getElementById('solve').addEventListener('click', async () => {
   say('Working out an answer — building the moves to work with.');
   await new Promise(r => setTimeout(r, 0));
   if (!kit) kit = await buildKit(pc => say(`Working out an answer — building the moves to work with (${pc}%).`));
+  if (bandaged && !bandKit)
+    bandKit = await buildBandKit(m => say(`Working out an answer — ${m}.`));
   // the placing search knows how many tiles it has settled; the other does not
   const raw = await findSolution((n, done, all) => say(done === undefined
     ? `Working out an answer — ${n} parts still out of place.`
@@ -1643,9 +2217,17 @@ document.getElementById('solve').addEventListener('click', async () => {
   showSolveButton();
   if (!raw) { say('No answer found. Scramble again and try once more.'); return; }
   const loose = simplifySolution(raw);
-  say('Working out an answer — tightening it.');
-  await new Promise(r => setTimeout(r, 0));
-  const tight = simplifySolution(tightenSolution(loose));
+  /* Tightening swaps a stretch of the answer for a shorter run of turns out of
+     a table that knows nothing about bandages, so on a glued board almost any
+     swap it made would be a run that cannot be played. Simplifying is safe —
+     cancelling turns of one hexagon against each other leaves every bandage
+     where the rest of the answer expects it. */
+  let tight = loose;
+  if (!bandaged) {
+    say('Working out an answer — tightening it.');
+    await new Promise(r => setTimeout(r, 0));
+    tight = simplifySolution(tightenSolution(loose));
+  }
   plan = asPlan(tight);
   planAt = 0;
   showPlan();
