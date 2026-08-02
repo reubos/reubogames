@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Rotating Puzzle — Rhombitrihexagonal</title>
+<style>
+  :root {
+    --bg: #1a3a1a;
+    --panel-2: #1c3a20;
+    --line: #2f5c38;
+    --text: #d4e8d4;
+    --muted: #86a886;
+    --accent: #4ade80;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    background-color: var(--bg);
+    color: var(--text);
+    font-family: 'Segoe UI', sans-serif;
+    margin: 0;
+    padding: 24px 20px 60px;
+    min-height: 100vh;
+  }
+
+  .wrap { max-width: 720px; margin: 0 auto; }
+
+  h1 { font-size: 2rem; color: #fff; margin: 0 0 6px; }
+  .sub { color: var(--muted); font-size: 0.95rem; margin: 0 0 24px; }
+
+  .panel {
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 10px;
+  }
+
+  #board { width: 100%; height: auto; display: block; touch-action: manipulation; }
+
+  /* stroke-width is set on the <g> in render(): the tiling is built on edge
+     length 1, so it is a constant in user units and must not be set here. */
+  .cell {
+    fill: #24422a;
+    stroke: #17301b;
+    stroke-linejoin: round;
+  }
+
+  .counts { color: var(--muted); font-size: 0.9rem; margin: 16px 0 0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Rotating Puzzle</h1>
+  <p class="sub">The rhombitrihexagonal tiling, 3.4.6.4, cut to the 61-tile honeycomb.</p>
+
+  <div class="panel">
+    <svg id="board" xmlns="http://www.w3.org/2000/svg"></svg>
+  </div>
+
+  <p class="counts" id="counts"></p>
+</div>
+
+<script>
+/* =====================================================================
+   THE BOARD
+
+   In the rhombitrihexagonal tiling the hexagons sit on a triangular
+   lattice of pitch 1 + √3, with a square straddling every lattice edge
+   and a triangle on every lattice face. So a hexagon comes with a collar
+   of six squares and six triangles, and a board of whole collars is what
+   the tiling looks like: cut anywhere else and hexagons end up on the rim
+   with their collars half missing.
+
+   Seven hexagons — the centre and its six neighbours — carry 30 squares
+   and 24 triangles between them, since the squares are shared by two
+   collars and the triangles by three. That is the 61-tile board.
+   ===================================================================== */
+
+const S3 = Math.sqrt(3);
+const PITCH = 1 + S3;                       // distance between hexagon centres
+
+// lattice basis, 60° apart, so the six neighbour directions are 30°, 90°, ...
+const A = [PITCH * S3 / 2, PITCH / 2];
+const B = [0, PITCH];
+
+const at = (a, b) => [a * A[0] + b * B[0], a * A[1] + b * B[1]];
+const key = (a, b) => a + ',' + b;
+
+// the centre and its six neighbours
+const HEXES = [[0, 0], [1, 0], [0, 1], [-1, 1], [-1, 0], [0, -1], [1, -1]];
+const hexSet = new Set(HEXES.map(h => key(h[0], h[1])));
+const isHex = (a, b) => hexSet.has(key(a, b));
+
+const RANGE = 2;                            // far enough to reach every collar
+
+/* Every lattice edge with a board hexagon at one end or the other. Taking the
+   three directions of one half-plane visits each edge from one end only. */
+const EDGES = [];
+for (let a = -RANGE; a <= RANGE; a++)
+  for (let b = -RANGE; b <= RANGE; b++)
+    for (const [da, db] of [[1, 0], [0, 1], [-1, 1]]) {
+      const p = [a, b], q = [a + da, b + db];
+      if (isHex(...p) || isHex(...q)) EDGES.push([p, q]);
+    }
+
+/* Every lattice face with a board hexagon at one of its corners. The faces
+   come in two families — pointing at 60° and at 0° from their first corner —
+   and each is reached once, from the corner it is named by. */
+const FACES = [];
+for (let a = -RANGE; a <= RANGE; a++)
+  for (let b = -RANGE; b <= RANGE; b++)
+    for (const off of [[[0, 0], [1, 0], [0, 1]], [[0, 0], [1, 0], [1, -1]]]) {
+      const tri = off.map(([da, db]) => [a + da, b + db]);
+      if (tri.some(p => isHex(...p))) FACES.push(tri);
+    }
+
+// --- the tiles --------------------------------------------------------
+
+const unit = (p, q) => {
+  const x = q[0] - p[0], y = q[1] - p[1], l = Math.hypot(x, y);
+  return [x / l, y / l];
+};
+
+const tiles = [];
+
+// hexagon: side 1, corners at 0°, 60°, ... so its edges face the neighbours
+for (const [a, b] of HEXES) {
+  const c = at(a, b);
+  const poly = [];
+  for (let k = 0; k < 6; k++) {
+    const t = k * Math.PI / 3;
+    poly.push([c[0] + Math.cos(t), c[1] + Math.sin(t)]);
+  }
+  tiles.push({ sides: 6, cell: [a, b], centre: c, poly });
+}
+
+// square: astride a lattice edge, one edge shared with each hexagon
+for (const [p, q] of EDGES) {
+  const P = at(...p), Q = at(...q);
+  const m = [(P[0] + Q[0]) / 2, (P[1] + Q[1]) / 2];
+  const [ux, uy] = unit(P, Q), wx = -uy, wy = ux;
+  const poly = [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([s, t]) =>
+    [m[0] + (s * ux + t * wx) / 2, m[1] + (s * uy + t * wy) / 2]);
+  tiles.push({ sides: 4, centre: m, poly });
+}
+
+// triangle: on a lattice face, a corner pointing at each of the three hexagons
+for (const tri of FACES) {
+  const C = tri.map(p => at(...p));
+  const f = [(C[0][0] + C[1][0] + C[2][0]) / 3, (C[0][1] + C[1][1] + C[2][1]) / 3];
+  const poly = C.map(c => {
+    const [ux, uy] = unit(f, c);
+    return [f[0] + ux / S3, f[1] + uy / S3];
+  });
+  tiles.push({ sides: 3, centre: f, poly });
+}
+
+// --- drawing ----------------------------------------------------------
+
+const PAD = 0.2;
+
+function render() {
+  const svg = document.getElementById('board');
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const t of tiles) for (const [x, y] of t.poly) {
+    if (x < x0) x0 = x;
+    if (y < y0) y0 = y;
+    if (x > x1) x1 = x;
+    if (y > y1) y1 = y;
+  }
+  svg.setAttribute('viewBox',
+    [x0 - PAD, y0 - PAD, x1 - x0 + 2 * PAD, y1 - y0 + 2 * PAD].join(' '));
+
+  const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+  g.setAttribute('stroke-width', '0.05');
+  for (const t of tiles) {
+    const el = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+    el.setAttribute('class', 'cell');
+    el.setAttribute('points', t.poly.map(p => p[0].toFixed(4) + ',' + p[1].toFixed(4)).join(' '));
+    g.appendChild(el);
+    t.el = el;
+  }
+  svg.replaceChildren(g);
+
+  const n = s => tiles.filter(t => t.sides === s).length;
+  document.getElementById('counts').textContent =
+    `${tiles.length} tiles — ${n(6)} hexagons, ${n(4)} squares, ${n(3)} triangles.`;
+}
+
+render();
+</script>
+</body>
+</html>
