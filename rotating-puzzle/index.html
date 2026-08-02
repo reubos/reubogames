@@ -537,10 +537,12 @@ const repaint = () => allParts.forEach(paint);
    colour its source had when the turn began, and a part's source is itself
    another part of the same collar. `dir` is +1 for anticlockwise and -1 for
    clockwise, which — the frame having y up — are the signs of the angle too. */
+// the move itself, and nothing drawn: a scramble makes hundreds of these and
+// only the state it leaves behind is worth painting
 function move(hex, dir) {
   const map = dir > 0 ? hex.acw : hex.cw;
   const taken = map.map(([part, src]) => [part, src.colour]);
-  for (const [part, colour] of taken) { part.colour = colour; paint(part); }
+  for (const [part, colour] of taken) part.colour = colour;
   // a bandage the collar holds whole goes round with it, onto the next lens
   if (bands.size)
     bands = new Set([...bands].map(s =>
@@ -637,6 +639,7 @@ function turn(hex, dir) {
   if (stuck(hex)) return;                 // a bandage lies across the collar
   settle();
   move(hex, dir);
+  repaint();
   refresh();
   spin(hex, -dir * 60);
 }
@@ -656,16 +659,28 @@ function reset() {
    backwards. Long enough that nothing is left where it started, which takes
    more than it looks: the seven collars overlap, so turns near enough to each
    other partly undo one another. */
-const SCRAMBLE_TURNS = 40;
+/* Long enough that the board reaches the mixed state instead of stopping
+   somewhere on the way to it. Counting how many of the 139 parts end up on a
+   colour other than the one they start with, and averaging over forty
+   scrambles, the plain puzzle climbs to about 106 and is there by 160 turns.
+   The bandaged one is still at 97 after 160 and does not level off until past
+   600: with a bandage lying across a collar there are often only a handful of
+   moves to pick from, and a good many of them undo one another, so the walk
+   keeps going back over its own ground. */
+const SCRAMBLE_TURNS = 200;
+const SCRAMBLE_TURNS_BANDAGED = 600;
+
 function scramble() {
   settle();
-  for (let i = 0; i < SCRAMBLE_TURNS; i++) {
+  const n = bandaged ? SCRAMBLE_TURNS_BANDAGED : SCRAMBLE_TURNS;
+  for (let i = 0; i < n; i++) {
     // only from the collars that will turn, so a scramble is a run of real
     // moves and can always be walked back the way it came
     const free = hexTiles.filter(h => !stuck(h));
     if (!free.length) break;
     move(free[Math.floor(Math.random() * free.length)], Math.random() < 0.5 ? 1 : -1);
   }
+  repaint();
   refresh();
 }
 
