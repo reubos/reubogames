@@ -902,12 +902,23 @@ function scramble() {
    where a beam of eight goes to nothing.
    ===================================================================== */
 
+/* Each board wants its own recipe. Seven circles has fourteen turns where three
+   has six, so every permutation within six turns is over a million of them
+   there against 21,706 here — far too many to write down. It does not need
+   them: a turn moves twelve of its sixty-one tiles rather than twelve of
+   thirty-one, so turns are more local and a four-turn table already holds
+   pieces small enough to commutate. Its three-cycles come out at eight turns,
+   half what they cost on the smaller board. */
+const RECIPE = {
+  three: { depth: 6, macro: 4, seedLen: 6, seedSupport: 8, commSupport: 4, aimDepth: 3 },
+  seven: { depth: 4, macro: 3, seedLen: 3, seedSupport: 12, commSupport: 3, aimDepth: 3 }
+};
+
 const SOLVE_BEAM = 8;
-const SOLVE_MACRO_DEPTH = 4;                // how far the short sequences run
-const SOLVE_COMM_SUPPORT = 4;               // tiles a commutator may disturb
 const SOLVE_BUDGET_MS = 6000;               // per attempt
 const SOLVE_TRIES = 4;
-const SOLVE_STALL = 10;                     // rounds without progress before restarting
+const SOLVE_AIM_AFTER = 2;                  // rounds without progress before aiming
+const SOLVE_STALL = 12;                     // rounds without progress before restarting
 /* Every colouring met is remembered so the descent does not go round in
    circles, but a round can throw up tens of thousands of them and the memory
    is what actually stops the page. Past this the record is dropped and started
@@ -923,9 +934,10 @@ const GAP = String();                       // joined with nothing between
 
 let kit = null;                             // the solver's tables, built once
 
-/* The board as the solver sees it: its parts in a fixed order, the six turns
-   as permutations of them, and the library of moves to descend with. */
+/* The board as the solver sees it: its parts in a fixed order, its turns as
+   permutations of them, and the library of moves to descend with. */
 function buildKit() {
+  const recipe = puzzle === PUZZLES.three ? RECIPE.three : RECIPE.seven;
   const seat = tiles.filter(t => onBoard.has(t));
   const parts = seat.flatMap(t => t.parts);
   const n = parts.length;
@@ -937,18 +949,18 @@ function buildKit() {
      when it is odd, so g^1 is the same turn the other way. */
   const gens = [];
   for (const h of boardHexes) for (const map of [h.acw, h.cw]) {
-    const perm = new Int8Array(n);
+    const perm = new Int16Array(n);
     for (let i = 0; i < n; i++) perm[i] = i;
     for (const [part, src] of map) perm[at.get(part)] = at.get(src);
     gens.push(perm);
   }
   const compose = (p, q) => {
-    const r = new Int8Array(n);
+    const r = new Int16Array(n);
     for (let i = 0; i < n; i++) r[i] = p[q[i]];
     return r;
   };
   const invert = p => {
-    const r = new Int8Array(n);
+    const r = new Int16Array(n);
     for (let i = 0; i < n; i++) r[p[i]] = i;
     return r;
   };
@@ -959,11 +971,11 @@ function buildKit() {
   };
 
   // every distinct permutation a short run of turns gives
-  const ident = new Int8Array(n);
+  const ident = new Int16Array(n);
   for (let i = 0; i < n; i++) ident[i] = i;
   const short = new Map([[ident.join(','), []]]);
   let layer = [ident];
-  for (let d = 0; d < SOLVE_MACRO_DEPTH + 2; d++) {
+  for (let d = 0; d < recipe.depth; d++) {
     const next = [];
     for (const p of layer) {
       const seq = short.get(p.join(','));
@@ -980,9 +992,11 @@ function buildKit() {
   const library = [], seeds = [];
   for (const [k, seq] of short) {
     if (!seq.length) continue;
-    const p = Int8Array.from(k.split(',').map(Number));
-    if (seq.length <= SOLVE_MACRO_DEPTH) library.push({ p, seq });
-    if (support(p) <= 8) seeds.push({ p, seq });    // the small ones, to commutate
+    const p = Int16Array.from(k.split(',').map(Number));
+    if (seq.length <= recipe.macro) library.push({ p, seq });
+    // the small ones, to commutate with each other
+    if (seq.length <= recipe.seedLen && support(p) <= recipe.seedSupport)
+      seeds.push({ p, seq });
   }
   // commutators of the small ones: three tiles apiece, and the repair tool
   const back = seq => seq.slice().reverse().map(g => g ^ 1);
@@ -990,11 +1004,53 @@ function buildKit() {
     const Xi = invert(X.p);
     for (const Y of seeds) {
       const c = compose(compose(compose(X.p, Y.p), Xi), invert(Y.p));
-      if (support(c) > SOLVE_COMM_SUPPORT || support(c) === 0) continue;
+      if (support(c) > recipe.commSupport || support(c) === 0) continue;
       library.push({ p: c, seq: X.seq.concat(Y.seq, back(X.seq), back(Y.seq)) });
     }
   }
-  return { parts, n, gens, library, short, compose, invert,
+  /* Aiming a three-cycle rather than hoping one in the library fits.
+     Conjugating a three-cycle by P moves it onto the tiles P sends its three
+     to, and which those are is the image of its triple under P's permutation
+     of the tiles — three lookups, not a composition of a hundred-odd elements.
+     So every triple that can be reached is indexed cheaply, and the turns are
+     only worked out for the conjugate actually wanted.
+
+     The board needs this. A fixed library of three-tile moves reaches 236 of
+     the 6084 triples of seven circles; conjugation carries that to thousands,
+     which is what lets the last few pieces be put right instead of the descent
+     wandering at four or five wrong parts. */
+  const bases = library.filter(m => support(m.p) === 3);
+  const prefixes = [{ p: ident, seq: [] }];
+  for (let d = 0, edge = [prefixes[0]]; d < recipe.aimDepth; d++) {
+    const next = [];
+    for (const b of edge)
+      for (let g = 0; g < gens.length; g++)
+        next.push({ p: compose(b.p, gens[g]), seq: b.seq.concat(g) });
+    prefixes.push(...next);
+    edge = next;
+  }
+  const tripleOf = p => {
+    const s = new Set();
+    for (let i = 0; i < n; i++) if (p[i] !== i) s.add(tileOf[i]);
+    return [...s].sort((x, y) => x - y).join(',');
+  };
+  const baseTriple = bases.map(m => tripleOf(m.p));
+  const aim = new Map();
+  for (let pi = 0; pi < prefixes.length; pi++) {
+    // how this prefix moves whole tiles, so a triple can be carried by lookup
+    const P = prefixes[pi].p, tp = new Int16Array(seat.length);
+    for (let i = 0; i < n; i++) tp[tileOf[P[i]]] = tileOf[i];
+    for (let ci = 0; ci < bases.length; ci++) {
+      const key = baseTriple[ci].split(',').map(x => tp[+x])
+                    .sort((x, y) => x - y).join(',');
+      const cost = 2 * prefixes[pi].seq.length + bases[ci].seq.length;
+      const had = aim.get(key);
+      if (!had || had.cost > cost) aim.set(key, { cost, pi, ci });
+    }
+  }
+
+  return { parts, n, gens, library, short, compose, invert, tileOf,
+           bases, prefixes, aim, support,
            /* A colouring is one letter to a part, so the string is both the
               board and the key it is remembered by. Colour names would not do:
               they are words, and a string of them cannot be indexed by part,
@@ -1048,7 +1104,7 @@ const TIGHTEN_WINDOW = 14;
 
 function tightenSolution(seq) {
   const { n, gens, short, compose, invert } = kit;
-  const ident = new Int8Array(n);
+  const ident = new Int16Array(n);
   for (let i = 0; i < n; i++) ident[i] = i;
   let out = seq.slice(), again = true;
   while (again) {
@@ -1066,6 +1122,30 @@ function tightenSolution(seq) {
         break;
       }
     }
+  }
+  return out;
+}
+
+/* Moves aimed at what is actually still wrong. A three-cycle is only worth
+   trying if it touches a tile that is out of place, and near the end there are
+   few of those, so the list stays short however many triples are indexed.
+   Both ways round: the inverse of a three-cycle is the same three tiles cycled
+   the other way, and only one of the two will be the one wanted. */
+function aimedRepairs(state) {
+  const { aim, bases, prefixes, compose, invert, tileOf, home } = kit;
+  const bad = new Set();
+  for (let i = 0; i < state.length; i++)
+    if (state[i] !== home[i]) bad.add(tileOf[i]);
+  if (!bad.size) return [];
+  const back = seq => seq.slice().reverse().map(g => g ^ 1);
+  const out = [];
+  for (const [key, hit] of aim) {
+    if (!key.split(',').some(x => bad.has(+x))) continue;
+    const P = prefixes[hit.pi], c = bases[hit.ci];
+    const p = compose(compose(P.p, c.p), invert(P.p));
+    const seq = P.seq.concat(c.seq, back(P.seq));
+    out.push({ p, seq });
+    out.push({ p: invert(p), seq: back(seq) });
   }
   return out;
 }
@@ -1102,8 +1182,14 @@ async function findSolution(onStep) {
     const seen = new Set([from]);
     let floor = miss(from), idle = 0, round = 0;
     while (performance.now() - t0 < SOLVE_BUDGET_MS) {
+      /* While the descent is still finding its way down, the library is enough
+         and is the same every round. Once it sticks, the moves that will shift
+         it are the ones aimed at the tiles still wrong, so those are worked out
+         for where it has got to and tried alongside. */
+      const moves = idle >= SOLVE_AIM_AFTER
+        ? kit.library.concat(aimedRepairs(beam[0].s)) : kit.library;
       const cand = [];
-      for (const b of beam) for (const m of kit.library) {
+      for (const b of beam) for (const m of moves) {
         const s = walk(b.s, m.p);
         if (seen.has(s)) continue;
         seen.add(s);
