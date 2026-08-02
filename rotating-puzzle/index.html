@@ -107,6 +107,9 @@
   }
   button:hover, .toggle:hover { background: #2a2d32; border-color: #4b4f57; }
   button:active { background: #34373c; }
+  /* the solver only knows the three-circle board, and only unbandaged */
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+  button:disabled:hover { background: var(--panel-2); border-color: var(--line); }
 
   .toggle { display: inline-flex; align-items: center; gap: 8px; }
   .toggle input { accent-color: #6ea8fe; cursor: pointer; margin: 0; }
@@ -128,6 +131,7 @@
   <div class="controls">
     <button type="button" id="scramble">Scramble</button>
     <button type="button" id="reset">Reset puzzle</button>
+    <button type="button" id="solve">Solve</button>
     <label class="toggle"><input type="checkbox" id="invert">Invert controls</label>
     <label class="toggle"><input type="checkbox" id="bandaged">Bandaged</label>
     <label class="toggle"><input type="checkbox" id="three">Three circles</label>
@@ -713,7 +717,7 @@ function refresh() {
 // the bandages a collar carries round with it
 const bandsIn = hex => bands.filter(b => b.tiles.every(t => hex.holds.has(t))).map(b => b.el);
 
-function spin(hex, from) {
+function spin(hex, from, ms = SPIN_MS) {
   const els = [hex.hit, ...bandsIn(hex),
                ...hex.collar.flatMap(t => [t.el, ...t.parts.map(p => p.el)])];
   const [cx, cy] = hex.centre;
@@ -734,7 +738,7 @@ function spin(hex, from) {
        earlier than the moment the turn was asked for, and a negative fraction
        run through the easing sends the collar back past where it started —
        a sixth of a turn that jumps to a fifth before it comes down. */
-    const u = Math.min(1, Math.max(0, (now - t0) / SPIN_MS));
+    const u = Math.min(1, Math.max(0, (now - t0) / ms));
     if (u < 1) { place(from * (1 - ease(u))); raf = requestAnimationFrame(step); }
     else stop();
   };
@@ -746,7 +750,7 @@ function spin(hex, from) {
      a sixth from colours that had long since moved. A timer is not throttled
      the same way, so it puts the picture straight whether the frames ran or
      not — and if they did, it has nothing left to do. */
-  backstop = setTimeout(stop, SPIN_MS + 300);
+  backstop = setTimeout(stop, ms + 300);
 }
 
 /* Which way a plain click turns. Right-click is always the other way, so the
@@ -757,6 +761,7 @@ const clickDir = () => (inverted ? -1 : 1);
 // a turn, shown: made at once, then wound back a sixth and played forward
 function turn(hex, dir) {
   if (stuck(hex)) return;                 // a bandage lies across the collar
+  stopPlaying();                          // a turn by hand takes the board back
   settle();
   move(hex, dir);
   repaint();
@@ -783,6 +788,7 @@ let onBoard = new Set();
 
 function setPuzzle(p) {
   puzzle = p;
+  kit = null;                               // the solver's tables are one board's
   hexColour = new Map(p.hexes.map(h => [key(h[0], h[1]), h[2]]));
   boardHexes = p.hexes.map(h => hexAt.get(key(h[0], h[1])));
   onBoard = new Set();
@@ -818,6 +824,223 @@ function scramble() {
   }
   repaint();
   refresh();
+}
+
+/* =====================================================================
+   THE SOLVER — three circles, unbandaged
+
+   The board cannot be searched. Its states grow by a factor of 4.9 a turn and
+   are still growing freely eight turns out, so the shortest solution is out of
+   reach and what is wanted instead is any solution at all.
+
+   Descending on the number of wrong parts does not give one. Taking the best
+   of every sequence of four turns or fewer walks the board down from about
+   forty wrong parts to two and then stops dead, and those last two are not
+   nearly solved: a meet-in-the-middle from there cannot bridge thirteen turns
+   to the end. Few wrong parts is not the same as few turns away.
+
+   What finishes it is having moves small enough to repair with. Every
+   permutation reachable in six turns disturbs at least seven of the 31 tiles,
+   which is a quarter of the board — too coarse. But commutators of those with
+   each other come down to three tiles: 7176 of them, sixteen turns apiece,
+   each moving six parts and leaving everything else alone. With those in hand
+   a descent can put one thing right without disturbing the rest.
+
+   Both are needed. The three-tile moves are commutators and so even, while a
+   turn is a six-cycle and odd, so a board left an odd permutation from solved
+   can never be finished by three-cycles alone. Searching the short sequences
+   and the three-cycles together settles it: the short ones carry the parity
+   and the bulk of the work, the three-cycles do the last of it.
+
+   The descent is a beam and not a greedy walk. Taking only the single best
+   move oscillates — five thousand turns to get from 46 wrong parts to 31 —
+   where a beam of eight goes to nothing.
+   ===================================================================== */
+
+const SOLVE_BEAM = 8;
+const SOLVE_MACRO_DEPTH = 4;                // how far the short sequences run
+const SOLVE_COMM_SUPPORT = 4;               // tiles a commutator may disturb
+const SOLVE_BUDGET_MS = 6000;               // per attempt
+const SOLVE_TRIES = 4;
+const SOLVE_STALL = 10;                     // rounds without progress before restarting
+/* Every colouring met is remembered so the descent does not go round in
+   circles, but a round can throw up tens of thousands of them and the memory
+   is what actually stops the page. Past this the record is dropped and started
+   again; the beam carries on from where it is. */
+const SOLVE_SEEN_CAP = 300000;
+const SOLVE_STEP_MS = 90;                   // how fast the answer is played back
+
+const solvable = () => puzzle === PUZZLES.three && !bandaged;
+
+// one letter to a colour, so a whole colouring is a string of one char per part
+const TOKEN = { white: 'W', red: 'R', orange: 'O', yellow: 'Y',
+                green: 'G', blue: 'B', purple: 'P', grey: '.' };
+const GAP = String();                       // joined with nothing between
+
+let kit = null;                             // the solver's tables, built once
+
+/* The board as the solver sees it: its parts in a fixed order, the six turns
+   as permutations of them, and the library of moves to descend with. */
+function buildKit() {
+  const seat = tiles.filter(t => onBoard.has(t));
+  const parts = seat.flatMap(t => t.parts);
+  const n = parts.length;
+  const at = new Map(parts.map((p, i) => [p, i]));
+  const tileOf = new Int32Array(n);
+  seat.forEach((t, ti) => t.parts.forEach(p => { tileOf[at.get(p)] = ti; }));
+
+  /* Turn g is hexagon g>>1 taken anticlockwise when g is even and clockwise
+     when it is odd, so g^1 is the same turn the other way. */
+  const gens = [];
+  for (const h of boardHexes) for (const map of [h.acw, h.cw]) {
+    const perm = new Int8Array(n);
+    for (let i = 0; i < n; i++) perm[i] = i;
+    for (const [part, src] of map) perm[at.get(part)] = at.get(src);
+    gens.push(perm);
+  }
+  const compose = (p, q) => {
+    const r = new Int8Array(n);
+    for (let i = 0; i < n; i++) r[i] = p[q[i]];
+    return r;
+  };
+  const invert = p => {
+    const r = new Int8Array(n);
+    for (let i = 0; i < n; i++) r[p[i]] = i;
+    return r;
+  };
+  const support = p => {
+    const s = new Set();
+    for (let i = 0; i < n; i++) if (p[i] !== i) s.add(tileOf[i]);
+    return s.size;
+  };
+
+  // every distinct permutation a short run of turns gives
+  const ident = new Int8Array(n);
+  for (let i = 0; i < n; i++) ident[i] = i;
+  const short = new Map([[ident.join(','), []]]);
+  let layer = [ident];
+  for (let d = 0; d < SOLVE_MACRO_DEPTH + 2; d++) {
+    const next = [];
+    for (const p of layer) {
+      const seq = short.get(p.join(','));
+      for (let g = 0; g < gens.length; g++) {
+        const q = compose(p, gens[g]), k = q.join(',');
+        if (short.has(k)) continue;
+        short.set(k, seq.concat(g));
+        next.push(q);
+      }
+    }
+    layer = next;
+  }
+
+  const library = [], seeds = [];
+  for (const [k, seq] of short) {
+    if (!seq.length) continue;
+    const p = Int8Array.from(k.split(',').map(Number));
+    if (seq.length <= SOLVE_MACRO_DEPTH) library.push({ p, seq });
+    if (support(p) <= 8) seeds.push({ p, seq });    // the small ones, to commutate
+  }
+  // commutators of the small ones: three tiles apiece, and the repair tool
+  const back = seq => seq.slice().reverse().map(g => g ^ 1);
+  for (const X of seeds) {
+    const Xi = invert(X.p);
+    for (const Y of seeds) {
+      const c = compose(compose(compose(X.p, Y.p), Xi), invert(Y.p));
+      if (support(c) > SOLVE_COMM_SUPPORT || support(c) === 0) continue;
+      library.push({ p: c, seq: X.seq.concat(Y.seq, back(X.seq), back(Y.seq)) });
+    }
+  }
+  return { parts, n, gens, library,
+           /* A colouring is one letter to a part, so the string is both the
+              board and the key it is remembered by. Colour names would not do:
+              they are words, and a string of them cannot be indexed by part,
+              which is what the permutations are written over. */
+           read: () => parts.map(p => TOKEN[p.colour]).join(GAP),
+           // and the colouring it is solved in: the point each part faces
+           home: seat.flatMap(t => t.on.map(pt => TOKEN[colourAt(...pt)])).join(GAP) };
+}
+
+/* Runs of turns on the one hexagon come to a single turn, or to none, and the
+   long way round a sixth-turn is the short way back. Applied until it settles,
+   because collapsing one run can bring two others together. */
+function simplifySolution(seq) {
+  let out = seq, changed = true;
+  while (changed) {
+    changed = false;
+    const next = [];
+    for (let i = 0; i < out.length; ) {
+      const hex = out[i] >> 1;
+      let turn = 0, j = i;
+      while (j < out.length && (out[j] >> 1) === hex) { turn += (out[j] & 1) ? -1 : 1; j++; }
+      turn = ((turn % 6) + 6) % 6;
+      const many = !turn ? 0 : (turn <= 3 ? turn : 6 - turn), dir = turn <= 3 ? 0 : 1;
+      // only a run that actually came out shorter is worth going round again
+      // for — saying so whenever a run was merged would never terminate
+      if (many !== j - i) changed = true;
+      for (let k = 0; k < many; k++) next.push(hex * 2 + dir);
+      i = j;
+    }
+    out = next;
+  }
+  return out;
+}
+
+/* The descent. Yields to the page between rounds so the button can say what it
+   is doing, and is tried again on a fresh tie-break if a round of it stalls —
+   the time it takes varies a good deal from one scramble to the next. */
+async function findSolution(onStep) {
+  const goal = kit.home, from = kit.read();
+  // the turned board, built straight as a string: it is its own key
+  const walk = (s, p) => {
+    let o = GAP;
+    for (let i = 0; i < p.length; i++) o += s[p[i]];
+    return o;
+  };
+  const miss = s => {
+    let n = 0;
+    for (let i = 0; i < s.length; i++) if (s[i] !== goal[i]) n++;
+    return n;
+  };
+  for (let attempt = 0; attempt < SOLVE_TRIES; attempt++) {
+    const t0 = performance.now();
+    /* Each candidate remembers the one it came from and the move that got it
+       there, rather than the whole run of turns. Carrying the run would mean
+       building an array for every candidate of every round — tens of thousands
+       of them, growing by sixteen turns a round — which is enough allocation on
+       its own to bring the page down. Only the winner's is ever assembled. */
+    const trail = m => {
+      const seq = [];
+      for (let node = m; node.via; node = node.back) seq.unshift(...node.via);
+      return seq;
+    };
+    let beam = [{ s: from, via: null, back: null }];
+    const seen = new Set([from]);
+    let floor = miss(from), idle = 0, round = 0;
+    while (performance.now() - t0 < SOLVE_BUDGET_MS) {
+      const cand = [];
+      for (const b of beam) for (const m of kit.library) {
+        const s = walk(b.s, m.p);
+        if (seen.has(s)) continue;
+        seen.add(s);
+        const w = miss(s);
+        if (w === 0) return trail({ via: m.seq, back: b });
+        cand.push({ s, via: m.seq, back: b, w, r: Math.random() });
+      }
+      if (!cand.length) break;
+      cand.sort((x, y) => x.w - y.w || x.r - y.r);
+      beam = cand.slice(0, SOLVE_BEAM);
+      if (seen.size > SOLVE_SEEN_CAP) { seen.clear(); for (const b of beam) seen.add(b.s); }
+      /* A descent that has stopped getting anywhere is better started again
+         than waited out: the tie-break is random, so the next attempt takes a
+         different way down and usually finds one. */
+      if (beam[0].w < floor) { floor = beam[0].w; idle = 0; } else idle++;
+      if (idle >= SOLVE_STALL) break;
+      if (onStep) onStep(beam[0].w);
+      // let the page draw now and then, without paying for it every round
+      if (++round % 4 === 0) await new Promise(r => setTimeout(r, 0));
+    }
+  }
+  return null;
 }
 
 /* How far the drawing has to reach, over the tiles this puzzle is playing on.
@@ -941,9 +1164,38 @@ function showHint() {
     (bandaged ? ' A collar a bandage lies across will not turn.' : '');
 }
 
+/* Playing an answer back. Each turn is shown, only faster than a turn made by
+   hand, and any click on the board stops it where it stands — the moves are
+   made one at a time, so stopping leaves a position like any other. */
+let playing = false;
+const stopPlaying = () => { playing = false; };
+
+async function playSolution(seq, say) {
+  playing = true;
+  for (let i = 0; i < seq.length && playing; i++) {
+    const g = seq[i], hex = boardHexes[g >> 1], dir = (g & 1) ? -1 : 1;
+    settle();
+    move(hex, dir);
+    repaint(); refresh();
+    spin(hex, -dir * 60, SOLVE_STEP_MS);
+    say(`Solving — turn ${i + 1} of ${seq.length}.`);
+    await new Promise(r => setTimeout(r, SOLVE_STEP_MS));
+  }
+  settle();
+  playing = false;
+}
+
+function showSolveButton() {
+  const b = document.getElementById('solve');
+  b.disabled = !solvable() || playing;
+  b.title = solvable() ? 'Solve this board'
+    : 'The solver only knows the three-circle puzzle, unbandaged';
+}
+
 // everything the board shows, after anything that changes what it should show
 function redraw() {
-  settle(); reset(); repaint(); refresh(); frame(); showHint();
+  settle(); stopPlaying(); reset(); repaint(); refresh(); frame(); showHint();
+  showSolveButton();
 }
 
 setPuzzle(PUZZLES.seven);
@@ -951,9 +1203,31 @@ reset();
 render();
 redraw();
 
-document.getElementById('scramble').addEventListener('click', scramble);
+document.getElementById('scramble').addEventListener('click', () => {
+  stopPlaying(); scramble(); showSolveButton();
+});
+
+/* The tables take a moment to build and the search a few seconds, so the line
+   under the board reports as it goes and the page is let breathe between
+   rounds. Kept for as long as the puzzle does not change. */
+document.getElementById('solve').addEventListener('click', async () => {
+  if (!solvable() || playing) return;
+  const say = t => { document.getElementById('hint').textContent = t; };
+  const b = document.getElementById('solve');
+  b.disabled = true;
+  settle();
+  say('Solving — building the moves to work with.');
+  await new Promise(r => setTimeout(r, 0));
+  if (!kit) kit = buildKit();
+  const raw = await findSolution(n => say(`Solving — ${n} parts still out of place.`));
+  if (!raw) { say('No solution found. Try scrambling again.'); showSolveButton(); return; }
+  const seq = simplifySolution(raw);
+  await playSolution(seq, say);
+  showHint();
+  showSolveButton();
+});
 document.getElementById('reset').addEventListener('click', () => {
-  settle(); reset(); repaint(); refresh();
+  settle(); stopPlaying(); reset(); repaint(); refresh(); showHint(); showSolveButton();
 });
 document.getElementById('invert').addEventListener('change', e => {
   inverted = e.target.checked;
