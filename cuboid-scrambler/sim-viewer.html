@@ -1,0 +1,582 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cuboid state viewer (prototype)</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font-family: system-ui, sans-serif; margin: 0; padding: 16px; background:#111; color:#eee; }
+  h1 { font-size: 16px; font-weight: 600; margin: 0 0 12px; }
+  .row { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-bottom:10px; }
+  label { font-size:13px; display:flex; align-items:center; gap:5px; }
+  input[type=number]{ width:52px; }
+  input[type=text]{ flex:1; min-width:220px; }
+  input, button { font:inherit; padding:4px 6px; background:#222; color:#eee; border:1px solid #444; border-radius:5px; }
+  button { cursor:pointer; }
+  button:hover { background:#333; }
+  #stage { background:#181818; border:1px solid #333; border-radius:8px; margin-top:8px; }
+  #moveline { font-size:13px; margin:8px 0; min-height:1.4em; letter-spacing:.5px; }
+  #moveline .cur { background:#446; color:#fff; padding:1px 5px; border-radius:4px; }
+  #moveline .done { opacity:.5; }
+  .muted { color:#888; font-size:12px; }
+</style>
+</head>
+<body>
+<h1>Cuboid state viewer — prototype (shapeshifting + colours)</h1>
+
+<div class="row">
+  <label>W <input type="number" id="iw" min="1" max="9" value="3"></label>
+  <label>H <input type="number" id="ih" min="1" max="9" value="5"></label>
+  <label>D <input type="number" id="id" min="1" max="9" value="7"></label>
+  <label>Moves/phase <input type="number" id="perphase" min="1" max="40" value="6"></label>
+  <button id="apply">Generate</button>
+</div>
+<div class="row">
+  <button id="prev">◀ Prev</button>
+  <input type="range" id="step" min="0" max="0" value="0" style="flex:1;">
+  <button id="next">Next ▶</button>
+  <span id="stepnum" class="muted">0 / 0</span>
+  <label><input type="checkbox" id="shapeonly"> shape only</label>
+  <label><input type="checkbox" id="highlight" checked> highlight next move</label>
+  <label title="All-even or all-odd puzzles only: render as a fixed N=max(w,h,d) cube, with the shorter axes' outer layers drawn thicker instead of shapeshifting.">
+    <input type="checkbox" id="constcube-toggle"> constant-cube view
+  </label>
+  <label title="All-even or all-odd puzzles only: number layers by distance from the outside of the fixed N-cube (never renumbered per phase) instead of by the current reduction's movable layers.">
+    <input type="checkbox" id="outside-numbering-toggle"> outside-numbered layers
+  </label>
+</div>
+<div id="constcube-note" class="muted" style="display:none;"></div>
+<div id="numbering-note" class="muted" style="display:none;"></div>
+<div id="moveline"></div>
+<svg id="stage" width="100%" height="460" viewBox="0 0 400 300" preserveAspectRatio="xMidYMid meet"></svg>
+<p class="muted">Green front · White up · Yellow down · Red right · Orange left · Blue back · dark = internal body revealed by shapeshifting.</p>
+
+<script>
+/* ===================== engine (mirror of sim-proto.js) ===================== */
+const COLORS = { '+x':'Red','-x':'Orange','+y':'White','-y':'Yellow','+z':'Green','-z':'Blue' };
+const HEX = { Red:'#dd2222', Orange:'#ff8800', White:'#f0f0f0', Yellow:'#ffdd00', Green:'#00aa55', Blue:'#0066cc', Body:'#2a2a2a' };
+const DIRS = { '+x':[1,0,0],'-x':[-1,0,0],'+y':[0,1,0],'-y':[0,-1,0],'+z':[0,0,1],'-z':[0,0,-1] };
+const I3 = [[1,0,0],[0,1,0],[0,0,1]];
+const dot=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
+const matVec=(M,v)=>[dot(M[0],v),dot(M[1],v),dot(M[2],v)];
+const transpose=(M)=>[0,1,2].map(i=>[M[0][i],M[1][i],M[2][i]]);
+const matMul=(A,B)=>{const Bt=transpose(B);return A.map(r=>Bt.map(c=>dot(r,c)));};
+const vecEq=(a,b)=>a[0]===b[0]&&a[1]===b[1]&&a[2]===b[2];
+const P={ x:[[1,0,0],[0,0,-1],[0,1,0]], y:[[0,0,1],[0,1,0],[-1,0,0]], z:[[0,-1,0],[1,0,0],[0,0,1]] };
+const matPow=(M,e)=>e===1?M:e===-1?transpose(M):matMul(M,M);
+const AXIS={R:'x',L:'x',U:'y',D:'y',F:'z',B:'z'}, IDX={x:0,y:1,z:2}, POSITIVE=new Set(['R','U','F']);
+const baseSign=(f)=>POSITIVE.has(f)?-1:1;
+const span=(n)=>Array.from({length:n},(_,i)=>-(n-1)+2*i);
+
+function buildSolved(w,h,d){
+  const xs=span(w),ys=span(h),zs=span(d);
+  const xmax=Math.max(...xs),xmin=Math.min(...xs),ymax=Math.max(...ys),ymin=Math.min(...ys),zmax=Math.max(...zs),zmin=Math.min(...zs);
+  const cubies=[];
+  for(const x of xs)for(const y of ys)for(const z of zs){
+    const st={};
+    if(x===xmax)st['+x']=COLORS['+x']; if(x===xmin)st['-x']=COLORS['-x'];
+    if(y===ymax)st['+y']=COLORS['+y']; if(y===ymin)st['-y']=COLORS['-y'];
+    if(z===zmax)st['+z']=COLORS['+z']; if(z===zmin)st['-z']=COLORS['-z'];
+    cubies.push({home:[x,y,z],pos:[x,y,z],ori:I3,fc:[x,y,z],stickers:st});
+  }
+  return cubies;
+}
+// coarsen fc to a phase's effective dims (centre-aligned clamp = outer-fat bandaging)
+function coarsen(cubies,eff){
+  const lim=eff.map(e=>e-1);
+  for(const c of cubies) c.fc=c.fc.map((v,k)=>Math.max(-lim[k],Math.min(lim[k],v)));
+}
+function parseMove(m){
+  const x=m.match(/^(\d+)?([RLUDFB])(w?)(2|')?$/);
+  if(!x)throw new Error('bad move: '+m);
+  return {layer:x[1]?+x[1]:1,face:x[2],wide:x[3]==='w',mod:x[4]||''};
+}
+// functional-layer selection by fc: bandaged physical layers share an fc value
+// (from coarsen) so they are grabbed together — no geometry inference.
+function selectCoords(cubies,mv){
+  const {face,layer,wide}=mv;
+  const k=IDX[AXIS[face]], pos=POSITIVE.has(face);
+  const coords=[...new Set(cubies.map(c=>c.fc[k]))].sort((a,b)=>pos?b-a:a-b);
+  return new Set(wide?coords.slice(0,layer):[coords[layer-1]]);
+}
+// ---- constant-cube "distance from outside" layer numbering ----
+// Layer numbers are ALWAYS relative to the fixed virtual N-cube, never
+// renumbered per phase. Layer L's target fc is found by clamping its virtual
+// doubled position straight down to the CURRENT phase's effective dimension
+// for that axis (composing the N-vs-true-size mapping with any further
+// phase reduction, since clamping to a smaller range after a larger one is
+// the same as clamping directly to the smaller one).
+function virtualLayerFc(L,N,eff,positive){
+  const p=N-(2*L-1), signed=positive?p:-p, lim=eff-1;
+  return Math.max(-lim,Math.min(lim,signed));
+}
+// Layer L is independently selectable iff it isn't redundant with the next
+// deeper layer (same target fc = already covered by grabbing L+1 alone).
+function constCubeLayerAvailable(L,N,eff,positive){
+  const maxN=Math.floor(N/2);
+  if(L>=maxN) return true;
+  return virtualLayerFc(L,N,eff,positive)!==virtualLayerFc(L+1,N,eff,positive);
+}
+function selectCoordsConstCube(cubies,mv,Nper,eff){
+  const {face,layer,wide}=mv;
+  const k=IDX[AXIS[face]], positive=POSITIVE.has(face);
+  const target=virtualLayerFc(layer,Nper[k],eff[k],positive);
+  const sel=new Set();
+  for(const c of cubies){
+    const fc=c.fc[k];
+    if(wide ? (positive?fc>=target:fc<=target) : fc===target) sel.add(fc);
+  }
+  return sel;
+}
+function applyMove(cubies,move,cc){
+  const mv=typeof move==='string'?parseMove(move):move;
+  const ax=AXIS[mv.face], k=IDX[ax];
+  const sel = cc ? selectCoordsConstCube(cubies,mv,cc.N,cc.eff) : selectCoords(cubies,mv);
+  const sign=baseSign(mv.face), exp=mv.mod==='2'?2:mv.mod==="'"?-sign:sign, R=matPow(P[ax],exp);
+  const absR=R.map(row=>row.map(Math.abs));   // permutation-only, for rotating extents (vhalf), not directions
+  for(const c of cubies){
+    if(!sel.has(c.fc[k]))continue;
+    c.pos=matVec(R,c.pos); c.ori=matMul(R,c.ori); c.fc=matVec(R,c.fc);
+    // constant-cube virtual position/half-width: rotated the SAME way as pos,
+    // never recomputed from a lookup (which would break once a real physical
+    // shapeshift moves a coordinate outside its native axis range).
+    if(c.vpos){ c.vpos=matVec(R,c.vpos); c.vhalf=matVec(absR,c.vhalf); }
+  }
+}
+function worldStickers(c){
+  const out={}, oriT=transpose(c.ori);
+  for(const [key,wv] of Object.entries(DIRS)){
+    const lv=matVec(oriT,wv);
+    const lk=Object.keys(DIRS).find(kk=>vecEq(DIRS[kk],lv));
+    if(c.stickers[lk])out[key]=c.stickers[lk];
+  }
+  return out;
+}
+
+/* ===================== renderer ===================== */
+// axonometric projection: +x right, +y up, +z (front) toward lower-left; back recedes upper-right.
+const S=20, AX=0.55, AY=0.42;
+const project=([x,y,z])=>[ x*S - z*S*AX, -y*S + z*S*AY ];
+const VIS=['+x','+y','+z'];                 // toward-camera face normals for this view
+const SHADE={ '+z':1.0, '+y':0.86, '+x':0.72 };
+function shade(hex,f){
+  const n=parseInt(hex.slice(1),16); let r=(n>>16)&255,g=(n>>8)&255,b=n&255;
+  r=Math.round(r*f); g=Math.round(g*f); b=Math.round(b*f);
+  return '#'+((1<<24)+(r<<16)+(g<<8)+b).toString(16).slice(1);
+}
+// the two in-plane unit axes for a given face normal
+const INPLANE={ '+x':[[0,1,0],[0,0,1]], '+y':[[1,0,0],[0,0,1]], '+z':[[1,0,0],[0,1,0]] };
+
+// ---- constant-cube display mode ----
+// Represent an all-even/all-odd puzzle as a fixed N=max(w,h,d) cube: shorter
+// axes' outermost layer(s) absorb the extra virtual space (no new cubies, no
+// internal seam -- an existing layer just draws wider). The bandaging still
+// restricts moves in exactly the same way a mismatched real dimension would,
+// so scrambling uses the SAME multi-phase reduction as the normal view --
+// only the RENDERING differs. A later-phase quarter turn on a bandaged axis
+// genuinely does shapeshift the raw puzzle (its true cross-section isn't
+// square), so the render position can't be looked up fresh from raw `pos`
+// each frame; instead each cubie carries a virtual position/half-width
+// (vpos/vhalf) seeded once from this map and rotated by the SAME matrices as
+// pos/fc (see applyMove), so it's always valid regardless of rotation history.
+function sameParity(w,h,d){ return (w%2)===(h%2) && (h%2)===(d%2); }
+function renderMap(p,d,N){
+  if(d===N) return {c:p,h:1};
+  if(d===1) return {c:0,h:N};
+  if(Math.abs(p)===d-1){ const s=Math.sign(p); return {c:s*(d-2+N)/2, h:(N-d)/2+1}; }
+  return {c:p,h:1};
+}
+function seedVirtual(cubies, dims, N){
+  for(const c of cubies){
+    const rm=[0,1,2].map(k=>renderMap(c.pos[k], dims[k], N));
+    c.vpos=rm.map(r=>r.c); c.vhalf=rm.map(r=>r.h);
+  }
+}
+
+// bent rotation arrow hugging one cube corner from outside: its two legs run
+// parallel to the two SILHOUETTE edges of the projected cuboid meeting at that
+// corner, so the bend matches the outline (90° at the F/B corners where the
+// horizontal+vertical edges meet, ~143° at the depth-involving corners).
+// Corner per face (a clean bijection over the 6 visible corners, each the
+// diagonal opposite of its opposite face's corner):
+//   U back-top-left, D front-bottom-right, R back-bottom-right,
+//   L front-top-left, F front-bottom-left, B back-top-right.
+const ARROW_CORNER={ U:[-1,+1,-1], D:[+1,-1,+1], R:[+1,-1,-1], L:[-1,+1,+1], F:[-1,-1,+1], B:[+1,+1,-1] };
+function buildArrow(cubies, mv, constCube){
+  // Extent per axis: derived from the LIVE (rotated) coordinate, same pattern
+  // either way -- vpos in constant-cube mode (always exactly N-1, by
+  // construction, since rotations only permute a uniform N-cube), raw pos
+  // otherwise.
+  const M = constCube
+    ? [0,1,2].map(k=>Math.max(1,...cubies.map(c=>Math.abs(c.vpos[k]))))
+    : [0,1,2].map(k=>Math.max(1,...cubies.map(c=>Math.abs(c.pos[k]))));
+  const sgn=ARROW_CORNER[mv.face];
+  const C=[sgn[0]*M[0], sgn[1]*M[1], sgn[2]*M[2]];        // the chosen cube corner
+  const Cs=project(C);
+  // the two silhouette (contour) edges at this corner: an edge along axis a is a
+  // contour edge iff its two adjacent faces (on the other axes) differ in visibility
+  // (+ side visible). leg direction = projected direction from C toward that neighbour.
+  const legDirs=[];
+  for(let a=0;a<3;a++){
+    const o=[0,1,2].filter(i=>i!==a);
+    if((sgn[o[0]]>0)===(sgn[o[1]]>0)) continue;           // both adjacent faces same visibility -> interior edge
+    const nb=[...C]; nb[a]=-nb[a];
+    const ns=project(nb); let d=[ns[0]-Cs[0], ns[1]-Cs[1]]; const l=Math.hypot(...d)||1;
+    legDirs.push([d[0]/l, d[1]/l]);
+  }
+  // outward normal at the corner = opposite the average of the (inward) leg directions
+  let ox=-(legDirs[0][0]+legDirs[1][0]), oy=-(legDirs[0][1]+legDirs[1][1]);
+  const ol=Math.hypot(ox,oy)||1; ox/=ol; oy/=ol;
+  // the head goes on the leg the corner actually moves toward under this move's rotation
+  const ax=AXIS[mv.face], sign=baseSign(mv.face), dirExp=mv.mod==="'"?-sign:sign;
+  const Cs2=project(matVec(matPow(P[ax],dirExp), C));
+  const m=[Cs2[0]-Cs[0], Cs2[1]-Cs[1]];
+  const dot=d=>d[0]*m[0]+d[1]*m[1];
+  const end=dot(legDirs[0])>=dot(legDirs[1])?legDirs[0]:legDirs[1];
+  const startL=end===legDirs[0]?legDirs[1]:legDirs[0];
+  const pushOut=6, legLen=17, ringGap=12;
+  // a bracket at a given radial distance from the corner, along the outward normal
+  const bracket=(r)=>{
+    const vertex=[Cs[0]+ox*r, Cs[1]+oy*r];
+    return [ [vertex[0]+startL[0]*legLen,vertex[1]+startL[1]*legLen], vertex, [vertex[0]+end[0]*legLen,vertex[1]+end[1]*legLen] ];
+  };
+  if(mv.mod==='2'){
+    // two brackets nested along the same outward normal (pure radial translates
+    // of each other) so they stay parallel and never cross.
+    return { bx:ox, by:oy, paths:[bracket(pushOut), bracket(pushOut+ringGap)] };
+  }
+  return { bx:ox, by:oy, paths:[bracket(pushOut)] };
+}
+
+function renderSVG(cubies, shapeOnly, hi, constCube){
+  const occ=new Set(cubies.map(c=>c.pos.join(',')));       // real adjacency, unaffected by display stretch
+  const sel = hi ? cubies.filter(c=>hi.sel.has(c.fc[hi.k])) : [];
+  const faces=[];
+  for(const c of cubies){
+    const isSel = hi && hi.sel.has(c.fc[hi.k]);
+    const ws = shapeOnly ? null : worldStickers(c);
+    for(const dir of VIS){
+      const n=DIRS[dir];
+      const nb=[c.pos[0]+2*n[0],c.pos[1]+2*n[1],c.pos[2]+2*n[2]];
+      if(occ.has(nb.join(',')))continue;                    // interior face — cull (real adjacency, unaffected by display stretch)
+      const [u0,v0]=INPLANE[dir];
+      let center,u,v;
+      if(constCube){
+        // use the LIVE, incrementally-rotated vpos/vhalf, not a fresh lookup
+        // from raw pos (which can be outside its native axis range after a
+        // real shapeshifting rotation of a bandaged group).
+        center=[0,1,2].map(k=>c.vpos[k] + n[k]*c.vhalf[k]);
+        u=u0.map((x,k)=>x*c.vhalf[k]); v=v0.map((x,k)=>x*c.vhalf[k]);
+      } else {
+        center=[c.pos[0]+n[0],c.pos[1]+n[1],c.pos[2]+n[2]];
+        u=u0; v=v0;
+      }
+      const corners=[[+1,+1],[+1,-1],[-1,-1],[-1,+1]].map(([su,sv])=>
+        project([center[0]+su*u[0]+sv*v[0], center[1]+su*u[1]+sv*v[1], center[2]+su*u[2]+sv*v[2]]));
+      let col, isBody=false;
+      if(shapeOnly){ col=shade('#8899aa',SHADE[dir]); }
+      else { const name=ws[dir]; isBody=!name; col=shade(HEX[name]||HEX.Body, SHADE[dir]); }
+      if(hi && !isSel) col = shade(col,0.4);   // dull the rest; turning layer keeps its true colour
+      // painter's-algorithm depth key. A scalar x+y+z sum is only an
+      // approximation of true screen depth, which becomes unreliable once
+      // faces are stretched by very different amounts (constant-cube mode);
+      // that let internal "body" faces sometimes paint over sticker faces
+      // that should be in front. Since a body face should NEVER be visibly
+      // exposed in this mode (it exists only because the underlying puzzle
+      // briefly shapeshifts, which this mode is specifically hiding), force
+      // it to sort furthest back so any overlapping sticker always wins.
+      let depth = center[0]+center[1]+center[2] + (dir==='+z'?0.5:dir==='+y'?0.25:0); // back-to-front
+      if(constCube && isBody) depth -= 1000;
+      faces.push({corners,col,depth,isSel});
+    }
+  }
+  faces.sort((a,b)=>a.depth-b.depth);
+  const arrow = hi ? buildArrow(cubies, hi.mv, constCube) : null;
+  // diagram bbox from the cubies only
+  let dminX=1e9,dminY=1e9,dmaxX=-1e9,dmaxY=-1e9;
+  for(const f of faces)for(const p of f.corners){ dminX=Math.min(dminX,p[0]);dminY=Math.min(dminY,p[1]);dmaxX=Math.max(dmaxX,p[0]);dmaxY=Math.max(dmaxY,p[1]); }
+  // Shift the arrow along its outward normal just enough to clear the diagram,
+  // using a true separating-axis argument: project every ACTUAL diagram vertex
+  // (not synthetic bbox corners, which overshoot for non-cubic shapes) onto the
+  // outward direction. If every arrow point's projection exceeds every diagram
+  // vertex's projection (plus a gap), the two point sets provably cannot touch
+  // -- correct in one shot, no iteration needed.
+  if(arrow){
+    const gap=4;
+    const proj=p=>p[0]*arrow.bx+p[1]*arrow.by;
+    const diagMaxProj=Math.max(...faces.flatMap(f=>f.corners).map(proj));
+    const arrowMinProj=Math.min(...arrow.paths.flat().map(proj));
+    if(arrowMinProj < diagMaxProj+gap){
+      const s=(diagMaxProj+gap)-arrowMinProj, sx=arrow.bx*s, sy=arrow.by*s;
+      arrow.paths=arrow.paths.map(path=>path.map(p=>[p[0]+sx,p[1]+sy]));
+    }
+  }
+  // fit viewBox over faces + shifted arrow
+  let minX=dminX,minY=dminY,maxX=dmaxX,maxY=dmaxY;
+  if(arrow) for(const path of arrow.paths)for(const p of path){ minX=Math.min(minX,p[0]);minY=Math.min(minY,p[1]);maxX=Math.max(maxX,p[0]);maxY=Math.max(maxY,p[1]); }
+  const pad=14, w=(maxX-minX)+2*pad, h=(maxY-minY)+2*pad;
+  const T=p=>`${(p[0]-minX+pad).toFixed(1)},${(p[1]-minY+pad).toFixed(1)}`;
+  let body='';
+  for(const f of faces){
+    const stroke=f.isSel?'#bbbbbb':'#111';
+    body+=`<polygon points="${f.corners.map(T).join(' ')}" fill="${f.col}" stroke="${stroke}" stroke-width="1" stroke-linejoin="round"/>`;
+  }
+  if(arrow){
+    const ac='#ff4500';
+    const head=(pen,tip)=>{ const dx=tip[0]-pen[0],dy=tip[1]-pen[1],l=Math.hypot(dx,dy)||1,ux=dx/l,uy=dy/l,s2=6;
+      const bx=tip[0]-ux*s2,by=tip[1]-uy*s2;
+      return `<polygon points="${T(tip)} ${T([bx-uy*s2*0.6,by+ux*s2*0.6])} ${T([bx+uy*s2*0.6,by-ux*s2*0.6])}" fill="${ac}"/>`; };
+    for(const path of arrow.paths){
+      body+=`<polyline points="${path.map(T).join(' ')}" fill="none" stroke="${ac}" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>`;
+      body+=head(path[1],path[2]); // arrowhead at the terminal end, pointing away from the bend vertex
+    }
+  }
+  const svg=document.getElementById('stage');
+  svg.setAttribute('viewBox',`0 0 ${w.toFixed(1)} ${h.toFixed(1)}`);
+  svg.innerHTML=body;
+}
+
+/* ===================== phase generator (mirrors the main scrambler) ===================== */
+function faceAvail(f,w,h,d){return f==='R'||f==='L'?w>=2:f==='U'||f==='D'?h>=2:d>=2;}
+function faceQT(f,w,h,d){ if(f==='R'||f==='L')return h===d; if(f==='U'||f==='D')return w===d; return w===h; }
+function maxLayers(f,w,h,d){ if(f==='R'||f==='L')return Math.floor(w/2); if(f==='U'||f==='D')return Math.floor(h/2); return Math.floor(d/2); }
+function getAxisDim(f,w,h,d){ return f==='R'||f==='L'?w:f==='U'||f==='D'?h:d; }
+function applyEquiv(face,mod){ const opp={R:'L',L:'R',U:'D',D:'U',F:'B',B:'F'}[face]; return {face:opp,mod:mod===''?"'":mod==="'"?'':'2'}; }
+function moveStr(face,layer,mod){ return (layer>1?String(layer):'')+face+mod; }
+function getCanonicalPool(w,h,d){
+  const pool=[];
+  for(const face of ['R','L','U','D','F','B']){
+    if(!faceAvail(face,w,h,d))continue;
+    const qt=faceQT(face,w,h,d), ml=maxLayers(face,w,h,d), N=getAxisDim(face,w,h,d);
+    const secondary=face==='L'||face==='D'||face==='B';
+    for(let l=1;l<=ml;l++){
+      const hasEquiv=N%2===0 && l*2===N;
+      if(secondary&&hasEquiv)continue;
+      for(const mod of (qt?['',"'",'2']:['2'])) pool.push({face,layer:l,mod,qt,hasEquiv});
+    }
+  }
+  return pool;
+}
+// Outside-numbered pool: layer numbers count from the outside of a fixed
+// reference size per axis, never renumbered per phase. Nper=[Nx,Ny,Nz] is
+// either the true global N repeated 3x (paired with constant-cube view, so
+// notation matches the rendered shape) or each axis's own native size
+// (standalone -- no cross-axis alignment needed, so no parity requirement).
+// A layer is only offered if it's independently selectable at this phase
+// (see constCubeLayerAvailable); qt uses the phase's effective dims as
+// usual, hasEquiv uses that axis's own Nper entry.
+function getConstantCubePool(Nper, eff){
+  const pool=[];
+  for(const face of ['R','L','U','D','F','B']){
+    const k=IDX[AXIS[face]], positive=POSITIVE.has(face);
+    const N=Nper[k], maxN=Math.floor(N/2);
+    if(maxN<1) continue;
+    const qt=faceQT(face, ...eff);
+    const secondary=face==='L'||face==='D'||face==='B';
+    for(let l=1;l<=maxN;l++){
+      if(!constCubeLayerAvailable(l,N,eff[k],positive)) continue;
+      const hasEquiv=N%2===0 && l*2===N;
+      if(secondary&&hasEquiv)continue;
+      for(const mod of (qt?['',"'",'2']:['2'])) pool.push({face,layer:l,mod,qt,hasEquiv});
+    }
+  }
+  return pool;
+}
+function canInc(w,h,d){
+  const o=[];
+  if(w>=2&&h>1&&d>1&&h!==d&&h%2===d%2)o.push({hi:Math.max(h,d),lo:Math.min(h,d),idx:[1,2]});
+  if(h>=2&&w>1&&d>1&&w!==d&&w%2===d%2)o.push({hi:Math.max(w,d),lo:Math.min(w,d),idx:[0,2]});
+  if(d>=2&&w>1&&h>1&&w!==h&&w%2===h%2)o.push({hi:Math.max(w,h),lo:Math.min(w,h),idx:[0,1]});
+  return o;
+}
+function applyRed(dims,opt){ const nd=[...dims]; const [i,j]=opt.idx; if(nd[i]>nd[j])nd[i]=opt.lo; else nd[j]=opt.lo; return nd; }
+function getPath(w,h,d){
+  const stages=[]; let dims=[w,h,d];
+  for(let it=0;it<20;it++){
+    const inc=canInc(...dims); stages.push([...dims]);
+    if(!inc.length)break;
+    const maxHi=Math.max(...inc.map(o=>o.hi));
+    const topHi=inc.filter(o=>o.hi===maxHi);
+    const maxLo=Math.max(...topHi.map(o=>o.lo));
+    const top=topHi.filter(o=>o.lo===maxLo);
+    dims=applyRed(dims, top[Math.floor(Math.random()*top.length)]);
+  }
+  return stages;
+}
+function generateScramble(w,h,d,perPhase){
+  const phases=[];
+  let prevQTFaces=new Set();
+  for(const eff of getPath(w,h,d)){
+    const pool=getCanonicalPool(...eff);
+    if(!pool.length)continue;
+    const curQTFaces=new Set(pool.filter(t=>t.qt).map(t=>t.face));
+    // forced first move: a quarter turn on a newly-QT-eligible face performs the
+    // reduction that initiates this phase (mirrors doGenerate's forcedFirstPool).
+    const forced = phases.length>0 ? pool.filter(t=>t.qt && !prevQTFaces.has(t.face) && t.mod!=='2') : [];
+    prevQTFaces=curQTFaces;
+    const mv=[];
+    for(let i=0;i<perPhase;i++){
+      const basePool = (i===0 && forced.length) ? forced : pool;
+      const t=basePool[Math.floor(Math.random()*basePool.length)];
+      let face=t.face,mod=t.mod;
+      if(t.hasEquiv&&Math.random()<0.5){const e=applyEquiv(t.face,t.mod);face=e.face;mod=e.mod;}
+      mv.push(moveStr(face,t.layer,mod));
+    }
+    phases.push({eff,moves:mv});
+  }
+  return phases;
+}
+// Same phase/reduction structure as generateScramble (getPath is unchanged --
+// the bandaging restricts moves identically regardless of display mode), but
+// draws from the N-based constant-cube pool instead of the eff-based one.
+function generateScrambleConstCube(w,h,d,perPhase,Nper){
+  const phases=[];
+  let prevQTFaces=new Set();
+  for(const eff of getPath(w,h,d)){
+    const pool=getConstantCubePool(Nper,eff);
+    if(!pool.length)continue;
+    const curQTFaces=new Set(pool.filter(t=>t.qt).map(t=>t.face));
+    const forced = phases.length>0 ? pool.filter(t=>t.qt && !prevQTFaces.has(t.face) && t.mod!=='2') : [];
+    prevQTFaces=curQTFaces;
+    const mv=[];
+    for(let i=0;i<perPhase;i++){
+      const basePool = (i===0 && forced.length) ? forced : pool;
+      const t=basePool[Math.floor(Math.random()*basePool.length)];
+      let face=t.face,mod=t.mod;
+      if(t.hasEquiv&&Math.random()<0.5){const e=applyEquiv(t.face,t.mod);face=e.face;mod=e.mod;}
+      mv.push(moveStr(face,t.layer,mod));
+    }
+    phases.push({eff,moves:mv});
+  }
+  return phases;
+}
+
+/* ===================== UI ===================== */
+// constCubeInfo drives RENDERING (draw as a fixed N-cube). notationInfo drives
+// MOVE NOTATION/SELECTION (layer numbers count from the outside of the fixed
+// N-cube). These are independent settings -- either can be on with the other
+// off, e.g. shapeshifting render with outside-numbered moves, or a
+// constant-cube render using ordinary reduced-layer notation.
+let phases=[], flat=[], W=3,H=5,D=7, constCubeInfo=null, notationInfo=null;
+// replay from solved, coarsening fc at each phase boundary, applying the first k moves.
+function stateAt(k){
+  const c=buildSolved(W,H,D);
+  if(constCubeInfo) seedVirtual(c, constCubeInfo.dims, constCubeInfo.N);
+  let applied=0;
+  for(const ph of phases){
+    coarsen(c, ph.eff);
+    const cc = notationInfo ? {N:notationInfo.Nper, eff:ph.eff} : null;
+    for(const m of ph.moves){ if(applied>=k) return c; applyMove(c,m,cc); applied++; }
+  }
+  return c;
+}
+// which phase's effective dims a given flat move-index falls within
+function phaseEffAt(k){
+  let idx=0;
+  for(const ph of phases){ if(idx+ph.moves.length>k) return ph.eff; idx+=ph.moves.length; }
+  return phases.length ? phases[phases.length-1].eff : [W,H,D];
+}
+// Outside-numbered, standalone (non-constant-cube-view) display label. The
+// generated layer number/width reflect a static per-axis formula, but the
+// TRUE physical picture can differ at runtime: fc merges on one axis during
+// its own reduction, then a later rotation on a DIFFERENT axis can import
+// that already-merged identity via a 90-degree swap, even onto an axis that
+// never reduced on its own. Selection is already correct (fc-based, grabs
+// the right group regardless of label) -- this only fixes the DISPLAYED
+// label, and needs TWO separate counts, not one:
+//   - cumulative depth (the NUMBER): every distinct raw physical layer from
+//     the face through and including this move's own target, inclusive --
+//     an OUTER group can have widened even when this move's own group
+//     hasn't, which still pushes this move's true depth deeper.
+//   - own-group width (the "w" FLAG): only cubies exactly at this move's own
+//     target -- whether ITS group specifically can't be turned alone.
+// A move can have a corrected number with no "w" (reaches deeper because an
+// outer layer widened, but its own group is still cleanly separable), or a
+// "w" with an unchanged number (its own group is the outermost and widened).
+function outsideNumberedLabel(state, moveStr, eff, Nper){
+  const mv=parseMove(moveStr);
+  const k=IDX[AXIS[mv.face]], positive=POSITIVE.has(mv.face);
+  const target=virtualLayerFc(mv.layer,Nper[k],eff[k],positive);
+  const ownRaw=new Set(), cumRaw=new Set();
+  for(const c of state){
+    const fc=c.fc[k];
+    if(fc===target) ownRaw.add(c.pos[k]);
+    if(positive ? fc>=target : fc<=target) cumRaw.add(c.pos[k]);
+  }
+  const ownWidth=ownRaw.size, depth=cumRaw.size;
+  if(depth<=1 && ownWidth<=1) return moveStr;
+  const num = depth>1 ? depth : (mv.layer>1?String(mv.layer):'');
+  return `${num}${mv.face}${ownWidth>1?'w':''}${mv.mod}`;
+}
+function renderAt(k){
+  const state=stateAt(k);
+  let hi=null;
+  if(k<flat.length && document.getElementById('highlight').checked){
+    const mv=parseMove(flat[k]);
+    const sel = notationInfo ? selectCoordsConstCube(state,mv,notationInfo.Nper,phaseEffAt(k)) : selectCoords(state,mv);
+    hi={ k:IDX[AXIS[mv.face]], sel, mv };
+  }
+  renderSVG(state, document.getElementById('shapeonly').checked, hi, constCubeInfo);
+  document.getElementById('stepnum').textContent=`${k} / ${flat.length}`;
+  const relabel = notationInfo && notationInfo.standalone;
+  let html='', i=0;
+  for(const ph of phases){
+    html+=`<span class="muted">[${ph.eff.join('×')}]</span> `;
+    for(const m of ph.moves){
+      const label = relabel ? outsideNumberedLabel(stateAt(i), m, ph.eff, notationInfo.Nper) : m;
+      const cls=i<k?'done':(i===k?'cur':''); html+=`<span class="${cls}">${label}</span> `; i++;
+    }
+  }
+  document.getElementById('moveline').innerHTML=html||'<span class="muted">(no moves)</span>';
+}
+function apply(){
+  W=Math.max(1,+document.getElementById('iw').value||1);
+  H=Math.max(1,+document.getElementById('ih').value||1);
+  D=Math.max(1,+document.getElementById('id').value||1);
+  const per=Math.max(1,Math.min(40,+document.getElementById('perphase').value||6));
+  // Two independent settings:
+  //  - constant-cube VIEW: render as a fixed N-cube (rendering only). Needs
+  //    all-even/all-odd dims, since every axis must share one N to form a cube.
+  //  - outside-numbered LAYERS: layer numbers count from the outside of a
+  //    fixed reference size, never renumbered per phase. No parity
+  //    requirement on its own (each axis is self-referential -- no cross-axis
+  //    alignment needed) UNLESS it's paired with an ACTIVE constant-cube
+  //    view, in which case it uses that view's shared N so the notation
+  //    matches what's drawn; otherwise each axis uses its own native size.
+  const wantConstCube=document.getElementById('constcube-toggle').checked;
+  const wantOutsideNum=document.getElementById('outside-numbering-toggle').checked;
+  const viewNote=document.getElementById('constcube-note');
+  const numNote=document.getElementById('numbering-note');
+  const parityOk = sameParity(W,H,D);
+  const useConstCube = wantConstCube && parityOk;
+  const N = useConstCube ? Math.max(W,H,D) : null;
+  const Nper = wantOutsideNum ? (useConstCube ? [N,N,N] : [W,H,D]) : null;
+  phases = wantOutsideNum ? generateScrambleConstCube(W,H,D,per,Nper) : generateScramble(W,H,D,per);
+  constCubeInfo = useConstCube ? {N, dims:[W,H,D]} : null;
+  notationInfo = wantOutsideNum ? {Nper, standalone: !useConstCube} : null;
+  viewNote.style.display = wantConstCube ? 'block' : 'none';
+  if(wantConstCube) viewNote.textContent = useConstCube
+    ? `Constant-cube view: rendered as a fixed ${N}×${N}×${N}.`
+    : `Constant-cube view needs all-even or all-odd dimensions (got ${W}×${H}×${D}) -- showing the normal shape instead.`;
+  numNote.style.display = wantOutsideNum ? 'block' : 'none';
+  if(wantOutsideNum) numNote.textContent = useConstCube
+    ? `Outside-numbered layers: counted from the outside of the fixed ${N}×${N}×${N} (matching the constant-cube view); bandaged outer layers are simply unavailable rather than renumbered.`
+    : `Outside-numbered layers: each axis counted from its own native size (${W}×${H}×${D}); bandaged outer layers are simply unavailable rather than renumbered.`;
+  flat=phases.flatMap(p=>p.moves);
+  const step=document.getElementById('step');
+  step.max=flat.length; step.value=0;
+  renderAt(0);
+}
+document.getElementById('apply').onclick=apply;
+document.getElementById('constcube-toggle').onchange=apply;
+document.getElementById('outside-numbering-toggle').onchange=apply;
+document.getElementById('step').oninput=(e)=>renderAt(+e.target.value);
+document.getElementById('shapeonly').onchange=()=>renderAt(+document.getElementById('step').value);
+document.getElementById('highlight').onchange=()=>renderAt(+document.getElementById('step').value);
+document.getElementById('prev').onclick=()=>{const s=document.getElementById('step');s.value=Math.max(0,+s.value-1);renderAt(+s.value);};
+document.getElementById('next').onclick=()=>{const s=document.getElementById('step');s.value=Math.min(flat.length,+s.value+1);renderAt(+s.value);};
+apply();
+</script>
+</body>
+</html>

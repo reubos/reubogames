@@ -1,0 +1,976 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Rotating Puzzle — Rhombitrihexagonal</title>
+<style>
+  :root {
+    --bg: #17181a;
+    --panel-2: #202225;
+    --line: #34373c;
+    --text: #e6e7e9;
+    --muted: #9a9da3;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    background-color: var(--bg);
+    color: var(--text);
+    font-family: 'Segoe UI', sans-serif;
+    margin: 0;
+    padding: 24px 20px 60px;
+    min-height: 100vh;
+  }
+
+  .wrap { max-width: 720px; margin: 0 auto; }
+
+  h1 { font-size: 2rem; color: #fff; margin: 0 0 6px; }
+  .sub { color: var(--muted); font-size: 0.95rem; margin: 0 0 24px; }
+
+  .panel {
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 10px;
+  }
+
+  /* A turn is a click, and turns come in quick succession, so the board must
+     not be somewhere a selection can start: without this a double-click on a
+     hexagon runs off and picks out the button labels underneath it. */
+  #board {
+    width: 100%; height: auto; display: block;
+    touch-action: manipulation;
+    user-select: none; -webkit-user-select: none;
+  }
+
+  /* stroke-width is set on the <g>s in render(): the tiling is built on edge
+     length 1, so it is a constant in user units and must not be set here. */
+
+  /* The parts carry a hairline of their own fill, so two halves of a tile meet
+     without the background showing through the seam between them. */
+  .part { stroke-linejoin: round; }
+
+  /* Tile outlines go over the parts, so a tile edge reads harder than the
+     split inside it. */
+  .cell {
+    fill: none;
+    stroke: #17181a;
+    stroke-linejoin: round;
+    pointer-events: none;
+  }
+
+  /* a bandage: one outline round the lens, the lines inside it hidden */
+  .band {
+    fill: none;
+    stroke: #17181a;
+    stroke-linejoin: round;
+    pointer-events: none;
+  }
+
+  /* the no-turn mark, standing on a hexagon whose collar is locked. Dark
+     enough to read on all seven hexagon colours, none of which is dark. */
+  .mark {
+    fill: none;
+    stroke: #17181a;
+    stroke-width: 0.045;                  /* finer than a tile edge, so it stays quiet */
+    stroke-linecap: round;
+    opacity: 0.5;
+    pointer-events: none;                 /* the hexagon under it is still the target */
+  }
+
+  /* transparent, not none: a hexagon has to be there to be clicked */
+  .hit {
+    fill: transparent;
+    stroke: none;
+    stroke-linejoin: round;
+    cursor: pointer;
+  }
+  .hit:hover { stroke: rgba(255, 255, 255, 0.75); }
+  /* a collar a bandage lies across says so before it is clicked */
+  .hit.stuck { cursor: not-allowed; }
+  .hit.stuck:hover { stroke: rgba(255, 110, 110, 0.9); }
+
+  .controls { display: flex; flex-wrap: wrap; gap: 10px; margin: 16px 0 0; }
+
+  button, .toggle {
+    font: inherit;
+    font-size: 0.95rem;
+    color: var(--text);
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 8px 16px;
+    cursor: pointer;
+    user-select: none; -webkit-user-select: none;
+  }
+  button:hover, .toggle:hover { background: #2a2d32; border-color: #4b4f57; }
+  button:active { background: #34373c; }
+
+  .toggle { display: inline-flex; align-items: center; gap: 8px; }
+  .toggle input { accent-color: #6ea8fe; cursor: pointer; margin: 0; }
+
+  .counts { color: var(--muted); font-size: 0.9rem; margin: 16px 0 0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Rotating Puzzle</h1>
+  <p class="sub">The rhombitrihexagonal tiling, 3.4.6.4, bowed onto circles — one
+    about each hexagon, through the twelve corners of the collar it turns. Every
+    tile is divided between the hexagons around it.</p>
+
+  <div class="panel">
+    <svg id="board" xmlns="http://www.w3.org/2000/svg"></svg>
+  </div>
+
+  <div class="controls">
+    <button type="button" id="scramble">Scramble</button>
+    <button type="button" id="reset">Reset puzzle</button>
+    <label class="toggle"><input type="checkbox" id="invert">Invert controls</label>
+    <label class="toggle"><input type="checkbox" id="bandaged">Bandaged</label>
+    <label class="toggle"><input type="checkbox" id="three">Three circles</label>
+  </div>
+
+  <p class="counts" id="hint"></p>
+
+  <p class="counts" id="counts"></p>
+</div>
+
+<script>
+/* =====================================================================
+   THE BOARD
+
+   In the rhombitrihexagonal tiling the hexagons sit on a triangular
+   lattice of pitch 1 + √3, with a square straddling every lattice edge
+   and a triangle on every lattice face. So a hexagon comes with a collar
+   of six squares and six triangles, and a board of whole collars is what
+   the tiling looks like: cut anywhere else and hexagons end up on the rim
+   with their collars half missing.
+
+   Seven hexagons — the centre and its six neighbours — carry 30 squares
+   and 24 triangles between them, since the squares are shared by two
+   collars and the triangles by three. That is the 61-tile board.
+   ===================================================================== */
+
+const S3 = Math.sqrt(3);
+const PITCH = 1 + S3;                       // distance between hexagon centres
+
+// lattice basis, 60° apart, so the six neighbour directions are 30°, 90°, ...
+const A = [PITCH * S3 / 2, PITCH / 2];
+const B = [0, PITCH];
+
+const at = (a, b) => [a * A[0] + b * B[0], a * A[1] + b * B[1]];
+const key = (a, b) => a + ',' + b;
+
+/* The centre and its six neighbours, and the colour each one owns. Clockwise
+   from the top on screen, which — since the board is drawn with y running up —
+   is the six neighbour directions taken in falling order of angle: 90°, 30°,
+   -30°, -90°, 150°... the last two being (-1,0) at 210° and (-1,1) at 150°. */
+const COLOURS = {
+  white:  '#f2f3f5',
+  red:    '#e5484d',
+  orange: '#f76b15',
+  yellow: '#f5cf24',
+  green:  '#3dbb63',
+  blue:   '#3b82f6',
+  purple: '#a855f7',
+  grey:   '#5a5e66'                         // off the board: no hexagon there
+};
+
+/* The seven the geometry is built for. The smaller puzzle plays on three of
+   them, so its board is a piece of this one — the same tiles on the same
+   circles, fewer of them in play — and nothing has to be built twice. */
+const HEXES = [[0, 0], [0, 1], [1, 0], [1, -1], [0, -1], [-1, 0], [-1, 1]];
+const hexSet = new Set(HEXES.map(h => key(...h)));
+const isHex = (a, b) => hexSet.has(key(a, b));
+
+/* Which hexagons a puzzle plays on and what colour each owns.
+
+   The seven go clockwise from the top, which — the board being drawn with y
+   running up — is the neighbour directions in falling order of angle.
+
+   The three sit on one lattice face, each of them next to both the others. On
+   the lattice they stand at 0°, 120° and 240° about their middle, which is two
+   up the left and one to the right — no two hexagons of this tiling are ever
+   level with one another. Turning the whole board a sixth of a half-turn
+   backwards carries those to 90°, 210° and 330°: one at the top and two at
+   equal heights below it, so the line between the bottom pair lies flat.
+   Clockwise from the top they read red, green, white. */
+const PUZZLES = {
+  seven: { hexes: [
+    [ 0,  0, 'white'],                      // the middle
+    [ 0,  1, 'red'],                        // 90°, straight up
+    [ 1,  0, 'orange'],                     // 30°
+    [ 1, -1, 'yellow'],                     // -30°
+    [ 0, -1, 'green'],                      // -90°, straight down
+    [-1,  0, 'blue'],                       // -150°
+    [-1,  1, 'purple'] ] },                 // 150°
+  three: { tilt: -Math.PI / 6, hexes: [
+    [ 0,  1, 'red'],                        // top, once tilted
+    [ 1,  0, 'green'],                      // bottom right
+    [ 0,  0, 'white'] ] }                   // bottom left
+};
+
+let hexColour = new Map();                  // filled in when a puzzle is picked
+// a lattice point with no hexagon of this puzzle on it has no colour to give,
+// so the halves and kites facing it go grey
+const colourAt = (a, b) => hexColour.get(key(a, b)) || 'grey';
+
+const RANGE = 2;                            // far enough to reach every collar
+
+/* Every lattice edge with a board hexagon at one end or the other. Taking the
+   three directions of one half-plane visits each edge from one end only. */
+const EDGES = [];
+for (let a = -RANGE; a <= RANGE; a++)
+  for (let b = -RANGE; b <= RANGE; b++)
+    for (const [da, db] of [[1, 0], [0, 1], [-1, 1]]) {
+      const p = [a, b], q = [a + da, b + db];
+      if (isHex(...p) || isHex(...q)) EDGES.push([p, q]);
+    }
+
+/* Every lattice face with a board hexagon at one of its corners. The faces
+   come in two families — pointing at 60° and at 0° from their first corner —
+   and each is reached once, from the corner it is named by. */
+const FACES = [];
+for (let a = -RANGE; a <= RANGE; a++)
+  for (let b = -RANGE; b <= RANGE; b++)
+    for (const off of [[[0, 0], [1, 0], [0, 1]], [[0, 0], [1, 0], [1, -1]]]) {
+      const tri = off.map(([da, db]) => [a + da, b + db]);
+      if (tri.some(p => isHex(...p))) FACES.push(tri);
+    }
+
+/* =====================================================================
+   THE CIRCLES
+
+   A collar is cut on a dodecagon, and that dodecagon is regular: all twelve
+   corners stand at 2·cos15° from the hexagon's centre, thirty degrees apart.
+   So there is a circle through every one of them, and swapping the dodecagon
+   for its own circumcircle moves no corner of the tiling at all — it only bows
+   each of the twelve edges out by a sagitta of 0.066.
+
+   Every edge of the tiling lies on exactly one collar boundary. A square's two
+   long edges are the boundaries of the two hexagons it does not touch across
+   them, and a triangle's three edges are the boundaries of the three hexagons
+   its corners point at; between them that is every edge there is. So bowing
+   the collars bows the whole tiling, and what is left is the arrangement of
+   one circle about every lattice point: the same corners, the same pieces, the
+   same counts, with every edge an arc.
+
+   The pieces change shape rather than number. A hexagon has all six edges
+   bowed into it and goes concave; a triangle has all three bowed out of it; a
+   square has the two facing hexagons bowed out and the two facing triangles
+   bowed in, so it keeps its area and leans.
+
+   A circle is carried to itself by any turn about its centre, so the collar
+   still turns — and more easily than the dodecagon did.
+   ===================================================================== */
+
+const ARC_R = 2 * Math.cos(Math.PI / 12);      // 1.9319, the dodecagon's circumradius
+
+// The rim of the board is cut by the circles of the hexagons that would have
+// stood outside it, so the lattice is needed a ring wider than the board is.
+const LATTICE = [];
+for (let a = -RANGE - 1; a <= RANGE + 1; a++)
+  for (let b = -RANGE - 1; b <= RANGE + 1; b++) LATTICE.push(at(a, b));
+
+/* The circle an edge runs on is the one with both of its ends on it, and since
+   every edge lies on exactly one collar boundary that is a lookup rather than a
+   choice — checked, because taking the first of two would be silently wrong. */
+function arcCentre(p, q) {
+  const on = v => LATTICE.filter(Z =>
+    Math.abs(Math.hypot(v[0] - Z[0], v[1] - Z[1]) - ARC_R) < 1e-9);
+  const both = on(p).filter(Z => on(q).some(W => W === Z));
+  if (both.length !== 1) throw new Error(`edge on ${both.length} circles`);
+  return both[0];
+}
+
+// An edge that gets cut in two is cut on its arc, not across its chord, so both
+// halves stay on the circle. The two circles either side of a lattice edge are
+// the same distance from both its ends, so this lands where the straight
+// midpoint used to: on the line of symmetry.
+function arcMid(p, q, Z) {
+  const x = (p[0] + q[0]) / 2 - Z[0], y = (p[1] + q[1]) / 2 - Z[1];
+  const l = Math.hypot(x, y);
+  return [Z[0] + ARC_R * x / l, Z[1] + ARC_R * y / l];
+}
+
+// --- the tiles --------------------------------------------------------
+
+const unit = (p, q) => {
+  const x = q[0] - p[0], y = q[1] - p[1], l = Math.hypot(x, y);
+  return [x / l, y / l];
+};
+
+// the edges of a shape that is all tiling edges: each corner and the circle the
+// edge leaving it runs on
+const arcs = poly => poly.map((v, k) => [v, arcCentre(v, poly[(k + 1) % poly.length])]);
+
+const mid = (p, q) => [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2];
+
+/* A tile is one shape and a list of parts. Every part faces one lattice point,
+   so the three tile shapes are three ways of dividing a tile between the
+   hexagons around it — the hexagon keeps itself, the square splits in half
+   across the lattice edge it straddles, and the triangle splits into three
+   kites, one to each corner.
+
+   Which point a part faces is written down once, in the order of `on`: part k
+   of a tile faces `on[k]`. That is the whole of the colouring — reset() reads
+   it — so the parts of a tile must be built in the order its points are.
+
+   Each shape carries its corners as `poly`, which is what its centre and the
+   size of the board are worked out from, and an `outline` beside it saying how
+   to get from one corner to the next: along the circle named there, or straight
+   where the edge is a cut through the middle of a tile rather than an edge of
+   the tiling. */
+const tiles = [];
+
+// hexagon: side 1, corners at 0°, 60°, ... so its edges face the neighbours.
+// Every edge is the boundary of the collar next door, so all six bow inwards.
+for (const [a, b] of HEXES) {
+  const c = at(a, b);
+  const poly = [];
+  for (let k = 0; k < 6; k++) {
+    const t = k * Math.PI / 3;
+    poly.push([c[0] + Math.cos(t), c[1] + Math.sin(t)]);
+  }
+  const outline = arcs(poly);
+  tiles.push({ sides: 6, on: [[a, b]], centre: c, poly, outline,
+               parts: [{ poly, outline }] });
+}
+
+/* square: astride a lattice edge, one edge shared with each hexagon. Built on
+   the axis running from one lattice point to the other, so cutting it at the
+   middle of that axis is the split, and each half is the one nearer its end. */
+for (const [p, q] of EDGES) {
+  const P = at(...p), Q = at(...q);
+  const m = mid(P, Q);
+  const [ux, uy] = unit(P, Q), wx = -uy, wy = ux;
+  const corner = (s, t) =>
+    [m[0] + (s * ux + t * wx) / 2, m[1] + (s * uy + t * wy) / 2];
+  // the two ends, across the lattice edge, and the two sides, along it
+  const [e0, e1, s1, s0] = [corner(-1, -1), corner(1, -1), corner(1, 1), corner(-1, 1)];
+  const poly = [e0, e1, s1, s0];
+  const [Zb, Zr, Zt, Zl] = [arcCentre(e0, e1), arcCentre(e1, s1),
+                            arcCentre(s1, s0), arcCentre(s0, e0)];
+  // the split runs down the middle of the two sides, and it meets them on the arc
+  const cut0 = arcMid(e0, e1, Zb), cut1 = arcMid(s1, s0, Zt);
+  tiles.push({ sides: 4, on: [p, q], centre: m, poly,
+    outline: [[e0, Zb], [e1, Zr], [s1, Zt], [s0, Zl]], parts: [
+    { poly: [e0, cut0, cut1, s0],
+      outline: [[e0, Zb], [cut0, null], [cut1, Zt], [s0, Zl]] },
+    { poly: [cut0, e1, s1, cut1],
+      outline: [[cut0, Zb], [e1, Zr], [s1, Zt], [cut1, null]] }
+  ] });
+}
+
+/* triangle: on a lattice face, a corner pointing at each of the three hexagons.
+   The kite on a corner is that corner, the halves of the two edges meeting
+   there, and the centre — so the three kites divide the tile between the three
+   hexagons its corners point at. */
+for (const tri of FACES) {
+  const C = tri.map(p => at(...p));
+  const f = [(C[0][0] + C[1][0] + C[2][0]) / 3, (C[0][1] + C[1][1] + C[2][1]) / 3];
+  const poly = C.map(c => {
+    const [ux, uy] = unit(f, c);
+    return [f[0] + ux / S3, f[1] + uy / S3];
+  });
+  const outline = arcs(poly);                 // edge k runs from corner k to k+1
+  const cut = poly.map((v, k) => arcMid(v, poly[(k + 1) % 3], outline[k][1]));
+  const parts = poly.map((v, k) => {
+    const b = (k + 2) % 3;                    // the edge arriving at corner k
+    return { poly: [cut[b], v, cut[k], f],
+             outline: [[cut[b], outline[b][1]], [v, outline[k][1]],
+                       [cut[k], null], [f, null]] };
+  });
+  tiles.push({ sides: 3, on: tri, centre: f, poly, outline, parts });
+}
+
+/* The two families of lattice faces wind opposite ways, so half the triangles
+   came out clockwise and half anticlockwise. Which way a shape is wound makes
+   no difference to drawing it, but a bandage's outline is stitched together
+   from the edges of the tiles under it, and that wants them all going the same
+   way round: then a shared edge is walked once in each direction and the edges
+   left over already run nose to tail. */
+const signedArea = o => {
+  let a = 0;
+  for (let i = 0; i < o.length; i++) {
+    const p = o[i][0], q = o[(i + 1) % o.length][0];
+    a += p[0] * q[1] - q[0] * p[1];
+  }
+  return a / 2;
+};
+// the same loop walked backwards: each corner keeps the edge that arrived at it
+const reversed = o => o.map((_, i) => {
+  const j = o.length - 1 - i;
+  return [o[(j + 1) % o.length][0], o[j][1]];
+});
+for (const t of tiles) if (signedArea(t.outline) < 0) t.outline = reversed(t.outline);
+
+/* =====================================================================
+   THE COLLARS
+
+   A tile sits on the lattice points its parts face — the hexagon on its own
+   point, the square on the two ends of its edge, the triangle on the three
+   corners of its face. Turn that round and each hexagon's collar is the tiles
+   sitting on its point: itself, six squares and six triangles.
+
+   Those thirteen have a dodecagon for an outline. Every square gives one edge
+   to it, the one facing the hexagon next door, its other three going to the
+   hexagon and the two triangles beside it; and every triangle gives one, the
+   one facing away, its other two going to the two squares. Six and six.
+
+   The outline is carried to itself by a sixth-turn, so a collar can be turned
+   without the board changing shape, and squares land on squares and triangles
+   on triangles. The board is the seven collars, and they overlap: every square
+   is in two of them and every triangle in three, which is what makes turning
+   one collar disturb the next.
+   ===================================================================== */
+
+const hexTiles = tiles.filter(t => t.sides === 6);
+const hexAt = new Map(hexTiles.map(t => [key(...t.on[0]), t]));
+for (const h of hexTiles) h.collar = [];
+for (const t of tiles)
+  for (const p of t.on) {
+    const h = hexAt.get(key(...p));
+    if (h) h.collar.push(t);              // no hexagon off the board to collar it
+  }
+
+const centroid = poly => {
+  let x = 0, y = 0;
+  for (const p of poly) { x += p[0]; y += p[1]; }
+  return [x / poly.length, y / poly.length];
+};
+for (const t of tiles) for (const part of t.parts) part.centre = centroid(part.poly);
+
+// Parts are far wider than the drift in the arithmetic that places them, so a
+// part is found by whichever centre is nearest and the tolerance is only there
+// to catch a lookup that has missed altogether.
+const allParts = tiles.flatMap(t => t.parts);
+function partAt(x, y) {
+  let best = null, bd = Infinity;
+  for (const p of allParts) {
+    const d = (p.centre[0] - x) ** 2 + (p.centre[1] - y) ** 2;
+    if (d < bd) { bd = d; best = p; }
+  }
+  return bd < 1e-6 ? best : null;
+}
+
+/* Turning a collar moves whole tiles onto tiles of the same shape, so nothing
+   about the board changes but which colour is where. That is fixed by the
+   geometry, so it is worked out once: for every part of the collar, the part it
+   takes its colour from — which lies the other way round from the turn, so the
+   angle here is the turn reversed.
+
+   The board is drawn with y running up, so a turn that reads as clockwise is
+   a turn through a negative angle, and its parts come from +60°. */
+function turnMap(hex, ang) {
+  const C = hex.centre, co = Math.cos(ang), si = Math.sin(ang);
+  return hex.collar.flatMap(t => t.parts).map(part => {
+    const x = part.centre[0] - C[0], y = part.centre[1] - C[1];
+    const src = partAt(C[0] + x * co - y * si, C[1] + x * si + y * co);
+    if (!src) throw new Error('a collar that does not turn onto itself');
+    return [part, src];
+  });
+}
+// a tile by where it stands, for asking a turn where each one is going
+function tileAt(x, y) {
+  let best = null, bd = Infinity;
+  for (const t of tiles) {
+    const d = (t.centre[0] - x) ** 2 + (t.centre[1] - y) ** 2;
+    if (d < bd) { bd = d; best = t; }
+  }
+  return bd < 1e-6 ? best : null;
+}
+
+/* Where each tile of a collar goes when the collar turns. The colours are
+   worked out the other way about — every part told where to take its colour
+   from — but a bandage is a thing being carried rather than a slot being
+   filled, so it wants telling where it is going. */
+function goMap(hex, ang) {
+  const C = hex.centre, co = Math.cos(ang), si = Math.sin(ang);
+  const m = new Map();
+  for (const t of hex.collar) {
+    const x = t.centre[0] - C[0], y = t.centre[1] - C[1];
+    const to = tileAt(C[0] + x * co - y * si, C[1] + x * si + y * co);
+    if (!to) throw new Error('a collar that does not turn onto itself');
+    m.set(t, to);
+  }
+  return m;
+}
+
+for (const h of hexTiles) {
+  h.cw = turnMap(h, Math.PI / 3);
+  h.acw = turnMap(h, -Math.PI / 3);
+  h.goACW = goMap(h, Math.PI / 3);
+  h.goCW = goMap(h, -Math.PI / 3);
+  h.holds = new Set(h.collar);
+}
+
+/* =====================================================================
+   THE BANDAGES
+
+   Two neighbouring circles cross in a lens — a vesica piscis — and the lens is
+   exactly three tiles: the square astride the lattice edge between them and the
+   triangles on the faces either side. Their areas come to 2.1302 and so does
+   the lens, so there is nothing else in it and nothing of them outside it.
+
+   Bandaging one glues its three into a single piece. Where a bandage lies
+   wholly in the collar being turned it goes round whole; what stops a turn is
+   a bandage the collar only partly holds, and then the collar cannot turn at
+   all, either way.
+
+   The seven-circle puzzle glues the lens at the far point of each outer
+   hexagon. A lens sits in the collar of each end of its edge and nowhere else,
+   since the square does, so those six are held by one collar only, both of
+   their third corners being off the board — nothing is blocked to begin with
+   and the bandages have to be dragged inwards before they bite. They are also
+   the six the board bulges out at, each with half of itself on the rim and grey.
+
+   The three-circle puzzle glues a different shape: two squares and the triangle
+   between them, at the face pointing away from the other two hexagons. That is
+   as far from them as the collar reaches, and no two hexagons of this tiling
+   share it, so again nothing is blocked until it is turned. A group like this
+   is held by one collar only — each square names its own hexagon and the other
+   end of its edge, and only the hexagon is common to both.
+
+   Neither shape needs its own machinery. A bandage is a set of tiles, it moves
+   by asking the turn where each of its tiles goes, and it is drawn by stitching
+   its tiles' outlines together and dropping the edges they share.
+   ===================================================================== */
+
+const pairKey = ps => ps.map(p => key(...p)).sort().join('|');
+const onSpot = (f, r) => f.some(s => key(...s) === key(...r));
+
+const bySeat = new Map();                   // a square or triangle by where it sits
+for (const t of tiles) if (t.sides !== 6) bySeat.set(pairKey(t.on), t);
+const seat = ps => {
+  const t = bySeat.get(pairKey(ps));
+  if (!t) throw new Error('no tile on ' + pairKey(ps));
+  return t;
+};
+
+// the lens on a lattice edge: the square astride it, and the triangles on the
+// two faces either side
+PUZZLES.seven.bands = () => PUZZLES.seven.hexes.slice(1).map(([a, b]) => {
+  const X = [a, b], Y = [2 * a, 2 * b];
+  return [seat([X, Y]),
+          ...FACES.filter(f => onSpot(f, X) && onSpot(f, Y)).map(seat)];
+});
+
+// two squares and the triangle between them, on the face opposite the two
+// hexagons this one sits beside
+PUZZLES.three.bands = () => PUZZLES.three.hexes.map(([a, b]) => {
+  const X = [a, b];
+  const away = PUZZLES.three.hexes
+    .filter(h => h[0] !== a || h[1] !== b)
+    .map(h => [2 * a - h[0], 2 * b - h[1]]);      // the neighbour opposite each
+  return [seat([X, away[0]]), seat([X, away[0], away[1]]), seat([X, away[1]])];
+});
+
+let bandaged = false;                       // whether the gluing is on
+let bands = [];                             // each { tiles, el }, where they are now
+
+// a collar turns unless a bandage is only partly in it
+const stuck = hex => bands.some(b => {
+  const n = b.tiles.filter(t => hex.holds.has(t)).length;
+  return n && n < b.tiles.length;
+});
+
+/* The outline of a bandage: every edge of every tile under it, with the ones
+   they share dropped and the rest stitched end to end. The tiles are all wound
+   the same way round, so a shared edge is walked once in each direction and the
+   survivors already run nose to tail. */
+function unionOutline(group) {
+  const spot = p => p[0].toFixed(4) + ',' + p[1].toFixed(4);
+  const steps = [];
+  for (const t of group)
+    for (let i = 0; i < t.outline.length; i++)
+      steps.push({ a: t.outline[i][0], Z: t.outline[i][1],
+                   b: t.outline[(i + 1) % t.outline.length][0] });
+  const span = s => [spot(s.a), spot(s.b)].sort().join('|');
+  const seen = new Map();
+  for (const s of steps) seen.set(span(s), (seen.get(span(s)) || 0) + 1);
+  const rim = steps.filter(s => seen.get(span(s)) === 1);
+  const next = new Map(rim.map(s => [spot(s.a), s]));
+  const out = [];
+  let s = rim[0];
+  do { out.push([s.a, s.Z]); s = next.get(spot(s.b)); } while (s && s !== rim[0]);
+  if (out.length !== rim.length) throw new Error('a bandage in more than one piece');
+  return out;
+}
+
+// --- drawing ----------------------------------------------------------
+
+const NS = 'http://www.w3.org/2000/svg';
+const PAD = 0.2;
+
+const svgEl = (name, attrs) => {
+  const el = document.createElementNS(NS, name);
+  for (const k in attrs) el.setAttribute(k, attrs[k]);
+  return el;
+};
+const xy = p => p[0].toFixed(4) + ',' + p[1].toFixed(4);
+
+/* An outline drawn as a path. Every arc is a thirtieth-turn of its circle, well
+   under a half, so it is always the small one; which way round it goes is
+   whether its far end lies anticlockwise of its near end, and anticlockwise is
+   the sweep flag here because the frame this is drawn in has y running up. */
+function pathOf(outline) {
+  let d = 'M' + xy(outline[0][0]);
+  for (let i = 0; i < outline.length; i++) {
+    const [a, Z] = outline[i], b = outline[(i + 1) % outline.length][0];
+    if (!Z) { d += 'L' + xy(b); continue; }
+    const turn = (a[0] - Z[0]) * (b[1] - Z[1]) - (a[1] - Z[1]) * (b[0] - Z[0]);
+    d += `A${ARC_R.toFixed(4)},${ARC_R.toFixed(4)} 0 0 ${turn > 0 ? 1 : 0} ${xy(b)}`;
+  }
+  return d + 'Z';
+}
+
+// the hairline is the fill again, so the two halves of a tile meet without the
+// background showing through the seam between them
+function paint(part) {
+  const c = COLOURS[part.colour];
+  part.el.setAttribute('fill', c);
+  part.el.setAttribute('stroke', c);
+}
+
+const repaint = () => allParts.forEach(paint);
+
+/* A turn is read off before any of it is written back: every part takes the
+   colour its source had when the turn began, and a part's source is itself
+   another part of the same collar. `dir` is +1 for anticlockwise and -1 for
+   clockwise, which — the frame having y up — are the signs of the angle too. */
+// the move itself, and nothing drawn: a scramble makes hundreds of these and
+// only the state it leaves behind is worth painting
+function move(hex, dir) {
+  const map = dir > 0 ? hex.acw : hex.cw;
+  const taken = map.map(([part, src]) => [part, src.colour]);
+  for (const [part, colour] of taken) part.colour = colour;
+  // a bandage the collar holds whole goes round with it
+  if (bands.length) {
+    const go = dir > 0 ? hex.goACW : hex.goCW;
+    for (const b of bands)
+      if (b.tiles.every(t => hex.holds.has(t))) b.tiles = b.tiles.map(t => go.get(t));
+  }
+}
+
+/* ---- showing a turn -------------------------------------------------
+
+   The collar fills the disc its circle bounds, exactly: the thirteen tiles
+   meet the circle and stop there, and no other tile crosses it. So turning
+   their elements about the centre is a shuffling of the disc among itself —
+   it stays covered the whole way round, the rest of the board is untouched,
+   and nothing can show through between them. Being a circle it holds at every
+   angle and not merely at the sixths, which is what makes it worth watching.
+
+   The move is made first and the picture wound back to where it came from,
+   then played forward. So the model is never behind what is on screen, and a
+   turn interrupted part way is already finished as far as the puzzle is
+   concerned — the next click only has to drop the transform and go. */
+const SPIN_MS = 200;
+const ease = u => 1 - (1 - u) ** 3;       // away quickly, settling onto the end
+
+let spinning = null;                      // undoes the turn being shown, if any
+const settle = () => { if (spinning) spinning(); };
+
+/* The hexagon's own target turns with it. It is the shape the hover outline is
+   drawn on, so leaving it behind would hold the highlight still against a
+   hexagon visibly turning under it — and since the browser hit-tests the shape
+   where the transform puts it, carrying it round also keeps the hover honest:
+   it is live against where the hexagon has got to, not where it set off from.
+   No other hexagon's target moves, none of them being in this collar. */
+/* What a bandage looks like: its own outline drawn, and the lines between the
+   three tiles under it gone, so it reads as the one piece it now is. The parts
+   keep their colours — the gluing is about what may move, not what colour it
+   is — so a bandage shows the same halves it did before, the inner one the
+   hexagon's and the outer one grey. */
+function refresh() {
+  const glued = new Set();
+  for (const el of bandPool) el.style.display = 'none';
+  bands.forEach((b, i) => {
+    b.el = bandPool[i];
+    b.el.setAttribute('d', pathOf(unionOutline(b.tiles)));
+    b.el.style.display = '';
+    for (const t of b.tiles) glued.add(t);
+  });
+  // a tile off this puzzle's board is not drawn at all
+  for (const t of tiles) {
+    const playing = onBoard.has(t);
+    for (const p of t.parts) p.el.style.display = playing ? '' : 'none';
+    t.el.style.display = playing && !glued.has(t) ? '' : 'none';
+  }
+  for (const h of hexTiles) {
+    const playing = boardHexes.includes(h);
+    const locked = playing && stuck(h);
+    h.hit.style.display = playing ? '' : 'none';
+    h.hit.classList.toggle('stuck', locked);
+    h.mark.style.display = locked ? '' : 'none';
+  }
+}
+
+// the bandages a collar carries round with it
+const bandsIn = hex => bands.filter(b => b.tiles.every(t => hex.holds.has(t))).map(b => b.el);
+
+function spin(hex, from) {
+  const els = [hex.hit, ...bandsIn(hex),
+               ...hex.collar.flatMap(t => [t.el, ...t.parts.map(p => p.el)])];
+  const [cx, cy] = hex.centre;
+  const place = a => {
+    const tr = `rotate(${a.toFixed(3)} ${cx.toFixed(4)} ${cy.toFixed(4)})`;
+    for (const el of els) el.setAttribute('transform', tr);
+  };
+  let raf = 0, backstop = 0;
+  const stop = () => {
+    cancelAnimationFrame(raf);
+    clearTimeout(backstop);
+    for (const el of els) el.removeAttribute('transform');
+    spinning = null;
+  };
+  const t0 = performance.now();
+  const step = now => {
+    /* Clamped at both ends. A frame carries the time it began, which can be
+       earlier than the moment the turn was asked for, and a negative fraction
+       run through the easing sends the collar back past where it started —
+       a sixth of a turn that jumps to a fifth before it comes down. */
+    const u = Math.min(1, Math.max(0, (now - t0) / SPIN_MS));
+    if (u < 1) { place(from * (1 - ease(u))); raf = requestAnimationFrame(step); }
+    else stop();
+  };
+  place(from);
+  spinning = stop;
+  raf = requestAnimationFrame(step);
+  /* Frames stop coming to a tab nobody is looking at, and the move is already
+     made, so without this the board would be found afterwards still wound back
+     a sixth from colours that had long since moved. A timer is not throttled
+     the same way, so it puts the picture straight whether the frames ran or
+     not — and if they did, it has nothing left to do. */
+  backstop = setTimeout(stop, SPIN_MS + 300);
+}
+
+/* Which way a plain click turns. Right-click is always the other way, so the
+   toggle swaps the pair rather than setting either on its own. */
+let inverted = false;
+const clickDir = () => (inverted ? -1 : 1);
+
+// a turn, shown: made at once, then wound back a sixth and played forward
+function turn(hex, dir) {
+  if (stuck(hex)) return;                 // a bandage lies across the collar
+  settle();
+  move(hex, dir);
+  repaint();
+  refresh();
+  spin(hex, -dir * 60);
+}
+
+/* The colouring the board is solved in, and the one it starts from: every part
+   the colour of the hexagon it faces, which is the point it was built on. The
+   board is set out by calling this, so solved is defined in one place and the
+   button cannot drift from what the puzzle opens as. */
+function reset() {
+  for (const t of tiles)
+    t.parts.forEach((part, k) => { part.colour = colourAt(...t.on[k]); });
+  bands = bandaged ? puzzle.bands().map(tiles => ({ tiles })) : [];
+}
+
+/* Choosing a puzzle is choosing which hexagons are in play. The board is then
+   the tiles their collars hold, and everything else — which parts go grey,
+   how far the drawing reaches, what a bandage is — follows from that. */
+let puzzle = PUZZLES.seven;
+let boardHexes = [];
+let onBoard = new Set();
+
+function setPuzzle(p) {
+  puzzle = p;
+  hexColour = new Map(p.hexes.map(h => [key(h[0], h[1]), h[2]]));
+  boardHexes = p.hexes.map(h => hexAt.get(key(h[0], h[1])));
+  onBoard = new Set();
+  for (const h of boardHexes) for (const t of h.collar) onBoard.add(t);
+}
+
+/* Turns taken at random, every one of them a legal move, so a scramble is
+   always solvable however long it runs — undone by making the same turns
+   backwards.
+
+   Long enough that either board reaches the mixed state rather than stopping
+   somewhere on the way to it. Counting how many of the 139 parts finish on a
+   colour other than the one they started on, averaged over forty scrambles,
+   the plain puzzle climbs to about 106 and is there by 160 turns. The bandaged
+   one is still at 97 after 160 and does not level off until past 600: with a
+   bandage lying across a collar there are often only a handful of moves to
+   pick from, and a good many of them undo one another, so the walk keeps going
+   back over its own ground.
+
+   A thousand clears both with room to spare, and one number does for the two
+   of them. It costs nothing worth counting: a move only touches the model, and
+   a thousand of them run in about ten milliseconds. */
+const SCRAMBLE_TURNS = 1000;
+
+function scramble() {
+  settle();
+  for (let i = 0; i < SCRAMBLE_TURNS; i++) {
+    // only from the collars that will turn, so a scramble is a run of real
+    // moves and can always be walked back the way it came
+    const free = boardHexes.filter(h => !stuck(h));
+    if (!free.length) break;
+    move(free[Math.floor(Math.random() * free.length)], Math.random() < 0.5 ? 1 : -1);
+  }
+  repaint();
+  refresh();
+}
+
+/* How far the drawing has to reach, over the tiles this puzzle is playing on.
+   Set apart from render() because the two puzzles are different sizes and the
+   smaller one sits off to one side of the larger one's middle. */
+function frame() {
+  /* A puzzle may be stood at an angle, which the board is drawn at rather than
+     the lattice being rebuilt: the tilt goes on the root, inside the flip, so
+     everything below it — the turns, the bandages, the sweep of every arc — is
+     worked out on the lattice as it always was. Only the reach has to know,
+     since it is measuring the board as it ends up on screen. */
+  const th = puzzle.tilt || 0, co = Math.cos(th), si = Math.sin(th);
+  const deg = th * 180 / Math.PI;
+  root.setAttribute('transform', `scale(1,-1) rotate(${deg.toFixed(4)})`);
+  // the mark reads as a mark the right way up, so it takes the tilt back out
+  for (const h of hexTiles)
+    h.mark.setAttribute('transform',
+      `rotate(${(-deg).toFixed(4)} ${h.centre[0].toFixed(4)} ${h.centre[1].toFixed(4)})`);
+
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  const reach = ([px, py]) => {
+    const x = px * co - py * si, y = px * si + py * co;
+    if (x < x0) x0 = x;
+    if (y < y0) y0 = y;
+    if (x > x1) x1 = x;
+    if (y > y1) y1 = y;
+  };
+  // an arc on the rim of the board bulges past both its ends, so the middle of
+  // every one of them has to be measured too
+  for (const t of tiles) {
+    if (!onBoard.has(t)) continue;
+    for (let i = 0; i < t.outline.length; i++) {
+      const [a, Z] = t.outline[i], b = t.outline[(i + 1) % t.outline.length][0];
+      reach(a);
+      if (Z) reach(arcMid(a, b, Z));
+    }
+  }
+  /* The maths has y running up, the way the angles above are written, and SVG
+     has it running down, so the board is flipped once in render() rather than
+     every coordinate being negated at the point it is worked out. The viewBox
+     is in the flipped frame, so its top edge is -y1. */
+  document.getElementById('board').setAttribute('viewBox',
+    [x0 - PAD, -y1 - PAD, x1 - x0 + 2 * PAD, y1 - y0 + 2 * PAD].join(' '));
+
+  const n = s => [...onBoard].filter(t => t.sides === s).length;
+  document.getElementById('counts').textContent =
+    `${onBoard.size} tiles — ${n(6)} hexagons, ${n(4)} squares, ${n(3)} triangles.`;
+}
+
+const MAX_BANDS = 6;
+const bandPool = [];
+let root;                                   // the flipped, tilted frame it all sits in
+
+function render() {
+  const svg = document.getElementById('board');
+  root = svgEl('g', { transform: 'scale(1,-1)' });
+
+  const fills = svgEl('g', { 'stroke-width': '0.01' });
+  for (const part of allParts) {
+    part.el = svgEl('path', { class: 'part', d: pathOf(part.outline) });
+    paint(part);
+    fills.appendChild(part.el);
+  }
+
+  const edges = svgEl('g', { 'stroke-width': '0.05' });
+  for (const t of tiles) {
+    t.el = svgEl('path', { class: 'cell', d: pathOf(t.outline) });
+    edges.appendChild(t.el);
+  }
+
+  // outlines for the bandages, filled in by refresh() wherever they have got to
+  const bandLayer = svgEl('g', { 'stroke-width': '0.05' });
+  for (let i = 0; i < MAX_BANDS; i++) {
+    const el = svgEl('path', { class: 'band' });
+    el.style.display = 'none';
+    bandPool.push(el);
+    bandLayer.appendChild(el);
+  }
+
+  /* The no-turn mark: a ring with a bar across it, standing at the centre of
+     each hexagon and shown while a bandage locks its collar. It never has to
+     turn — a hexagon is only ever in its own collar, and a collar that will not
+     turn does not move — so it sits in a layer of its own that nothing spins. */
+  const MARK_R = 0.17, bar = MARK_R / Math.SQRT2;
+  const marks = svgEl('g');
+  for (const h of hexTiles) {
+    const [cx, cy] = h.centre;
+    h.mark = svgEl('g', { class: 'mark' });
+    h.mark.append(
+      svgEl('circle', { cx, cy, r: MARK_R }),
+      // upper left to lower right on screen, so drawn the other way up here
+      svgEl('line', { x1: cx - bar, y1: cy + bar, x2: cx + bar, y2: cy - bar }));
+    h.mark.style.display = 'none';
+    marks.appendChild(h.mark);
+  }
+
+  /* What is clicked is the hexagon, so the hexagons get a layer of their own
+     over the top: the parts underneath would do for a target, but a hexagon is
+     one part today and need not stay that way. */
+  const hits = svgEl('g', { 'stroke-width': '0.06' });
+  for (const h of hexTiles) {
+    h.hit = svgEl('path', { class: 'hit', d: pathOf(h.outline) });
+    // read when the click happens, so the toggle takes effect at once
+    h.hit.addEventListener('click', () => turn(h, clickDir()));
+    h.hit.addEventListener('contextmenu', e => { e.preventDefault(); turn(h, -clickDir()); });
+    hits.appendChild(h.hit);
+  }
+
+  root.append(fills, edges, bandLayer, marks, hits);
+  svg.replaceChildren(root);
+  // right-clicking is a move, so the menu never wants to come up over the board
+  svg.addEventListener('contextmenu', e => e.preventDefault());
+}
+
+// said in the one place the toggles can change it, so they cannot disagree
+function showHint() {
+  const way = d => d > 0 ? 'anticlockwise' : 'clockwise';
+  document.getElementById('hint').textContent =
+    `Click a hexagon to turn its collar ${way(clickDir())}, ` +
+    `right-click to turn it ${way(-clickDir())}.` +
+    (bandaged ? ' A collar a bandage lies across will not turn.' : '');
+}
+
+// everything the board shows, after anything that changes what it should show
+function redraw() {
+  settle(); reset(); repaint(); refresh(); frame(); showHint();
+}
+
+setPuzzle(PUZZLES.seven);
+reset();
+render();
+redraw();
+
+document.getElementById('scramble').addEventListener('click', scramble);
+document.getElementById('reset').addEventListener('click', () => {
+  settle(); reset(); repaint(); refresh();
+});
+document.getElementById('invert').addEventListener('change', e => {
+  inverted = e.target.checked;
+  showHint();
+});
+/* Changing the puzzle, or whether it is bandaged, puts the board back to the
+   start. Where the bandages would go on a board already scrambled has no
+   answer — they were never carried through those turns — and dropping them
+   onto it could leave colours that no run of bandaged moves can reach. */
+document.getElementById('bandaged').addEventListener('change', e => {
+  bandaged = e.target.checked;
+  redraw();
+});
+document.getElementById('three').addEventListener('change', e => {
+  setPuzzle(e.target.checked ? PUZZLES.three : PUZZLES.seven);
+  redraw();
+});
+</script>
+</body>
+</html>
