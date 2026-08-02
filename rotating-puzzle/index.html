@@ -910,13 +910,46 @@ function scramble() {
    pieces small enough to commutate. Its three-cycles come out at eight turns,
    half what they cost on the smaller board. */
 const RECIPE = {
-  three: { depth: 6, macro: 4, seedLen: 6, seedSupport: 8, commSupport: 4, aimDepth: 3 },
-  seven: { depth: 4, macro: 3, seedLen: 3, seedSupport: 12, commSupport: 3, aimDepth: 3 }
+  three: { depth: 6, macro: 4, seedLen: 6, seedSupport: 8, commSupport: 4, aimDepth: 3,
+           budget: 6000, tries: 4 },
+  /* Seven circles takes far longer and is worth waiting on: it has 54 tiles to
+     place against 28, over a library ten times the size. Measured over five
+     scrambles it wants 28 to 47 seconds, so it is given ninety and two goes at
+     it rather than four short ones. */
+  seven: { depth: 4, macro: 3, seedLen: 3, seedSupport: 12, commSupport: 3, aimDepth: 3,
+           reduce: true, budget: 90000, tries: 2 }
 };
 
+/* Placing tiles rather than counting wrong parts, which the larger board needs.
+
+   Counting is nearly flat over 61 tiles: there is almost always a move that
+   puts one more part right and almost never one that puts many right, so a
+   descent creeps. Sixty rounds of it got from 106 wrong parts to 42 and stuck;
+   a library five times bigger got to 16 in two and a half minutes and stuck
+   too. It is not a matter of waiting longer.
+
+   Counting placed tiles instead gives a staircase to climb. Tiles are taken in
+   a fixed order — the ones fewest cycles can reach first, while there is still
+   room to work — and a move is only allowed if it leaves the placed ones
+   alone.
+
+   That order is the wrong tool for the end. A board can sit three tiles from
+   home and still read as stuck, because the tile the order wants next is one
+   of the three, and the search worries at it instead of finishing them. So
+   past a point the order is dropped and plain counting takes over, which is
+   how the smaller board is solved and which closes from there.
+
+   Two further things the trials insisted on. When nothing improves, the placed
+   tiles are unfrozen a few at a time, since the tiles left are often
+   unreachable without disturbing something. And the best position found is
+   kept: a beam replaced wholesale each round can walk downhill, and one run
+   reached 52 tiles of 54 and wandered back to 49 before giving up. */
+const PLACE_FOCUS = 14;                     // how far past the frontier to look
+const PLACE_ENDGAME = 20;                   // wrong parts at which order is dropped
+const PLACE_RELAX = [[5, 2], [10, 4], [16, 8], [24, 14]];
+const PLACE_GIVE_UP = 34;
+
 const SOLVE_BEAM = 8;
-const SOLVE_BUDGET_MS = 6000;               // per attempt
-const SOLVE_TRIES = 4;
 const SOLVE_AIM_AFTER = 2;                  // rounds without progress before aiming
 const SOLVE_STALL = 12;                     // rounds without progress before restarting
 /* Every colouring met is remembered so the descent does not go round in
@@ -925,7 +958,8 @@ const SOLVE_STALL = 12;                     // rounds without progress before re
    again; the beam carries on from where it is. */
 const SOLVE_SEEN_CAP = 300000;
 
-const solvable = () => puzzle === PUZZLES.three && !bandaged;
+// both boards can be solved now; a bandaged one still cannot
+const solvable = () => !bandaged;
 
 // one letter to a colour, so a whole colouring is a string of one char per part
 const TOKEN = { white: 'W', red: 'R', orange: 'O', yellow: 'Y',
@@ -936,7 +970,7 @@ let kit = null;                             // the solver's tables, built once
 
 /* The board as the solver sees it: its parts in a fixed order, its turns as
    permutations of them, and the library of moves to descend with. */
-function buildKit() {
+async function buildKit(onStep) {
   const recipe = puzzle === PUZZLES.three ? RECIPE.three : RECIPE.seven;
   const seat = tiles.filter(t => onBoard.has(t));
   const parts = seat.flatMap(t => t.parts);
@@ -1034,23 +1068,100 @@ function buildKit() {
     for (let i = 0; i < n; i++) if (p[i] !== i) s.add(tileOf[i]);
     return [...s].sort((x, y) => x - y).join(',');
   };
-  const baseTriple = bases.map(m => tripleOf(m.p));
+  const baseTriple = bases.map(m => [...new Set(
+    Array.from({ length: n }, (_, i) => i).filter(i => m.p[i] !== i).map(i => tileOf[i]))]);
+
+  // the parts of each tile, so a tile can be asked whether it is home
+  const tileParts = [];
+  for (let i = 0; i < n; i++) (tileParts[tileOf[i]] = tileParts[tileOf[i]] || []).push(i);
+
+  /* One three-cycle for each triple, kept for the smaller board, where the
+     descent only wants something to reach for when it sticks. */
   const aim = new Map();
+  /* The larger board wants more: the same three tiles cycled a different way
+     round, or with a different twist on their parts, is a different tool, and
+     placing a tile exactly needs the right one. So the conjugates are kept
+     apart by what they do to the parts of the three tiles, not merely by which
+     tiles they move. */
+  const cycles = recipe.reduce ? [] : null;
+  const seenCycle = new Set();
+  /* The seven-circle board conjugates 1440 three-cycles by 2955 prefixes,
+     which is four million and takes some seconds. Left to run it would lock
+     the page up, so it lets go of the thread now and then and says how far it
+     has got. */
   for (let pi = 0; pi < prefixes.length; pi++) {
+    if (onStep && (pi & 255) === 0) {
+      onStep(Math.round(100 * pi / prefixes.length));
+      await new Promise(r => setTimeout(r, 0));
+    }
     // how this prefix moves whole tiles, so a triple can be carried by lookup
     const P = prefixes[pi].p, tp = new Int16Array(seat.length);
-    for (let i = 0; i < n; i++) tp[tileOf[P[i]]] = tileOf[i];
+    /* Which tile each tile is carried to. The conjugate P·c·P⁻¹ moves the
+       part P[j] exactly where c moves j, so the map wanted runs from the tile
+       a part is on to the tile P takes it to — that way round, not the other,
+       or the triples come out belonging to the wrong conjugates. */
+    for (let i = 0; i < n; i++) tp[tileOf[i]] = tileOf[P[i]];
+    const Pi = invert(P), plen = prefixes[pi].seq.length;
     for (let ci = 0; ci < bases.length; ci++) {
-      const key = baseTriple[ci].split(',').map(x => tp[+x])
-                    .sort((x, y) => x - y).join(',');
-      const cost = 2 * prefixes[pi].seq.length + bases[ci].seq.length;
-      const had = aim.get(key);
-      if (!had || had.cost > cost) aim.set(key, { cost, pi, ci });
+      const t3 = baseTriple[ci].map(x => tp[x]).sort((x, y) => x - y);
+      const cost = 2 * plen + bases[ci].seq.length;
+      if (!recipe.reduce) {
+        const key = t3.join(',');
+        const had = aim.get(key);
+        if (!had || had.cost > cost) aim.set(key, { cost, pi, ci });
+        continue;
+      }
+      /* What a conjugate does to the three tiles' parts, as a cheap first
+         sieve: it takes three lookups a part, where composing the whole
+         permutation takes a hundred and thirty-nine. Four million conjugates
+         go through here, so almost all of them must be turned away cheaply. */
+      const c = bases[ci].p;
+      let sig = '';
+      for (const t of t3) for (const j of tileParts[t]) sig += ',' + P[c[Pi[j]]];
+      if (seenCycle.has(sig)) continue;
+      seenCycle.add(sig);
+      /* But the sieve lets nine of every ten through that are the same move
+         over again, so what survives is weighed properly. Deduping on the
+         permutation cut 267,520 cycles to 29,660 — and a round of the search
+         is every move tried against every state it is holding, so nine times
+         fewer moves is nine times less work, every round of every attempt. */
+      const p = compose(compose(P, c), Pi);
+      const pk = p.join(',');
+      if (seenCycle.has(pk)) continue;
+      seenCycle.add(pk);
+      const q = invert(p);
+      seenCycle.add(q.join(','));
+      const seq = prefixes[pi].seq.concat(bases[ci].seq, back(prefixes[pi].seq));
+      cycles.push({ p, seq, t3 });
+      cycles.push({ p: q, seq: back(seq), t3 });
     }
   }
 
-  return { parts, n, gens, library, short, compose, invert, tileOf,
-           bases, prefixes, aim, support,
+  /* Which tile to place first. A tile few cycles can reach is one to settle
+     while there is still room to work, so the scarce ones go to the front and
+     the well-served ones are left till last. */
+  let order = null, rank = null, moves = null;
+  if (recipe.reduce) {
+    const touch = new Map();
+    for (const mv of cycles) for (const t of mv.t3) touch.set(t, (touch.get(t) || 0) + 1);
+    order = seat.map((_, t) => t).filter(t => tileParts[t].length > 1)
+      .sort((a, b) => (touch.get(a) || 0) - (touch.get(b) || 0));
+    rank = new Int16Array(seat.length).fill(9999);
+    order.forEach((t, j) => { rank[t] = j; });
+    for (const mv of cycles) mv.low = Math.min(rank[mv.t3[0]], rank[mv.t3[1]], rank[mv.t3[2]]);
+    // a macro disturbs whatever it disturbs, and has no triple to aim
+    const lib = library.map(m => {
+      let low = 9999;
+      for (let i = 0; i < n; i++) if (m.p[i] !== i) low = Math.min(low, rank[tileOf[i]]);
+      return { p: m.p, seq: m.seq, t3: null, low };
+    });
+    moves = cycles.concat(lib);
+  }
+
+  return { parts, n, gens, library, short, compose, invert, tileOf, tileParts,
+           budget: recipe.budget, tries: recipe.tries,
+           bases, prefixes, aim, support, cycles, order, rank, moves,
+           reduce: !!recipe.reduce,
            /* A colouring is one letter to a part, so the string is both the
               board and the key it is remembered by. Colour names would not do:
               they are words, and a string of them cannot be indexed by part,
@@ -1150,6 +1261,82 @@ function aimedRepairs(state) {
   return out;
 }
 
+/* Placing the tiles one by one, in the order laid down when the kit was built.
+   Scored on how many of that order are home, and once few parts are wrong, on
+   the wrong parts alone — see the note beside PLACE_ENDGAME for why both are
+   needed. One number covers the two, so "the best position so far" always
+   means something and the search can be put back on it when it drifts. */
+async function placeSolution(from, goal, walk, miss, onStep) {
+  const { order, rank, tileParts, moves } = kit;
+  const placed = s => {
+    let j = 0;
+    outer: for (; j < order.length; j++) {
+      for (const i of tileParts[order[j]]) if (s[i] !== goal[i]) break outer;
+    }
+    return j;
+  };
+  const score = (pre, w) =>
+    w <= PLACE_ENDGAME ? 100000 - w * 100 + pre : pre * 100 - w;
+  const trail = m => {
+    const seq = [];
+    for (let node = m; node.via; node = node.back) seq.unshift(...node.via);
+    return seq;
+  };
+
+  for (let attempt = 0; attempt < kit.tries; attempt++) {
+    const t0 = performance.now();
+    const root = { s: from, via: null, back: null, pre: placed(from), w: miss(from) };
+    root.sc = score(root.pre, root.w);
+    let beam = [root], top = root, idle = 0, relax = 0, round = 0;
+    const seen = new Set([from]);
+    while (performance.now() - t0 < kit.budget) {
+      const endgame = beam[0].w <= PLACE_ENDGAME;
+      // late on, only what touches a tile still wrong is worth trying
+      const bad = new Set();
+      if (endgame)
+        for (let i = 0; i < beam[0].s.length; i++)
+          if (beam[0].s[i] !== goal[i]) bad.add(kit.tileOf[i]);
+
+      const cand = [];
+      for (const b of beam) {
+        const floor = Math.max(0, b.pre - relax);
+        const ceiling = b.pre + PLACE_FOCUS + relax * 4;
+        for (const m of moves) {
+          if (endgame) {
+            if (m.t3 && !m.t3.some(t => bad.has(t))) continue;
+          } else {
+            if (m.low < floor) continue;             // would disturb a placed tile
+            if (m.t3 && m.low > ceiling) continue;   // too far ahead to be useful yet
+          }
+          const s = walk(b.s, m.p);
+          if (seen.has(s)) continue;
+          seen.add(s);
+          const w = miss(s);
+          if (w === 0) return trail({ via: m.seq, back: b });
+          const pre = placed(s);
+          cand.push({ s, via: m.seq, back: b, pre, w, sc: score(pre, w), r: Math.random() });
+        }
+      }
+      if (!cand.length) break;
+      cand.sort((x, y) => y.sc - x.sc || x.r - y.r);
+      beam = cand.slice(0, SOLVE_BEAM);
+      if (seen.size > SOLVE_SEEN_CAP) { seen.clear(); for (const b of beam) seen.add(b.s); }
+
+      if (beam[0].sc > top.sc) { top = beam[0]; idle = 0; relax = 0; }
+      else {
+        idle++;
+        for (const [after, r] of PLACE_RELAX) if (idle === after) relax = r;
+        if (idle >= PLACE_GIVE_UP) break;
+        // drifted below the best seen: go back to it rather than wander on
+        if (idle % 6 === 0 && beam[0].sc < top.sc) beam = [top];
+      }
+      if (onStep) onStep(beam[0].w, beam[0].pre, order.length);
+      if (++round % 2 === 0) await new Promise(r => setTimeout(r, 0));
+    }
+  }
+  return null;
+}
+
 /* The descent. Yields to the page between rounds so the button can say what it
    is doing, and is tried again on a fresh tie-break if a round of it stalls —
    the time it takes varies a good deal from one scramble to the next. */
@@ -1166,7 +1353,8 @@ async function findSolution(onStep) {
     for (let i = 0; i < s.length; i++) if (s[i] !== goal[i]) n++;
     return n;
   };
-  for (let attempt = 0; attempt < SOLVE_TRIES; attempt++) {
+  if (kit.reduce) return placeSolution(from, goal, walk, miss, onStep);
+  for (let attempt = 0; attempt < kit.tries; attempt++) {
     const t0 = performance.now();
     /* Each candidate remembers the one it came from and the move that got it
        there, rather than the whole run of turns. Carrying the run would mean
@@ -1181,7 +1369,7 @@ async function findSolution(onStep) {
     let beam = [{ s: from, via: null, back: null }];
     const seen = new Set([from]);
     let floor = miss(from), idle = 0, round = 0;
-    while (performance.now() - t0 < SOLVE_BUDGET_MS) {
+    while (performance.now() - t0 < kit.budget) {
       /* While the descent is still finding its way down, the library is enough
          and is the same every round. Once it sticks, the moves that will shift
          it are the ones aimed at the tiles still wrong, so those are worked out
@@ -1447,8 +1635,11 @@ document.getElementById('solve').addEventListener('click', async () => {
   settle(); clearPlan();
   say('Working out an answer — building the moves to work with.');
   await new Promise(r => setTimeout(r, 0));
-  if (!kit) kit = buildKit();
-  const raw = await findSolution(n => say(`Working out an answer — ${n} parts still out of place.`));
+  if (!kit) kit = await buildKit(pc => say(`Working out an answer — building the moves to work with (${pc}%).`));
+  // the placing search knows how many tiles it has settled; the other does not
+  const raw = await findSolution((n, done, all) => say(done === undefined
+    ? `Working out an answer — ${n} parts still out of place.`
+    : `Working out an answer — ${done} of ${all} tiles placed, ${n} parts out.`));
   showSolveButton();
   if (!raw) { say('No answer found. Scramble again and try once more.'); return; }
   const loose = simplifySolution(raw);
