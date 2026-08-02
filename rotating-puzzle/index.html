@@ -74,9 +74,9 @@
   .mark {
     fill: none;
     stroke: #17181a;
-    stroke-width: 0.085;
+    stroke-width: 0.045;                  /* finer than a tile edge, so it stays quiet */
     stroke-linecap: round;
-    opacity: 0.9;
+    opacity: 0.5;
     pointer-events: none;                 /* the hexagon under it is still the target */
   }
 
@@ -750,7 +750,7 @@ function render() {
      each hexagon and shown while a bandage locks its collar. It never has to
      turn — a hexagon is only ever in its own collar, and a collar that will not
      turn does not move — so it sits in a layer of its own that nothing spins. */
-  const MARK_R = 0.28, bar = MARK_R / Math.SQRT2;
+  const MARK_R = 0.17, bar = MARK_R / Math.SQRT2;
   const marks = svgEl('g');
   for (const h of hexTiles) {
     const [cx, cy] = h.centre;
