@@ -206,7 +206,7 @@
       input[type="number"], .slider-num { background: #2a2a28; border-color: #444; color: #e8e8e4; }
       button { background: #2a2a28; border-color: #444; color: #e8e8e4; }
       button:hover { background: #333330; }
-      label, .phase-label, .scramble-header span, .slider-row span, #outside-numbering-note, #constcube-note { color: #999; }
+      label, .phase-label, .scramble-header span, .slider-row span, #constcube-note { color: #999; }
       .phase-label strong { color: #e8e8e4; }
       .move { background: #2a2a28; border-color: #444; color: #e8e8e4; }
       .move.qt { background: #0c2a44; border-color: #185fa5; color: #78b4e8; }
@@ -249,7 +249,7 @@
         <input type="checkbox" id="efficient-toggle" onchange="clearScramble()">
         Efficient mode
       </label>
-      <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;user-select:none;" title="Layer numbers count distance from the outside of each axis's own full size, never renumbered per phase, instead of the current reduction's movable layers. Not currently combined with efficient mode.">
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;user-select:none;" title="Layer numbers count distance from the outside of each axis's own full size, never renumbered per phase, instead of the current reduction's movable layers.">
         <input type="checkbox" id="outside-numbering-toggle" onchange="clearScramble()">
         Outside-numbered layers
       </label>
@@ -257,12 +257,11 @@
         <input type="checkbox" id="constcube-toggle" onchange="onDisplayOptionChange()">
         Constant-cube view
       </label>
-      <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;user-select:none;" title="Hovering a move shows the coloured puzzle state just before that move, with the turning layer highlighted. Unchecked shows the plain reduced-cuboid schematic instead.">
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;user-select:none;" title="Hovering a move shows the coloured, shapeshifted puzzle state just before that move, with the turning layer highlighted. Unchecked shows the plain reduced-cuboid schematic instead.">
         <input type="checkbox" id="state-diagram-toggle" checked onchange="onDisplayOptionChange()">
-        Coloured state on hover
+        Show shapeshifted state for hovered moves
       </label>
     </div>
-    <div id="outside-numbering-note" style="display:none;font-size:12px;color:#666;margin-top:-6px;margin-bottom:8px;"></div>
     <div id="constcube-note" style="display:none;font-size:12px;color:#666;margin-top:-6px;margin-bottom:8px;"></div>
 
     <div id="out"></div>
@@ -607,7 +606,7 @@
       return { bx:ox, by:oy, paths: mv.mod==='2' ? [bracket(pushOut), bracket(pushOut+ringGap)] : [bracket(pushOut)] };
     }
     // Returns a self-contained <svg> string for the given state.
-    function renderStateSVG(cubies, hi, constCube, maxPx) {
+    function renderStateSVG(cubies, hi, constCube, maxPx, fit) {
       const occ=new Set(cubies.map(c=>c.pos.join(',')));
       const faces=[];
       for (const c of cubies) {
@@ -675,7 +674,9 @@
           body+=head(path[1],path[2]);
         }
       }
-      const scale = maxPx ? Math.min(1, maxPx/Math.max(w,h)) : 1;
+      // `fit` scales up as well as down (SVG upscaling is lossless via the
+      // viewBox); without it maxPx is only a cap.
+      const scale = maxPx ? (fit ? maxPx/Math.max(w,h) : Math.min(1, maxPx/Math.max(w,h))) : 1;
       return `<svg width="${(w*scale).toFixed(1)}" height="${(h*scale).toFixed(1)}" viewBox="0 0 ${w.toFixed(1)} ${h.toFixed(1)}" xmlns="http://www.w3.org/2000/svg">${body}</svg>`;
     }
     function applyEquiv(face, mod) {
@@ -970,9 +971,6 @@
       const cubies = simOn ? buildSolved(W, H, D) : null;
       if (cubies && simN) seedVirtual(cubies, [W, H, D], simN);
       _tipCache = null; _replay = null;
-      const note = document.getElementById('outside-numbering-note');
-      note.style.display = outsideNum && isEfficient() ? 'block' : 'none';
-      if (outsideNum && isEfficient()) note.textContent = 'Efficient mode is not currently combined with outside-numbered layers -- efficient-mode layer restriction is skipped while outside-numbering is on.';
       for (let i = 0; i < stages.length; i++) {
         const [w, h, d] = stages[i].dims;
         const eff = [w, h, d];
@@ -982,18 +980,36 @@
         const curQTFaces = new Set(canonPool.filter(t => t.qt).map(t => t.face));
         const forcedFirstPool = i > 0 ? canonPool.filter(t => t.qt && !prevQTFaces.has(t.face) && t.mod !== '2') : null;
         prevQTFaces = curQTFaces;
-        // Efficient mode: for the axis that bandages next phase, keep only the
-        // outermost Δ layers (the ones about to be frozen); deeper layers survive
-        // and are mixed in later phases under their renumbered identity.
-        // (Not combined with outside-numbered layers -- see note above.)
+        // Efficient mode: on the axis that bandages next phase, keep only the
+        // layers whose independence is about to be lost; deeper layers survive
+        // and get mixed in later phases.
         let effPool = canonPool;
         let effLabel = '';
-        if (!outsideNum && isEfficient() && i < stages.length - 1) {
-          const bi = bandageInfo(stages[i].dims, stages[i + 1].dims);
-          if (bi && bi.delta >= 1) {
-            const restricted = canonPool.filter(t => !(faceAxis(t.face) === bi.axis && t.layer > bi.delta));
-            if (restricted.length) { effPool = restricted; effLabel = ` · efficient: ${bi.axis}-axis layers ≤ ${bi.delta}`; }
+        if (isEfficient() && i < stages.length - 1) {
+          const nextEff = stages[i + 1].dims;
+          let restricted = null, desc = '';
+          if (outsideNum) {
+            // Outside-numbered layers are never renumbered, so "about to freeze"
+            // is stated directly: a layer is independently selectable now (it's
+            // in the pool) but not at the next phase's effective dims, i.e. it
+            // merges into its deeper neighbour. This reproduces the same set the
+            // normal-numbering Δ rule picks, without relying on renumbering.
+            restricted = canonPool.filter(t => {
+              const k = IDX[AXIS[t.face]];
+              if (nextEff[k] === eff[k]) return true;   // not the bandaging axis
+              return !constCubeLayerAvailable(t.layer, Nper[k], nextEff[k], POSITIVE.has(t.face));
+            });
+            const kept = [...new Set(restricted.filter(t => nextEff[IDX[AXIS[t.face]]] !== eff[IDX[AXIS[t.face]]]).map(t => t.layer))].sort((a, b) => a - b);
+            const bi = bandageInfo(stages[i].dims, nextEff);
+            if (kept.length) desc = ` · efficient: ${bi ? bi.axis : '?'}-axis layers ${kept.join(',')} (freezing next phase)`;
+          } else {
+            const bi = bandageInfo(stages[i].dims, nextEff);
+            if (bi && bi.delta >= 1) {
+              restricted = canonPool.filter(t => !(faceAxis(t.face) === bi.axis && t.layer > bi.delta));
+              desc = ` · efficient: ${bi.axis}-axis layers ≤ ${bi.delta}`;
+            }
           }
+          if (restricted && restricted.length && restricted.length < canonPool.length) { effPool = restricted; effLabel = desc; }
         }
         const phaseLabel = `Phase ${i + 1} · ${w}×${h}×${d}${effLabel}`;
         const n = ns[i] ?? ns[ns.length - 1];
@@ -1071,7 +1087,7 @@
       if (!_sim) { el.innerHTML = ''; return; }
       const c = stateAtIndex(_sim.moves.length);
       const N = constCubeN(_sim.W, _sim.H, _sim.D);
-      el.innerHTML = `<span style="font-size:12px;color:#666;">Scrambled state</span>` + renderStateSVG(c, null, !!N, 240);
+      el.innerHTML = `<span style="font-size:12px;color:#666;">Scrambled state</span>` + renderStateSVG(c, null, !!N, 420, true);
     }
     function copyScramble(btn) {
       navigator.clipboard.writeText(document.getElementById('full-scr').textContent).then(() => {
@@ -1081,7 +1097,7 @@
     }
 
     // Either the coloured state just before this move, or the plain
-    // reduced-cuboid schematic, per the "Coloured state on hover" setting.
+    // reduced-cuboid schematic, per the "Show shapeshifted state" setting.
     function moveTooltipSVG(span) {
       const { face, layer, mod, wide, w, h, d, idx } = span.dataset;
       if (isStateDiagram() && _sim && idx !== undefined && canRenderState(_sim.W, _sim.H, _sim.D)) {
