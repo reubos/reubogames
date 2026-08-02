@@ -800,8 +800,22 @@
       }
       let minX=dminX,minY=dminY,maxX=dmaxX,maxY=dmaxY;
       if(arrow) for(const path of arrow.paths)for(const p of path){ minX=Math.min(minX,p[0]);minY=Math.min(minY,p[1]);maxX=Math.max(maxX,p[0]);maxY=Math.max(maxY,p[1]); }
-      const pad=10, w=(maxX-minX)+2*pad, h=(maxY-minY)+2*pad;
-      const T=p=>`${(p[0]-minX+pad).toFixed(1)},${(p[1]-minY+pad).toFixed(1)}`;
+      let pad=10, w=(maxX-minX)+2*pad, h=(maxY-minY)+2*pad;
+      let T=p=>`${(p[0]-minX+pad).toFixed(1)},${(p[1]-minY+pad).toFixed(1)}`;
+      // A rotatable view can't use a tight box: it would resize (and so appear to
+      // zoom) at every angle, shifting the page around it. Size it once to the
+      // bounding sphere instead -- the puzzle rotates about the origin, so a
+      // square that fits the sphere fits every orientation, at a constant scale.
+      if (view) {
+        const E=[0,0,0];
+        for (const c of cubies) {
+          const p = constCube ? c.vpos : c.pos, hh = constCube ? c.vhalf : [1,1,1];
+          for (let k=0;k<3;k++) E[k]=Math.max(E[k], Math.abs(p[k])+hh[k]);
+        }
+        const R = Math.hypot(E[0],E[1],E[2]) * PS;
+        pad = 4; w = h = 2*R + 2*pad;
+        T = p => `${(p[0]+R+pad).toFixed(1)},${(p[1]+R+pad).toFixed(1)}`;
+      }
       let body='';
       for(const f of faces){
         const stroke=f.isSel?'#bbbbbb':'#111';
@@ -816,6 +830,11 @@
           body+=`<polyline points="${path.map(T).join(' ')}" fill="none" stroke="${ac}" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>`;
           body+=head(path[1],path[2]);
         }
+      }
+      // The rotatable view fills its (fixed, square) container instead of
+      // carrying pixel dimensions, so nothing around it moves as it turns.
+      if (view) {
+        return `<svg viewBox="0 0 ${w.toFixed(1)} ${h.toFixed(1)}" style="width:100%;height:100%;display:block;" xmlns="http://www.w3.org/2000/svg">${body}</svg>`;
       }
       // `fit` scales up as well as down (SVG upscaling is lossless via the
       // viewBox); without it maxPx is only a cap.
@@ -1228,13 +1247,19 @@
         return;
       }
       if (!_sim) { el.innerHTML = ''; return; }
-      el.innerHTML = `<span style="font-size:12px;color:#666;">Scrambled state — drag to rotate</span>`
-        + `<div id="final-canvas" style="touch-action:none;cursor:grab;user-select:none;"></div>`;
+      el.innerHTML = `<div style="display:flex;align-items:center;gap:10px;">
+          <span style="font-size:12px;color:#666;">Scrambled state — drag to rotate</span>
+          <button id="reset-view" style="font-size:12px;padding:2px 9px;">Reset view</button>
+        </div>`
+        + `<div id="final-canvas" style="width:100%;max-width:500px;aspect-ratio:1/1;touch-action:none;cursor:grab;user-select:none;"></div>`;
+      document.getElementById('reset-view').addEventListener('click', resetFinalView);
       redrawFinalView();
     }
-    // Free camera for the bottom image. Default is chosen to match the fixed
+    // Free camera for the bottom image. The default reproduces the fixed
     // projection used elsewhere, so it looks unchanged until you drag it.
-    let _finalView = { yaw: -0.583, pitch: 0.527 };
+    const FINAL_VIEW_HOME = { yaw: -0.583, pitch: 0.527 };
+    let _finalView = { ...FINAL_VIEW_HOME };
+    function resetFinalView() { _finalView = { ...FINAL_VIEW_HOME }; redrawFinalView(); }
     function redrawFinalView() {
       const host = document.getElementById('final-canvas');
       if (!host || !_sim) return;
