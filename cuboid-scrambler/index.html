@@ -785,13 +785,18 @@
       // Eye distance scales with the puzzle, so the effect is the same strength
       // whatever its size.
       const view = viewM ? { m: viewM, d: PERSP*Rw } : null;
-      // Facing depends only on the camera, so resolve it once rather than per cubie.
-      const dirs = view ? Object.keys(DIRS).filter(d => matVec(view.m, DIRS[d])[2] > 1e-9) : VIS;
-      // Same for brightness: one factor per visible side, not per cubie.
+      // With a finite eye, whether a face is turned towards the camera depends on
+      // WHERE it is, not just which way it points -- so it cannot be resolved per
+      // direction like the orthographic case. All six are candidates and each is
+      // tested individually below; only the normals are precomputed here.
+      const dirs = view ? Object.keys(DIRS) : VIS;
+      const nView = {};
+      if (view) for (const d of dirs) nView[d] = matVec(view.m, DIRS[d]);
+      // Brightness only tracks orientation, so it stays a per-direction lookup.
       const shadeFor = {};
       for (const d of dirs) {
         // nv[2] is exactly how face-on the side is (1 = square to the camera).
-        if (view) shadeFor[d] = AMBIENT + DIFFUSE*Math.max(0, matVec(view.m, DIRS[d])[2]);
+        if (view) shadeFor[d] = AMBIENT + DIFFUSE*Math.max(0, nView[d][2]);
         else shadeFor[d] = SHADE[d];
       }
       const faces=[];
@@ -822,6 +827,16 @@
             center=[c.pos[0]+n[0],c.pos[1]+n[1],c.pos[2]+n[2]];
             u=u0; v=v0;
           }
+          // Perspective-correct facing: the eye sits at (0,0,d) in view space, so
+          // a face shows only if its normal points towards that point rather than
+          // merely along the view axis. Using the orthographic test here left back
+          // faces near the silhouette drawn over the front of the solid.
+          let cv = null;
+          if (view) {
+            cv = matVec(view.m, center);
+            const nv = nView[dir];
+            if (-nv[0]*cv[0] - nv[1]*cv[1] + nv[2]*(view.d - cv[2]) <= 1e-9) continue;
+          }
           const corners=[[+1,+1],[+1,-1],[-1,-1],[-1,+1]].map(([su,sv])=>
             projectPt([center[0]+su*u[0]+sv*v[0], center[1]+su*u[1]+sv*v[1], center[2]+su*u[2]+sv*v[2]], view));
           const name=ws[dir];
@@ -832,7 +847,7 @@
           // (the old "force body faces to the back" hack papered over the cull
           // bug fixed above, and is no longer needed).
           const depth = view
-            ? matVec(view.m, center)[2]
+            ? cv[2]
             : center[0]+center[1]+center[2] + (dir==='+z'?0.5:dir==='+y'?0.25:0);
           faces.push({corners,col,depth,isSel});
         }
@@ -874,29 +889,6 @@
       for(const f of faces){
         const stroke=f.isSel?'#bbbbbb':'#111';
         body+=`<polygon points="${f.corners.map(T).join(' ')}" fill="${f.col}" stroke="${stroke}" stroke-width="1" stroke-linejoin="round"/>`;
-      }
-      // Constant-cube stretches each axis by a different amount, so cell sizes
-      // differ wildly between sides and a near edge-on side becomes a sliver of
-      // many thin cells -- which reads as a separate plate stuck to the shape,
-      // because nothing marks where one side of the cube ends and the next
-      // begins. Draw the cube's own edges (silhouette plus the visible interior
-      // ones) so the solid reads unambiguously. Geometry is unchanged: these lie
-      // exactly on the box already being drawn.
-      if (view && constCube) {
-        const seen = dirs.reduce((s,d)=>(s[d]=1,s),{});
-        const AXNAME=['x','y','z'];
-        for (let a=0;a<3;a++) {
-          const [b,cx]=[0,1,2].filter(i=>i!==a);
-          for (const sb of [-1,1]) for (const sc of [-1,1]) {
-            // an edge is worth drawing if either side meeting along it is visible
-            const fb=(sb>0?'+':'-')+AXNAME[b], fc=(sc>0?'+':'-')+AXNAME[cx];
-            if(!seen[fb] && !seen[fc]) continue;
-            const p0=[0,0,0], p1=[0,0,0];
-            p0[b]=p1[b]=sb*E[b]; p0[cx]=p1[cx]=sc*E[cx];
-            p0[a]=-E[a]; p1[a]=E[a];
-            body+=`<line x1="${T(projectPt(p0,view)).split(',')[0]}" y1="${T(projectPt(p0,view)).split(',')[1]}" x2="${T(projectPt(p1,view)).split(',')[0]}" y2="${T(projectPt(p1,view)).split(',')[1]}" stroke="#111" stroke-width="2.2" stroke-linecap="round"/>`;
-          }
-        }
       }
       if(arrow){
         const ac='#ff4500';
