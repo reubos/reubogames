@@ -63,6 +63,21 @@
   }
   .hit:hover { stroke: rgba(255, 255, 255, 0.75); }
 
+  .controls { display: flex; flex-wrap: wrap; gap: 10px; margin: 16px 0 0; }
+
+  button {
+    font: inherit;
+    font-size: 0.95rem;
+    color: var(--text);
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 8px 16px;
+    cursor: pointer;
+  }
+  button:hover { background: #2a2d32; border-color: #4b4f57; }
+  button:active { background: #34373c; }
+
   .counts { color: var(--muted); font-size: 0.9rem; margin: 16px 0 0; }
 </style>
 </head>
@@ -74,6 +89,11 @@
 
   <div class="panel">
     <svg id="board" xmlns="http://www.w3.org/2000/svg"></svg>
+  </div>
+
+  <div class="controls">
+    <button type="button" id="scramble">Scramble</button>
+    <button type="button" id="reset">Reset puzzle</button>
   </div>
 
   <p class="counts">Click a hexagon to turn its collar anticlockwise, right-click to
@@ -171,12 +191,15 @@ const unit = (p, q) => {
 
 const mid = (p, q) => [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2];
 
-/* A tile is one shape and a list of coloured parts. Every part faces one
-   lattice point and takes its colour from the hexagon standing there, so the
-   three tile shapes are three ways of dividing a tile between the hexagons
-   around it — the hexagon keeps itself, the square splits in half across the
-   lattice edge it straddles, and the triangle splits into three kites, one to
-   each corner. */
+/* A tile is one shape and a list of parts. Every part faces one lattice point,
+   so the three tile shapes are three ways of dividing a tile between the
+   hexagons around it — the hexagon keeps itself, the square splits in half
+   across the lattice edge it straddles, and the triangle splits into three
+   kites, one to each corner.
+
+   Which point a part faces is written down once, in the order of `on`: part k
+   of a tile faces `on[k]`. That is the whole of the colouring — reset() reads
+   it — so the parts of a tile must be built in the order its points are. */
 const tiles = [];
 
 // hexagon: side 1, corners at 0°, 60°, ... so its edges face the neighbours
@@ -187,8 +210,7 @@ for (const [a, b] of HEXES) {
     const t = k * Math.PI / 3;
     poly.push([c[0] + Math.cos(t), c[1] + Math.sin(t)]);
   }
-  tiles.push({ sides: 6, on: [[a, b]], centre: c, poly,
-               parts: [{ poly, colour: colourAt(a, b) }] });
+  tiles.push({ sides: 6, on: [[a, b]], centre: c, poly, parts: [{ poly }] });
 }
 
 /* square: astride a lattice edge, one edge shared with each hexagon. Built on
@@ -202,10 +224,8 @@ for (const [p, q] of EDGES) {
     [m[0] + (s * ux + t * wx) / 2, m[1] + (s * uy + t * wy) / 2];
   const poly = [corner(-1, -1), corner(1, -1), corner(1, 1), corner(-1, 1)];
   tiles.push({ sides: 4, on: [p, q], centre: m, poly, parts: [
-    { poly: [corner(-1, -1), corner(0, -1), corner(0, 1), corner(-1, 1)],
-      colour: colourAt(...p) },
-    { poly: [corner(0, -1), corner(1, -1), corner(1, 1), corner(0, 1)],
-      colour: colourAt(...q) }
+    { poly: [corner(-1, -1), corner(0, -1), corner(0, 1), corner(-1, 1)] },
+    { poly: [corner(0, -1), corner(1, -1), corner(1, 1), corner(0, 1)] }
   ] });
 }
 
@@ -221,8 +241,7 @@ for (const tri of FACES) {
     return [f[0] + ux / S3, f[1] + uy / S3];
   });
   const parts = poly.map((v, k) => ({
-    poly: [mid(poly[(k + 2) % 3], v), v, mid(v, poly[(k + 1) % 3]), f],
-    colour: colourAt(...tri[k])
+    poly: [mid(poly[(k + 2) % 3], v), v, mid(v, poly[(k + 1) % 3]), f]
   }));
   tiles.push({ sides: 3, on: tri, centre: f, poly, parts });
 }
@@ -318,12 +337,36 @@ function paint(part) {
   part.el.setAttribute('stroke', c);
 }
 
+const repaint = () => allParts.forEach(paint);
+
 /* A turn is read off before any of it is written back: every part takes the
    colour its source had when the turn began, and a part's source is itself
    another part of the same collar. */
 function turn(hex, map) {
   const taken = map.map(([part, src]) => [part, src.colour]);
   for (const [part, colour] of taken) { part.colour = colour; paint(part); }
+}
+
+/* The colouring the board is solved in, and the one it starts from: every part
+   the colour of the hexagon it faces, which is the point it was built on. The
+   board is set out by calling this, so solved is defined in one place and the
+   button cannot drift from what the puzzle opens as. */
+function reset() {
+  for (const t of tiles)
+    t.parts.forEach((part, k) => { part.colour = colourAt(...t.on[k]); });
+}
+
+/* Turns taken at random. Every one of them is a legal move, so a scramble is
+   always solvable however long it runs — undone by making the same turns
+   backwards. Long enough that nothing is left where it started, which takes
+   more than it looks: the seven collars overlap, so turns near enough to each
+   other partly undo one another. */
+const SCRAMBLE_TURNS = 40;
+function scramble() {
+  for (let i = 0; i < SCRAMBLE_TURNS; i++) {
+    const h = hexTiles[Math.floor(Math.random() * hexTiles.length)];
+    turn(h, Math.random() < 0.5 ? h.cw : h.acw);
+  }
 }
 
 function render() {
@@ -377,7 +420,10 @@ function render() {
     `${tiles.length} tiles — ${n(6)} hexagons, ${n(4)} squares, ${n(3)} triangles.`;
 }
 
+reset();
 render();
+document.getElementById('scramble').addEventListener('click', scramble);
+document.getElementById('reset').addEventListener('click', () => { reset(); repaint(); });
 </script>
 </body>
 </html>
