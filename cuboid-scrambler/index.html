@@ -206,12 +206,67 @@
       input[type="number"], .slider-num { background: #2a2a28; border-color: #444; color: #e8e8e4; }
       button { background: #2a2a28; border-color: #444; color: #e8e8e4; }
       button:hover { background: #333330; }
-      label, .phase-label, .scramble-header span, .slider-row span, #outside-numbering-note { color: #999; }
+      label, .phase-label, .scramble-header span, .slider-row span, #constcube-note { color: #999; }
       .phase-label strong { color: #e8e8e4; }
       .move { background: #2a2a28; border-color: #444; color: #e8e8e4; }
       .move.qt { background: #0c2a44; border-color: #185fa5; color: #78b4e8; }
       .full-scramble { background: #2a2a28; border-color: #444; color: #e8e8e4; }
       h1 { color: #e8e8e4; }
+    }
+
+    /* ---- settings dialog ---- */
+    #settings-overlay {
+      position: fixed; inset: 0; z-index: 2000;
+      background: rgba(0,0,0,0.35);
+      display: flex; align-items: center; justify-content: center; padding: 1rem;
+    }
+    #settings-overlay[hidden] { display: none; }
+
+    .modal {
+      background: #f5f5f0;
+      border: 0.5px solid #ccc;
+      border-radius: 12px;
+      width: 100%; max-width: 540px; max-height: 85vh;
+      overflow-y: auto;
+      padding: 18px 20px 20px;
+      box-shadow: 0 8px 30px rgba(0,0,0,0.18);
+    }
+    .modal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+    .modal-head h2 { font-size: 17px; font-weight: 500; }
+    .modal-head button { border: none; background: none; font-size: 20px; line-height: 1; padding: 4px 8px; color: #666; }
+    .modal-head button:hover { background: none; color: #1a1a18; }
+
+    .setting { display: flex; align-items: flex-start; gap: 16px; padding: 13px 0; border-top: 0.5px solid #e0e0da; }
+    .setting-text { flex: 1; }
+    .setting-name { font-size: 14px; font-weight: 500; margin-bottom: 3px; }
+    .setting-desc { font-size: 12px; color: #666; line-height: 1.45; }
+
+    /* toggle switch (replaces the plain checkbox) */
+    .switch { position: relative; display: inline-block; flex: none; width: 40px; height: 22px; margin: 2px 0 0; cursor: pointer; }
+    .switch input { position: absolute; opacity: 0; width: 0; height: 0; }
+    .switch .track { position: absolute; inset: 0; border-radius: 11px; background: #ccc; transition: background .15s; }
+    .switch .track::before {
+      content: ''; position: absolute; left: 2px; top: 2px; width: 18px; height: 18px;
+      border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,0.25);
+      transition: transform .15s;
+    }
+    .switch input:checked + .track { background: #1a1a18; }
+    .switch input:checked + .track::before { transform: translateX(18px); }
+    .switch input:focus-visible + .track { box-shadow: 0 0 0 3px rgba(0,0,0,0.15); }
+
+    @media (prefers-color-scheme: dark) {
+      .modal { background: #23231f; border-color: #444; }
+      .modal-head h2 { color: #e8e8e4; }
+      .modal-head button { color: #999; }
+      .modal-head button:hover { color: #e8e8e4; }
+      .setting { border-top-color: #3a3a36; }
+      .setting-name { color: #e8e8e4; }
+      .setting-desc { color: #999; }
+      .switch .track { background: #444; }
+      .switch .track::before { background: #e8e8e4; }
+      .switch input:checked + .track { background: #e8e8e4; }
+      .switch input:checked + .track::before { background: #1a1a18; }
+      .switch input:focus-visible + .track { box-shadow: 0 0 0 3px rgba(255,255,255,0.2); }
     }
   </style>
 </head>
@@ -239,109 +294,134 @@
 
     <div id="sliders-container"></div>
 
-    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
       <button onclick="doGenerate()">Generate scramble</button>
-      <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;user-select:none;">
-        <input type="checkbox" id="wide-toggle" checked onchange="clearScramble()">
-        Wide moves (e.g. 3Rw)
-      </label>
-      <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;user-select:none;" title="For the axis that bandages next phase, only scramble the outer layers about to be frozen; deeper layers are mixed in later phases.">
-        <input type="checkbox" id="efficient-toggle" onchange="clearScramble()">
-        Efficient mode
-      </label>
-      <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;user-select:none;" title="Layer numbers count distance from the outside of each axis's own full size, never renumbered per phase, instead of the current reduction's movable layers. Not currently combined with efficient mode.">
-        <input type="checkbox" id="outside-numbering-toggle" onchange="clearScramble()">
-        Outside-numbered layers
-      </label>
+      <button onclick="openSettings()" aria-haspopup="dialog"><i class="ti ti-settings" style="font-size:14px;margin-right:5px;vertical-align:-2px;"></i>Settings</button>
     </div>
-    <div id="outside-numbering-note" style="display:none;font-size:12px;color:#666;margin-top:-6px;margin-bottom:8px;"></div>
 
     <div id="out"></div>
   </div>
   <div id="move-tooltip"><div id="move-tooltip-inner"></div></div>
 
+  <div id="settings-overlay" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+      <div class="modal-head">
+        <h2 id="settings-title">Settings</h2>
+        <button id="settings-close" aria-label="Close settings">&times;</button>
+      </div>
+
+      <div class="setting">
+        <div class="setting-text">
+          <div class="setting-name">Slice moves</div>
+          <div class="setting-desc">Scramble using slice moves (eg. <code>3R</code>), turning only that one layer. When off, scramble using wide moves, meaning every layer from the outside to that layer is turned. This changes which pieces you turn, not just how the move is written, but both settings should reach roughly equally random states.</div>
+        </div>
+        <label class="switch"><input type="checkbox" id="slice-toggle" onchange="onSettingChange('clear')"><span class="track"></span></label>
+      </div>
+
+      <div class="setting">
+        <div class="setting-text">
+          <div class="setting-name">Efficient mode</div>
+          <div class="setting-desc">On the axis that bandages next phase, only scramble the layers whose independence is about to be lost. Deeper layers survive the reduction and get mixed in later phases, so no scrambling is wasted on pieces that will be rearranged anyway.</div>
+        </div>
+        <label class="switch"><input type="checkbox" id="efficient-toggle" onchange="onSettingChange('clear')"><span class="track"></span></label>
+      </div>
+
+      <div class="setting">
+        <div class="setting-text">
+          <div class="setting-name">Outside-numbered layers</div>
+          <div class="setting-desc">Number layers by their distance from the outside of the puzzle's full size, fixed for the whole scramble. By default layers are renumbered every phase to count only the ones currently movable, so the same name can mean a different layer later on.</div>
+        </div>
+        <label class="switch"><input type="checkbox" id="outside-numbering-toggle" onchange="onSettingChange('clear')"><span class="track"></span></label>
+      </div>
+
+      <div class="setting">
+        <div class="setting-text">
+          <div class="setting-name">Constant-cube view</div>
+          <div class="setting-desc">Draw the puzzle as a fixed cube, with the shorter axes' outer layers drawn thicker, so it never appears to change shape. Needs all-even or all-odd dimensions. Affects the diagrams only — the scramble itself and the functionality is unchanged.</div>
+          <div id="constcube-note" style="display:none;font-size:12px;color:#666;margin-top:5px;"></div>
+        </div>
+        <label class="switch"><input type="checkbox" id="constcube-toggle" onchange="onSettingChange('display')"><span class="track"></span></label>
+      </div>
+
+      <div class="setting">
+        <div class="setting-text">
+          <div class="setting-name">Show shapeshifted state for hovered moves</div>
+          <div class="setting-desc">Hovering a move shows the coloured puzzle as it actually looks at that point in the scramble, with the layer about to turn highlighted. When off, hovering shows a plain schematic of the reduced cuboid instead.</div>
+        </div>
+        <label class="switch"><input type="checkbox" id="state-diagram-toggle" checked onchange="onSettingChange('display')"><span class="track"></span></label>
+      </div>
+    </div>
+  </div>
+
   <script>
+    function isConstCube() { return document.getElementById('constcube-toggle').checked; }
+    function isStateDiagram() { return document.getElementById('state-diagram-toggle').checked; }
+    // Coloured diagrams simulate every cubie, so cost grows with cubies x moves.
+    // Past this size the puzzle is far beyond any real cuboid, and both the
+    // replay and the SVG get slow enough to stutter on hover -- fall back to the
+    // schematic, which is cheap and size-independent.
+    const STATE_MAX_CUBIES = 1500;
+    function canRenderState(W, H, D) { return W * H * D <= STATE_MAX_CUBIES; }
+    // Constant-cube view needs one shared N across all axes, so it requires
+    // all-even or all-odd dimensions; otherwise fall back to the true shape.
+    function constCubeN(W, H, D) {
+      return (isConstCube() && sameParity(W, H, D)) ? Math.max(W, H, D) : null;
+    }
+    function updateConstCubeNote(W, H, D) {
+      const note = document.getElementById('constcube-note');
+      const unavailable = isConstCube() && !sameParity(W, H, D);
+      note.style.display = unavailable ? 'block' : 'none';
+      if (unavailable) note.textContent = `Constant-cube view needs all-even or all-odd dimensions (got ${W}×${H}×${D}) — drawing the true shape instead.`;
+    }
+    // Solved-state preview, in colour.
     function drawCuboid() {
       const W = Math.max(1, parseInt(document.getElementById('iw').value) || 1);
       const H = Math.max(1, parseInt(document.getElementById('ih').value) || 1);
       const D = Math.max(1, parseInt(document.getElementById('id').value) || 1);
-
-      const VW = 320, VH = 180;
-      const PL = 52, PR = 24, PT = 18, PB = 36;
-      const dw = VW - PL - PR, dh = VH - PT - PB;
-      const AX = 0.48, AY = 0.28;
-
-      let s = Math.min(dw / (W + D * AX), dh / (H + D * AY));
-      s = Math.min(s, 28);
-
-      const cw = W * s, ch = H * s, ddx = D * s * AX, ddy = D * s * AY;
-      const ox = PL + (dw - cw - ddx) / 2;
-      const oy = PT + ddy + (dh - ch - ddy) / 2 + ch;
-
-      const C = {
-        fbl:[ox,oy], fbr:[ox+cw,oy], ftr:[ox+cw,oy-ch], ftl:[ox,oy-ch],
-        bbl:[ox+ddx,oy-ddy], bbr:[ox+cw+ddx,oy-ddy],
-        btr:[ox+cw+ddx,oy-ch-ddy], btl:[ox+ddx,oy-ch-ddy]
-      };
-      const v = n => n.toFixed(1);
-      const ps = ks => ks.map(k => C[k].map(v).join(',')).join(' ');
-      const ln = (a,b,cls) => `<line x1="${v(a[0])}" y1="${v(a[1])}" x2="${v(b[0])}" y2="${v(b[1])}" class="${cls}" stroke-width="1" fill="none"/>`;
-
-      let svg = `<svg width="100%" viewBox="0 0 ${VW} ${VH}" xmlns="http://www.w3.org/2000/svg">`;
-
-      // Hidden back edges
-      svg += ln(C.fbl, C.bbl, 'cv-hidden cv-dim');
-      svg += ln(C.bbl, C.bbr, 'cv-hidden cv-dim');
-      svg += ln(C.bbl, C.btl, 'cv-hidden cv-dim');
-
-      // Three visible faces
-      svg += `<polygon points="${ps(['fbr','bbr','btr','ftr'])}" class="cv-right cv-stroke" stroke-width="1.5"/>`;
-      svg += `<polygon points="${ps(['ftl','ftr','btr','btl'])}" class="cv-top cv-stroke" stroke-width="1.5"/>`;
-      svg += `<polygon points="${ps(['fbl','fbr','ftr','ftl'])}" class="cv-front cv-stroke" stroke-width="1.5"/>`;
-
-      // Interior grid lines
-      function lerp2(a, b, t) { return [a[0] + (b[0]-a[0])*t, a[1] + (b[1]-a[1])*t]; }
-      function faceGrid(tl, tr, br, bl, cols, rows, cls) {
-        for (let i = 1; i < cols; i++) {
-          const t = i / cols;
-          const p1 = lerp2(tl, tr, t), p2 = lerp2(bl, br, t);
-          svg += `<line x1="${v(p1[0])}" y1="${v(p1[1])}" x2="${v(p2[0])}" y2="${v(p2[1])}" class="${cls}" stroke-width="0.8" fill="none"/>`;
-        }
-        for (let i = 1; i < rows; i++) {
-          const t = i / rows;
-          const p1 = lerp2(tl, bl, t), p2 = lerp2(tr, br, t);
-          svg += `<line x1="${v(p1[0])}" y1="${v(p1[1])}" x2="${v(p2[0])}" y2="${v(p2[1])}" class="${cls}" stroke-width="0.8" fill="none"/>`;
-        }
-      }
-      // Front face: W columns, H rows; corners tl,tr,br,bl
-      faceGrid(C.ftl, C.ftr, C.fbr, C.fbl, W, H, 'cv-grid');
-      // Top face: W columns, D rows
-      faceGrid(C.btl, C.btr, C.ftr, C.ftl, W, D, 'cv-grid');
-      // Right face: D columns, H rows
-      faceGrid(C.ftr, C.btr, C.bbr, C.fbr, D, H, 'cv-grid');
-
-      const lf = `font-size="11" font-family="Segoe UI, sans-serif"`;
-
-      // Width: arrow + label below front-bottom edge
-      const wMx = v(ox + cw / 2), wAy = v(oy + 7), wLy = v(oy + 19);
-      svg += `<line x1="${v(ox+2)}" y1="${wAy}" x2="${v(ox+cw-2)}" y2="${wAy}" class="cv-dim" stroke-width="1" fill="none"/>`;
-      svg += `<text x="${wMx}" y="${wLy}" text-anchor="middle" ${lf} class="cv-label">width ${W}</text>`;
-
-      // Height: arrow + label left of front-left edge
-      const hMy = v(oy - ch / 2), hAx = v(ox - 8), hLx = v(ox - 20);
-      svg += `<line x1="${hAx}" y1="${v(oy-2)}" x2="${hAx}" y2="${v(oy-ch+2)}" class="cv-dim" stroke-width="1" fill="none"/>`;
-      svg += `<text x="${hLx}" y="${hMy}" text-anchor="middle" ${lf} class="cv-label" transform="rotate(-90,${hLx},${hMy})">height ${H}</text>`;
-
-      // Depth: label along the bottom-right depth edge
-      const dMx = v((C.fbr[0] + C.bbr[0]) / 2 + 6);
-      const dMy = v((C.fbr[1] + C.bbr[1]) / 2 + 12);
-      svg += `<line x1="${v(C.fbr[0]+1)}" y1="${v(C.fbr[1]-1)}" x2="${v(C.bbr[0]-1)}" y2="${v(C.bbr[1]+1)}" class="cv-dim" stroke-width="1" fill="none"/>`;
-      svg += `<text x="${dMx}" y="${dMy}" text-anchor="start" ${lf} class="cv-label">depth ${D}</text>`;
-
-      svg += '</svg>';
-      document.getElementById('cuboid-vis').innerHTML = svg;
+      const N = constCubeN(W, H, D);
+      const cubies = buildSolved(W, H, D);
+      if (N) seedVirtual(cubies, [W, H, D], N);
+      document.getElementById('cuboid-vis').innerHTML = renderStateSVG(cubies, null, !!N, 260);
+      updateConstCubeNote(W, H, D);
       renderSliders(W, H, D);
     }
+    // Constant-cube view and hover style are display-only: redraw what's already
+    // on screen rather than discarding the scramble.
+    function onDisplayOptionChange() {
+      drawCuboid();
+      _tipCache = null; _replay = null;
+      renderFinalState();
+    }
+
+    // ---- settings persistence + dialog ----
+    const SETTING_IDS = ['slice-toggle', 'efficient-toggle', 'outside-numbering-toggle', 'constcube-toggle', 'state-diagram-toggle'];
+    const SETTINGS_KEY = 'cuboid-scrambler:settings';
+    // localStorage can throw outright (private modes, blocked file:// origins),
+    // so every access is guarded -- failing to persist should never break the page.
+    function loadSettings() {
+      let saved;
+      try { saved = JSON.parse(localStorage.getItem(SETTINGS_KEY) || 'null'); } catch (e) { return; }
+      if (!saved || typeof saved !== 'object') return;
+      for (const id of SETTING_IDS) {
+        if (typeof saved[id] === 'boolean') document.getElementById(id).checked = saved[id];
+      }
+    }
+    function saveSettings() {
+      const o = {};
+      for (const id of SETTING_IDS) o[id] = document.getElementById(id).checked;
+      try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(o)); } catch (e) { /* not persisted */ }
+    }
+    // 'display' settings only change how things are drawn, so the scramble is
+    // kept; 'clear' settings change which pieces actually turn, so it isn't.
+    function onSettingChange(kind) {
+      saveSettings();
+      if (kind === 'display') onDisplayOptionChange(); else clearScramble();
+    }
+    function openSettings() {
+      document.getElementById('settings-overlay').hidden = false;
+      document.getElementById('settings-close').focus();
+    }
+    function closeSettings() { document.getElementById('settings-overlay').hidden = true; }
 
     function getN() {
       return Array.from(document.querySelectorAll('.phase-slider')).map(s => parseInt(s.value));
@@ -396,7 +476,9 @@
     ['iw', 'ih', 'id'].forEach(id => {
       document.getElementById(id).addEventListener('input', () => { drawCuboid(); clearScramble(); });
     });
-    drawCuboid();
+    // NB: the initial drawCuboid() call lives at the very end of this script --
+    // it now depends on const declarations further down (COLORS, HEX, ...),
+    // which are in their temporal dead zone until then.
 
     function faceAxis(f) { return f === 'R' || f === 'L' ? 'x' : f === 'U' || f === 'D' ? 'y' : 'z'; }
     function faceAvail(f, w, h, d) { return f === 'R' || f === 'L' ? w >= 2 : f === 'U' || f === 'D' ? h >= 2 : d >= 2; }
@@ -431,7 +513,8 @@
       }
       return pool;
     }
-    function isWide() { return document.getElementById('wide-toggle').checked; }
+    // Wide is the default; the setting is expressed as its opposite (slice).
+    function isWide() { return !document.getElementById('slice-toggle').checked; }
     // mandatoryWide (if passed) forces the "w" flag regardless of the wide
     // toggle -- used for outside-numbered layers whose own group is
     // genuinely bandaged (no single-slice interpretation is physically valid).
@@ -441,15 +524,15 @@
     }
     function isOutsideNumbered() { return document.getElementById('outside-numbering-toggle').checked; }
 
-    // ---- minimal cubie engine (position + functional coordinate only) ----
-    // Needed to detect outside-numbered layers whose true physical width has
-    // been inflated by rotation history: fc merges on whichever axis is being
-    // reduced at a given phase, and a LATER rotation on a DIFFERENT axis can
-    // import that already-merged group via a 90-degree swap, even onto an
-    // axis that never reduced on its own. This is a runtime property of the
-    // actual rotation sequence, not derivable from a static formula, so a
-    // real (if minimal -- no orientation/stickers needed, nothing here is
-    // rendered as cubies) simulation is required.
+    // ---- cubie engine ----
+    // A real rotation simulation is required for two things a static formula
+    // can't give: (1) outside-numbered layers whose true physical width has
+    // been inflated by rotation history -- fc merges on whichever axis is
+    // being reduced at a given phase, and a LATER rotation on a DIFFERENT
+    // axis can import that already-merged group via a 90-degree swap, even
+    // onto an axis that never reduced on its own; and (2) the coloured state
+    // diagrams, which need each cubie's live position, orientation and
+    // stickers at an arbitrary point in the scramble.
     const AXIS = { R:'x', L:'x', U:'y', D:'y', F:'z', B:'z' };
     const IDX = { x:0, y:1, z:2 };
     const POSITIVE = new Set(['R','U','F']);
@@ -460,11 +543,6 @@
     function matMul(A,B) { const Bt=transpose(B); return A.map(row => Bt.map(col => row[0]*col[0]+row[1]*col[1]+row[2]*col[2])); }
     function matPow(M,e) { return e===1 ? M : e===-1 ? transpose(M) : matMul(M,M); }
     function span(n) { return Array.from({length:n}, (_,i) => -(n-1)+2*i); }
-    function buildFC(w,h,d) {
-      const cubies=[];
-      for (const x of span(w)) for (const y of span(h)) for (const z of span(d)) cubies.push({ pos:[x,y,z], fc:[x,y,z] });
-      return cubies;
-    }
     function coarsenFC(cubies, eff) {
       const lim = eff.map(e => e-1);
       for (const c of cubies) c.fc = c.fc.map((v,k) => Math.max(-lim[k], Math.min(lim[k], v)));
@@ -488,12 +566,6 @@
       const sel = new Set();
       for (const c of cubies) { const fc=c.fc[k]; if (wide ? (positive?fc>=target:fc<=target) : fc===target) sel.add(fc); }
       return sel;
-    }
-    function applyMoveFC(cubies, mv, Nper, eff) {
-      const ax = AXIS[mv.face], k = IDX[ax];
-      const sel = selectCoordsCC(cubies, mv, Nper, eff);
-      const sign = baseSign(mv.face), exp = mv.mod==='2'?2:mv.mod==="'"?-sign:sign, R = matPow(P[ax], exp);
-      for (const c of cubies) { if (!sel.has(c.fc[k])) continue; c.pos=matVec(R,c.pos); c.fc=matVec(R,c.fc); }
     }
     // Outside-numbered pool: layer numbers count from the outside of each
     // axis's own native size (Nper), never renumbered per phase.
@@ -530,6 +602,313 @@
         if (positive ? fc>=target : fc<=target) cumRaw.add(c.pos[k]);
       }
       return { depth: cumRaw.size, ownWide: ownRaw.size>1 };
+    }
+
+    // ---- full cubie state (orientation + stickers), for coloured diagrams ----
+    const COLORS = { '+x':'Red','-x':'Orange','+y':'White','-y':'Yellow','+z':'Green','-z':'Blue' };
+    const HEX = { Red:'#dd2222', Orange:'#ff8800', White:'#f0f0f0', Yellow:'#ffdd00', Green:'#00aa55', Blue:'#0066cc', Body:'#2a2a2a' };
+    const DIRS = { '+x':[1,0,0],'-x':[-1,0,0],'+y':[0,1,0],'-y':[0,-1,0],'+z':[0,0,1],'-z':[0,0,-1] };
+    const I3 = [[1,0,0],[0,1,0],[0,0,1]];
+    const vecEq = (a,b) => a[0]===b[0]&&a[1]===b[1]&&a[2]===b[2];
+    function buildSolved(w,h,d) {
+      const xs=span(w), ys=span(h), zs=span(d);
+      const xmax=Math.max(...xs),xmin=Math.min(...xs),ymax=Math.max(...ys),ymin=Math.min(...ys),zmax=Math.max(...zs),zmin=Math.min(...zs);
+      const cubies=[];
+      for (const x of xs) for (const y of ys) for (const z of zs) {
+        const st={};
+        if(x===xmax)st['+x']=COLORS['+x']; if(x===xmin)st['-x']=COLORS['-x'];
+        if(y===ymax)st['+y']=COLORS['+y']; if(y===ymin)st['-y']=COLORS['-y'];
+        if(z===zmax)st['+z']=COLORS['+z']; if(z===zmin)st['-z']=COLORS['-z'];
+        cubies.push({ pos:[x,y,z], ori:I3, fc:[x,y,z], stickers:st });
+      }
+      return cubies;
+    }
+    function worldStickers(c) {
+      const out={}, oriT=transpose(c.ori);
+      for (const [key,wv] of Object.entries(DIRS)) {
+        const lv=matVec(oriT,wv);
+        const lk=Object.keys(DIRS).find(kk=>vecEq(DIRS[kk],lv));
+        if(c.stickers[lk])out[key]=c.stickers[lk];
+      }
+      return out;
+    }
+    // phase-relative selection (normal numbering): the k-th distinct functional
+    // layer counting in from the named face.
+    function selectCoords(cubies, mv) {
+      const { face, layer, wide } = mv;
+      const k=IDX[AXIS[face]], positive=POSITIVE.has(face);
+      const coords=[...new Set(cubies.map(c=>c.fc[k]))].sort((a,b)=>positive?b-a:a-b);
+      return new Set(wide ? coords.slice(0,layer) : [coords[layer-1]]);
+    }
+    // Unified simulation step. `wide` on the move is the flag actually DISPLAYED
+    // to the user (it changes which cubies physically turn), so the simulation
+    // always matches what the notation tells them to do.
+    function simSelect(cubies, mv, sim) {
+      return sim.outsideNum ? selectCoordsCC(cubies, mv, sim.Nper, mv.eff) : selectCoords(cubies, mv);
+    }
+    function applySimMove(cubies, mv, sim) {
+      const ax=AXIS[mv.face], k=IDX[ax];
+      const sel=simSelect(cubies, mv, sim);
+      const sign=baseSign(mv.face), exp=mv.mod==='2'?2:mv.mod==="'"?-sign:sign, R=matPow(P[ax],exp);
+      const absR=R.map(row=>row.map(Math.abs)); // permutation only: for extents (vhalf), which aren't directional
+      for (const c of cubies) {
+        if(!sel.has(c.fc[k]))continue;
+        c.pos=matVec(R,c.pos); c.ori=matMul(R,c.ori); c.fc=matVec(R,c.fc);
+        if(c.vpos){ c.vpos=matVec(R,c.vpos); c.vhalf=matVec(absR,c.vhalf); }
+      }
+    }
+
+    // ---- constant-cube display: fixed N-cube, shorter axes' outer layers drawn thicker ----
+    function sameParity(w,h,d) { return (w%2)===(h%2) && (h%2)===(d%2); }
+    function renderMap(p,d,N) {
+      if(d===N) return {c:p,h:1};
+      if(d===1) return {c:0,h:N};
+      if(Math.abs(p)===d-1){ const s=Math.sign(p); return {c:s*(d-2+N)/2, h:(N-d)/2+1}; }
+      return {c:p,h:1};
+    }
+    // vpos/vhalf are seeded once and then rotated alongside pos, never re-derived
+    // from a lookup -- a later-phase turn on a bandaged axis genuinely shapeshifts
+    // the raw puzzle, which would put pos outside its native range.
+    function seedVirtual(cubies, dims, N) {
+      for (const c of cubies) {
+        const rm=[0,1,2].map(k=>renderMap(c.pos[k], dims[k], N));
+        c.vpos=rm.map(r=>r.c); c.vhalf=rm.map(r=>r.h);
+      }
+    }
+
+    // ---- axonometric renderer ----
+    const PS=20, PAX=0.55, PAY=0.42;
+    const project=([x,y,z])=>[ x*PS - z*PS*PAX, -y*PS + z*PS*PAY ];
+    const VIS=['+x','+y','+z'];
+    // Fixed view: brightness per world face (only +x/+y/+z are ever visible).
+    const SHADE={ '+z':1.0, '+y':0.86, '+x':0.72 };
+    // Free view: brightness must track how face-on a side is, or the shape stops
+    // reading as solid. Keying it to the world face (as the fixed view does)
+    // meant that after rotating, a nearly edge-on side could be drawn brighter
+    // than a face-on one -- which the eye interprets as the cube flaring
+    // outwards. A light off the camera axis has the same failure (an edge-on
+    // side that happens to face the light lights up), so this is a pure
+    // headlight: brightness is a monotonic function of face-on-ness, leaving no
+    // angle where the two disagree. Sides stay distinguishable via their cell
+    // outlines and sticker colours rather than via a lighting gradient.
+    const AMBIENT=0.48, DIFFUSE=0.52;
+    // Eye distance for the free view, as a multiple of the puzzle's own radius.
+    // Smaller exaggerates the vanishing point, larger flattens towards
+    // orthographic. 4.5 renders the near edge ~1.14x the far one -- enough to
+    // read as a cube without looking like a wide-angle lens.
+    const PERSP=4.5;
+    // Worst-case magnification from the perspective divide, over the bounding
+    // sphere. Naively that looks like d/(d-R), but a point at full depth R sits
+    // on the view axis with zero lateral offset, so it cannot reach that.
+    // Maximising r/(1 - z/d) subject to r^2 + z^2 = R^2 gives cos(theta) = R/d
+    // and a bound of 1/sqrt(1 - (R/d)^2) -- barely above 1, rather than the ~1.3
+    // the naive figure would have cost in canvas size.
+    const PERSP_MAG = 1/Math.sqrt(1 - 1/(PERSP*PERSP));
+    // Free view (bottom image only): rotate by yaw then pitch, then project
+    // orthographically. +z in view space points at the camera.
+    function viewMatrix(yaw, pitch) {
+      const cy=Math.cos(yaw), sy=Math.sin(yaw), cp=Math.cos(pitch), sp=Math.sin(pitch);
+      return matMul([[1,0,0],[0,cp,-sp],[0,sp,cp]], [[cy,0,sy],[0,1,0],[-sy,0,cy]]);
+    }
+    // The free view uses a weak perspective divide. Orthographic keeps parallel
+    // edges parallel, which is geometrically proper but leaves the solid reading
+    // flat and ambiguous (the Necker-cube effect) -- the far side is drawn just
+    // as large as the near one, so it looks like it flares outwards. Converging
+    // edges are precisely the cue that resolves it, so the two cannot both be
+    // had. `view.d` is the eye distance in world units; larger is weaker.
+    function projectPt(p, view) {
+      if (!view) return project(p);
+      const q = matVec(view.m, p);
+      const f = view.d / (view.d - q[2]);
+      return [q[0]*PS*f, -q[1]*PS*f];
+    }
+    function shade(hex,f) {
+      const n=parseInt(hex.slice(1),16); let r=(n>>16)&255,g=(n>>8)&255,b=n&255;
+      r=Math.round(r*f); g=Math.round(g*f); b=Math.round(b*f);
+      return '#'+((1<<24)+(r<<16)+(g<<8)+b).toString(16).slice(1);
+    }
+    // The two in-plane axes for each face normal. Negative faces reuse their
+    // positive counterpart's pair (winding doesn't matter -- filled polygons,
+    // no backface culling), and are only ever needed by the free view.
+    const INPLANE={ '+x':[[0,1,0],[0,0,1]], '+y':[[1,0,0],[0,0,1]], '+z':[[1,0,0],[0,1,0]],
+                    '-x':[[0,1,0],[0,0,1]], '-y':[[1,0,0],[0,0,1]], '-z':[[1,0,0],[0,1,0]] };
+    // Bent arrow hugging one cube corner from outside; legs run parallel to the
+    // two silhouette edges meeting there, so the bend matches the outline.
+    const ARROW_CORNER={ U:[-1,+1,-1], D:[+1,-1,+1], R:[+1,-1,-1], L:[-1,+1,+1], F:[-1,-1,+1], B:[+1,+1,-1] };
+    function buildArrow(cubies, mv, constCube) {
+      const M = constCube
+        ? [0,1,2].map(k=>Math.max(1,...cubies.map(c=>Math.abs(c.vpos[k]))))
+        : [0,1,2].map(k=>Math.max(1,...cubies.map(c=>Math.abs(c.pos[k]))));
+      const sgn=ARROW_CORNER[mv.face];
+      const C=[sgn[0]*M[0], sgn[1]*M[1], sgn[2]*M[2]];
+      const Cs=project(C);
+      const legDirs=[];
+      for (let a=0;a<3;a++) {
+        const o=[0,1,2].filter(i=>i!==a);
+        if((sgn[o[0]]>0)===(sgn[o[1]]>0)) continue;   // interior edge, not a silhouette edge
+        const nb=[...C]; nb[a]=-nb[a];
+        const ns=project(nb); const dd=[ns[0]-Cs[0], ns[1]-Cs[1]]; const l=Math.hypot(dd[0],dd[1])||1;
+        legDirs.push([dd[0]/l, dd[1]/l]);
+      }
+      if(legDirs.length<2) return null;
+      let ox=-(legDirs[0][0]+legDirs[1][0]), oy=-(legDirs[0][1]+legDirs[1][1]);
+      const ol=Math.hypot(ox,oy)||1; ox/=ol; oy/=ol;
+      const ax=AXIS[mv.face], sign=baseSign(mv.face), dirExp=mv.mod==="'"?-sign:sign;
+      const Cs2=project(matVec(matPow(P[ax],dirExp), C));
+      const m=[Cs2[0]-Cs[0], Cs2[1]-Cs[1]];
+      const dt=dv=>dv[0]*m[0]+dv[1]*m[1];
+      const end=dt(legDirs[0])>=dt(legDirs[1])?legDirs[0]:legDirs[1];
+      const startL=end===legDirs[0]?legDirs[1]:legDirs[0];
+      const pushOut=6, legLen=17, ringGap=12;
+      const bracket=(r)=>{
+        const vx=[Cs[0]+ox*r, Cs[1]+oy*r];
+        return [ [vx[0]+startL[0]*legLen,vx[1]+startL[1]*legLen], vx, [vx[0]+end[0]*legLen,vx[1]+end[1]*legLen] ];
+      };
+      return { bx:ox, by:oy, paths: mv.mod==='2' ? [bracket(pushOut), bracket(pushOut+ringGap)] : [bracket(pushOut)] };
+    }
+    // Returns a self-contained <svg> string for the given state.
+    // `view` (optional) switches to the free rotatable camera used by the
+    // bottom image: all six faces become candidates and are culled by facing,
+    // and depth comes from the true view axis instead of the fixed-view x+y+z
+    // shortcut. Without it the original fixed-view path runs unchanged.
+    function renderStateSVG(cubies, hi, constCube, maxPx, fit, viewM) {
+      const occ=new Set(cubies.map(c=>c.pos.join(',')));
+      // Per-axis half-extents of the drawn solid: sets the eye distance and the
+      // fixed canvas, and in constant-cube mode also defines the cube's surface
+      // (see the cull below).
+      const E=[0,0,0];
+      for (const c of cubies) {
+        const p = constCube ? c.vpos : c.pos, hh = constCube ? c.vhalf : [1,1,1];
+        for (let k=0;k<3;k++) E[k]=Math.max(E[k], Math.abs(p[k])+hh[k]);
+      }
+      const Rw = Math.hypot(E[0],E[1],E[2]) || 1;
+      // Eye distance scales with the puzzle, so the effect is the same strength
+      // whatever its size.
+      const view = viewM ? { m: viewM, d: PERSP*Rw } : null;
+      // With a finite eye, whether a face is turned towards the camera depends on
+      // WHERE it is, not just which way it points -- so it cannot be resolved per
+      // direction like the orthographic case. All six are candidates and each is
+      // tested individually below; only the normals are precomputed here.
+      const dirs = view ? Object.keys(DIRS) : VIS;
+      const nView = {};
+      if (view) for (const d of dirs) nView[d] = matVec(view.m, DIRS[d]);
+      // Brightness only tracks orientation, so it stays a per-direction lookup.
+      const shadeFor = {};
+      for (const d of dirs) {
+        // nv[2] is exactly how face-on the side is (1 = square to the camera).
+        if (view) shadeFor[d] = AMBIENT + DIFFUSE*Math.max(0, nView[d][2]);
+        else shadeFor[d] = SHADE[d];
+      }
+      const faces=[];
+      for (const c of cubies) {
+        const isSel = hi && hi.sel.has(c.fc[hi.k]);
+        const ws = worldStickers(c);
+        for (const dir of dirs) {
+          const n=DIRS[dir];
+          const ax = n[0] ? 0 : n[1] ? 1 : 2;
+          if (constCube) {
+            // Real adjacency is the wrong cull here: the drawn geometry is the
+            // VIRTUAL cube, and once a shapeshifting move makes real and virtual
+            // adjacency diverge, faces buried inside the cube stop being culled
+            // and paint over its surface at some angles. The virtual boxes tile
+            // the cube exactly, so a face is on the surface iff its plane is the
+            // cube's boundary -- an exact test that needs no adjacency at all.
+            if (Math.abs(c.vpos[ax] + n[ax]*c.vhalf[ax] - n[ax]*E[ax]) > 1e-9) continue;
+          } else {
+            const nb=[c.pos[0]+2*n[0],c.pos[1]+2*n[1],c.pos[2]+2*n[2]];
+            if(occ.has(nb.join(',')))continue;   // interior face
+          }
+          const [u0,v0]=INPLANE[dir];
+          let center,u,v;
+          if(constCube){
+            center=[0,1,2].map(k=>c.vpos[k] + n[k]*c.vhalf[k]);
+            u=u0.map((x,k)=>x*c.vhalf[k]); v=v0.map((x,k)=>x*c.vhalf[k]);
+          } else {
+            center=[c.pos[0]+n[0],c.pos[1]+n[1],c.pos[2]+n[2]];
+            u=u0; v=v0;
+          }
+          // Perspective-correct facing: the eye sits at (0,0,d) in view space, so
+          // a face shows only if its normal points towards that point rather than
+          // merely along the view axis. Using the orthographic test here left back
+          // faces near the silhouette drawn over the front of the solid.
+          let cv = null;
+          if (view) {
+            cv = matVec(view.m, center);
+            const nv = nView[dir];
+            if (-nv[0]*cv[0] - nv[1]*cv[1] + nv[2]*(view.d - cv[2]) <= 1e-9) continue;
+          }
+          const corners=[[+1,+1],[+1,-1],[-1,-1],[-1,+1]].map(([su,sv])=>
+            projectPt([center[0]+su*u[0]+sv*v[0], center[1]+su*u[1]+sv*v[1], center[2]+su*u[2]+sv*v[2]], view));
+          const name=ws[dir];
+          let col=shade(HEX[name]||HEX.Body, shadeFor[dir]);
+          if(hi && !isSel) col=shade(col,0.4);   // dull everything but the turning layer
+          // In constant-cube mode the drawn solid is now exactly the cube's
+          // surface, so nothing overlaps and this ordering is only a formality
+          // (the old "force body faces to the back" hack papered over the cull
+          // bug fixed above, and is no longer needed).
+          const depth = view
+            ? cv[2]
+            : center[0]+center[1]+center[2] + (dir==='+z'?0.5:dir==='+y'?0.25:0);
+          faces.push({corners,col,depth,isSel});
+        }
+      }
+      faces.sort((a,b)=>a.depth-b.depth);
+      // The arrow's corner/silhouette geometry is built for the fixed view only.
+      const arrow = (hi && !view) ? buildArrow(cubies, hi.mv, constCube) : null;
+      let dminX=1e9,dminY=1e9,dmaxX=-1e9,dmaxY=-1e9;
+      for(const f of faces)for(const p of f.corners){ dminX=Math.min(dminX,p[0]);dminY=Math.min(dminY,p[1]);dmaxX=Math.max(dmaxX,p[0]);dmaxY=Math.max(dmaxY,p[1]); }
+      if(!faces.length) return '';
+      // Separating-axis shift: push the arrow along its outward normal until every
+      // arrow point clears every actual diagram vertex (bbox corners overshoot).
+      if(arrow){
+        const gap=4;
+        const proj=p=>p[0]*arrow.bx+p[1]*arrow.by;
+        const diagMaxProj=Math.max(...faces.flatMap(f=>f.corners).map(proj));
+        const arrowMinProj=Math.min(...arrow.paths.flat().map(proj));
+        if(arrowMinProj < diagMaxProj+gap){
+          const s=(diagMaxProj+gap)-arrowMinProj, sx=arrow.bx*s, sy=arrow.by*s;
+          arrow.paths=arrow.paths.map(path=>path.map(p=>[p[0]+sx,p[1]+sy]));
+        }
+      }
+      let minX=dminX,minY=dminY,maxX=dmaxX,maxY=dmaxY;
+      if(arrow) for(const path of arrow.paths)for(const p of path){ minX=Math.min(minX,p[0]);minY=Math.min(minY,p[1]);maxX=Math.max(maxX,p[0]);maxY=Math.max(maxY,p[1]); }
+      let pad=10, w=(maxX-minX)+2*pad, h=(maxY-minY)+2*pad;
+      let T=p=>`${(p[0]-minX+pad).toFixed(1)},${(p[1]-minY+pad).toFixed(1)}`;
+      // A rotatable view can't use a tight box: it would resize (and so appear to
+      // zoom) at every angle, shifting the page around it. Size it once to the
+      // bounding sphere instead -- the puzzle rotates about the origin, so a
+      // square that fits the sphere fits every orientation, at a constant scale.
+      // Scale by the perspective divide's exact worst-case magnification, so the
+      // never-clips guarantee holds without wasting canvas.
+      if (view) {
+        const R = Rw * PS * PERSP_MAG;
+        pad = 4; w = h = 2*R + 2*pad;
+        T = p => `${(p[0]+R+pad).toFixed(1)},${(p[1]+R+pad).toFixed(1)}`;
+      }
+      let body='';
+      for(const f of faces){
+        const stroke=f.isSel?'#bbbbbb':'#111';
+        body+=`<polygon points="${f.corners.map(T).join(' ')}" fill="${f.col}" stroke="${stroke}" stroke-width="1" stroke-linejoin="round"/>`;
+      }
+      if(arrow){
+        const ac='#ff4500';
+        const head=(pen,tip)=>{ const dx=tip[0]-pen[0],dy=tip[1]-pen[1],l=Math.hypot(dx,dy)||1,ux=dx/l,uy=dy/l,s2=10;
+          const bx=tip[0]-ux*s2,by=tip[1]-uy*s2;
+          return `<polygon points="${T(tip)} ${T([bx-uy*s2*0.7,by+ux*s2*0.7])} ${T([bx+uy*s2*0.7,by-ux*s2*0.7])}" fill="${ac}"/>`; };
+        for(const path of arrow.paths){
+          body+=`<polyline points="${path.map(T).join(' ')}" fill="none" stroke="${ac}" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/>`;
+          body+=head(path[1],path[2]);
+        }
+      }
+      // The rotatable view fills its (fixed, square) container instead of
+      // carrying pixel dimensions, so nothing around it moves as it turns.
+      if (view) {
+        return `<svg viewBox="0 0 ${w.toFixed(1)} ${h.toFixed(1)}" style="width:100%;height:100%;display:block;" xmlns="http://www.w3.org/2000/svg">${body}</svg>`;
+      }
+      // `fit` scales up as well as down (SVG upscaling is lossless via the
+      // viewBox); without it maxPx is only a cap.
+      const scale = maxPx ? (fit ? maxPx/Math.max(w,h) : Math.min(1, maxPx/Math.max(w,h))) : 1;
+      return `<svg width="${(w*scale).toFixed(1)}" height="${(h*scale).toFixed(1)}" viewBox="0 0 ${w.toFixed(1)} ${h.toFixed(1)}" xmlns="http://www.w3.org/2000/svg">${body}</svg>`;
     }
     function applyEquiv(face, mod) {
       const opp = { R:'L', L:'R', U:'D', D:'U', F:'B', B:'F' }[face];
@@ -736,6 +1115,50 @@
     }
     function clearScramble() {
       document.getElementById('out').innerHTML = '';
+      _sim = null; _tipCache = null; _replay = null;
+    }
+    // Recorded scramble, replayed on demand for the hover and final-state
+    // diagrams (cheaper than snapshotting every intermediate state).
+    let _sim = null, _tipCache = null, _replay = null;
+    function stateAtIndex(k) {
+      if (!_sim) return null;
+      const { W, H, D } = _sim;
+      const N = constCubeN(W, H, D);
+      const upto = Math.min(k, _sim.moves.length);
+      // Hovering normally scans forward, so continue from the cached state when
+      // possible; only a backward jump needs rebuilding from solved. Without
+      // this a deep hover on a large puzzle replays the whole scramble.
+      let c, start;
+      if (_replay && _replay.sim === _sim && _replay.N === N && _replay.idx <= upto) {
+        c = _replay.cubies; start = _replay.idx;
+      } else {
+        c = buildSolved(W, H, D);
+        if (N) seedVirtual(c, [W, H, D], N);
+        start = 0;
+      }
+      for (let i = start; i < upto; i++) {
+        const m = _sim.moves[i];
+        coarsenFC(c, m.eff);   // idempotent within a phase, and eff only shrinks across phases
+        applySimMove(c, m, _sim);
+      }
+      _replay = { sim: _sim, N, idx: upto, cubies: c };
+      // Enter the upcoming move's phase context too, so its highlight is
+      // computed against the same bandaging the move itself will use. (Also
+      // idempotent -- the next forward step re-applies the same clamp.)
+      if (k < _sim.moves.length) coarsenFC(c, _sim.moves[k].eff);
+      return c;
+    }
+    // State just before move `idx`, with that move's turning layer highlighted.
+    function stateTooltipSVG(idx) {
+      if (_tipCache && _tipCache.idx === idx) return _tipCache.svg;
+      const c = stateAtIndex(idx);
+      if (!c) return '';
+      const m = _sim.moves[idx];
+      const N = constCubeN(_sim.W, _sim.H, _sim.D);
+      const hi = m ? { k: IDX[AXIS[m.face]], sel: simSelect(c, m, _sim), mv: m } : null;
+      const svg = renderStateSVG(c, hi, !!N, 210);
+      _tipCache = { idx, svg };
+      return svg;
     }
     function isEfficient() { return document.getElementById('efficient-toggle').checked; }
     // Which axis bandages when going from dimsA -> dimsB, and how many outer layers freeze.
@@ -764,50 +1187,89 @@
       // phase, instead of the current reduction's movable layers. Needs a
       // real (minimal) rotation simulation alongside generation, since a
       // layer's true bandaged width is a runtime property of the rotation
-      // history, not derivable from a static formula (see buildFC etc above).
+      // history, not derivable from a static formula (see the engine above).
       const outsideNum = isOutsideNumbered();
       const Nper = [W, H, D];
-      const cubies = outsideNum ? buildFC(W, H, D) : null;
-      const note = document.getElementById('outside-numbering-note');
-      note.style.display = outsideNum && isEfficient() ? 'block' : 'none';
-      if (outsideNum && isEfficient()) note.textContent = 'Efficient mode is not currently combined with outside-numbered layers -- efficient-mode layer restriction is skipped while outside-numbering is on.';
+      // One live simulation drives everything: outside-numbered relabelling
+      // (which needs each move's true bandaged width at that exact point), and
+      // the recorded move list that the hover/final-state diagrams replay.
+      // Outside-numbering *requires* it; otherwise it's only worth running when
+      // the puzzle is small enough to draw coloured diagrams at all.
+      const wantState = canRenderState(W, H, D);
+      const simOn = outsideNum || wantState;
+      _sim = simOn ? { W, H, D, outsideNum, Nper, moves: [] } : null;
+      const simN = constCubeN(W, H, D);
+      const cubies = simOn ? buildSolved(W, H, D) : null;
+      if (cubies && simN) seedVirtual(cubies, [W, H, D], simN);
+      _tipCache = null; _replay = null;
       for (let i = 0; i < stages.length; i++) {
         const [w, h, d] = stages[i].dims;
-        const canonPool = outsideNum ? getConstantCubePool(Nper, [w, h, d]) : getCanonicalPool(w, h, d);
-        if (outsideNum && cubies) coarsenFC(cubies, [w, h, d]);
+        const eff = [w, h, d];
+        const canonPool = outsideNum ? getConstantCubePool(Nper, eff) : getCanonicalPool(w, h, d);
+        if (cubies) coarsenFC(cubies, eff);
         if (!canonPool.length) continue;
         const curQTFaces = new Set(canonPool.filter(t => t.qt).map(t => t.face));
         const forcedFirstPool = i > 0 ? canonPool.filter(t => t.qt && !prevQTFaces.has(t.face) && t.mod !== '2') : null;
         prevQTFaces = curQTFaces;
-        // Efficient mode: for the axis that bandages next phase, keep only the
-        // outermost Δ layers (the ones about to be frozen); deeper layers survive
-        // and are mixed in later phases under their renumbered identity.
-        // (Not combined with outside-numbered layers -- see note above.)
+        // Efficient mode: on the axis that bandages next phase, keep only the
+        // layers whose independence is about to be lost; deeper layers survive
+        // and get mixed in later phases.
         let effPool = canonPool;
         let effLabel = '';
-        if (!outsideNum && isEfficient() && i < stages.length - 1) {
-          const bi = bandageInfo(stages[i].dims, stages[i + 1].dims);
-          if (bi && bi.delta >= 1) {
-            const restricted = canonPool.filter(t => !(faceAxis(t.face) === bi.axis && t.layer > bi.delta));
-            if (restricted.length) { effPool = restricted; effLabel = ` · efficient: ${bi.axis}-axis layers ≤ ${bi.delta}`; }
+        if (isEfficient() && i < stages.length - 1) {
+          const nextEff = stages[i + 1].dims;
+          let restricted = null, desc = '';
+          if (outsideNum) {
+            // Outside-numbered layers are never renumbered, so "about to freeze"
+            // is stated directly: a layer is independently selectable now (it's
+            // in the pool) but not at the next phase's effective dims, i.e. it
+            // merges into its deeper neighbour. This reproduces the same set the
+            // normal-numbering Δ rule picks, without relying on renumbering.
+            restricted = canonPool.filter(t => {
+              const k = IDX[AXIS[t.face]];
+              if (nextEff[k] === eff[k]) return true;   // not the bandaging axis
+              return !constCubeLayerAvailable(t.layer, Nper[k], nextEff[k], POSITIVE.has(t.face));
+            });
+            const kept = [...new Set(restricted.filter(t => nextEff[IDX[AXIS[t.face]]] !== eff[IDX[AXIS[t.face]]]).map(t => t.layer))].sort((a, b) => a - b);
+            const bi = bandageInfo(stages[i].dims, nextEff);
+            if (kept.length) desc = ` · efficient: ${bi ? bi.axis : '?'}-axis layers ${kept.join(',')} (freezing next phase)`;
+          } else {
+            const bi = bandageInfo(stages[i].dims, nextEff);
+            if (bi && bi.delta >= 1) {
+              restricted = canonPool.filter(t => !(faceAxis(t.face) === bi.axis && t.layer > bi.delta));
+              desc = ` · efficient: ${bi.axis}-axis layers ≤ ${bi.delta}`;
+            }
           }
+          if (restricted && restricted.length && restricted.length < canonPool.length) { effPool = restricted; effLabel = desc; }
         }
         const phaseLabel = `Phase ${i + 1} · ${w}×${h}×${d}${effLabel}`;
         const n = ns[i] ?? ns[ns.length - 1];
         let moves = scramblePhase(effPool, n, lastRef, phaseLabel, forcedFirstPool && forcedFirstPool.length ? forcedFirstPool : null);
-        if (outsideNum && cubies && moves.length) {
-          // Re-derive each move's true depth/width against the live cubie
-          // state, right before applying it, and relabel accordingly.
-          moves = moves.map(m => {
-            const pm = parseMove(m);
-            const { depth, ownWide } = outsideNumberedInfo(cubies, pm, Nper, [w, h, d]);
-            applyMoveFC(cubies, pm, Nper, [w, h, d]);
-            const correctedLayer = depth > 1 ? depth : pm.layer;
-            return moveStr(pm.face, correctedLayer, pm.mod, ownWide);
-          });
-        }
-        if (moves.length) phasesData.push({ dims: stages[i].dims, qt: stages[i].qt, moves });
+        // Record the canonical descriptor for each move and advance the sim.
+        // `wide` is taken from the label actually shown, because the wide/slice
+        // distinction changes which cubies physically turn -- so the simulation
+        // always matches what the notation instructs.
+        const startIdx = _sim ? _sim.moves.length : 0;
+        if (_sim) moves = moves.map(m => {
+          const pm = parseMove(m);
+          if (!pm) return m;
+          let label = m, raw = { face: pm.face, layer: pm.layer, mod: pm.mod, wide: pm.wide, eff };
+          if (outsideNum) {
+            // Re-derive true depth/width against the live state, before applying.
+            const { depth, ownWide } = outsideNumberedInfo(cubies, pm, Nper, eff);
+            label = moveStr(pm.face, depth > 1 ? depth : pm.layer, pm.mod, ownWide);
+            raw.wide = !!parseMove(label).wide;
+          }
+          applySimMove(cubies, raw, _sim);
+          _sim.moves.push(raw);
+          return label;
+        });
+        if (moves.length) phasesData.push({ dims: stages[i].dims, qt: stages[i].qt, moves, startIdx });
       }
+      // The generation sim has already walked the whole scramble, so hand it
+      // straight to the replay cache rather than replaying it again to draw
+      // the final state.
+      if (_sim) _replay = { sim: _sim, N: simN, idx: _sim.moves.length, cubies };
       const out = document.getElementById('out');
       if (!phasesData.length) {
         out.innerHTML = '<p style="color:#666;font-size:14px;margin-top:1rem;">No moves possible for this puzzle.</p>';
@@ -824,9 +1286,9 @@
         // phase's own w/h/d, so the diagram must use Nper to stay in bounds
         // and stay consistent with what the notation actually means.
         const [hw, hh, hd] = outsideNum ? Nper : [w, h, d];
-        p.moves.forEach(m => {
+        p.moves.forEach((m, j) => {
           const pm = parseMove(m);
-          const da = pm ? ` data-face="${pm.face}" data-layer="${pm.layer}" data-mod="${pm.mod}" data-wide="${pm.wide}" data-w="${hw}" data-h="${hh}" data-d="${hd}"` : '';
+          const da = pm ? ` data-face="${pm.face}" data-layer="${pm.layer}" data-mod="${pm.mod}" data-wide="${pm.wide}" data-w="${hw}" data-h="${hh}" data-d="${hd}" data-idx="${p.startIdx + j}"` : '';
           html += `<span class="move${pm && pm.mod !== '2' ? ' qt' : ''}"${da}>${m}</span>`;
         });
         html += `</div>`;
@@ -837,8 +1299,42 @@
           <button onclick="copyScramble(this)"><i class="ti ti-copy" style="font-size:13px;margin-right:4px;vertical-align:-1px;"></i>Copy</button>
         </div>
         <div class="full-scramble" id="full-scr">${allMoves.join(' ')}</div>
+        <div id="final-state" style="margin-top:14px;display:flex;flex-direction:column;align-items:center;gap:4px;"></div>
       </div>`;
       out.innerHTML = html;
+      renderFinalState();
+    }
+    // The fully-scrambled state, shown under the scramble text.
+    function renderFinalState() {
+      const el = document.getElementById('final-state');
+      if (!el) return;
+      const W = Math.max(1, parseInt(document.getElementById('iw').value) || 1);
+      const H = Math.max(1, parseInt(document.getElementById('ih').value) || 1);
+      const D = Math.max(1, parseInt(document.getElementById('id').value) || 1);
+      if (!canRenderState(W, H, D)) {
+        el.innerHTML = `<span style="font-size:12px;color:#666;">Coloured diagrams are off above ${STATE_MAX_CUBIES} cubies (this puzzle has ${W * H * D}).</span>`;
+        return;
+      }
+      if (!_sim) { el.innerHTML = ''; return; }
+      el.innerHTML = `<div style="display:flex;align-items:center;gap:10px;">
+          <span style="font-size:12px;color:#666;">Scrambled state — drag to rotate</span>
+          <button id="reset-view" style="font-size:12px;padding:2px 9px;">Reset view</button>
+        </div>`
+        + `<div id="final-canvas" style="width:100%;max-width:500px;aspect-ratio:1/1;touch-action:none;cursor:grab;user-select:none;"></div>`;
+      document.getElementById('reset-view').addEventListener('click', resetFinalView);
+      redrawFinalView();
+    }
+    // Free camera for the bottom image. The default reproduces the fixed
+    // projection used elsewhere, so it looks unchanged until you drag it.
+    const FINAL_VIEW_HOME = { yaw: -0.583, pitch: 0.527 };
+    let _finalView = { ...FINAL_VIEW_HOME };
+    function resetFinalView() { _finalView = { ...FINAL_VIEW_HOME }; redrawFinalView(); }
+    function redrawFinalView() {
+      const host = document.getElementById('final-canvas');
+      if (!host || !_sim) return;
+      const c = stateAtIndex(_sim.moves.length);   // O(1): the replay cache already sits at the end
+      const N = constCubeN(_sim.W, _sim.H, _sim.D);
+      host.innerHTML = renderStateSVG(c, null, !!N, 420, true, viewMatrix(_finalView.yaw, _finalView.pitch));
     }
     function copyScramble(btn) {
       navigator.clipboard.writeText(document.getElementById('full-scr').textContent).then(() => {
@@ -847,14 +1343,24 @@
       });
     }
 
+    // Either the coloured state just before this move, or the plain
+    // reduced-cuboid schematic, per the "Show shapeshifted state" setting.
+    function moveTooltipSVG(span) {
+      const { face, layer, mod, wide, w, h, d, idx } = span.dataset;
+      if (isStateDiagram() && _sim && idx !== undefined && canRenderState(_sim.W, _sim.H, _sim.D)) {
+        const svg = stateTooltipSVG(+idx);
+        if (svg) return svg;
+      }
+      return cuboidSVG(+w, +h, +d, face, +layer, mod, wide === 'true');
+    }
+
     (function(){
       const tt = document.getElementById('move-tooltip');
       const tti = document.getElementById('move-tooltip-inner');
       document.getElementById('out').addEventListener('mouseover', function(e) {
         const span = e.target.closest('.move[data-face]');
         if (!span) return;
-        const {face, layer, mod, wide, w, h, d} = span.dataset;
-        tti.innerHTML = cuboidSVG(+w, +h, +d, face, +layer, mod, wide === 'true');
+        tti.innerHTML = moveTooltipSVG(span);
         tt.style.display = 'block';
       });
       document.getElementById('out').addEventListener('mouseout', function(e) {
@@ -869,8 +1375,7 @@
         const span = e.target.closest('.move[data-face]');
         if (!span) { tt.style.display = 'none'; return; }
         e.preventDefault();
-        const {face, layer, mod, wide, w, h, d} = span.dataset;
-        tti.innerHTML = cuboidSVG(+w, +h, +d, face, +layer, mod, wide === 'true');
+        tti.innerHTML = moveTooltipSVG(span);
         tt.style.display = 'block';
         const r = span.getBoundingClientRect();
         tt.style.left = Math.min(r.left, window.innerWidth - 210) + 'px';
@@ -880,6 +1385,48 @@
         if (!e.target.closest('#out') && !e.target.closest('#move-tooltip')) tt.style.display = 'none';
       });
     })();
+
+    // Drag the bottom image to orbit it. Bound on document rather than the
+    // element, since #final-canvas is rebuilt on every generate.
+    (function(){
+      let dragging = false, lastX = 0, lastY = 0;
+      const SPEED = 0.011;
+      document.addEventListener('pointerdown', e => {
+        const host = e.target.closest && e.target.closest('#final-canvas');
+        if (!host) return;
+        dragging = true; lastX = e.clientX; lastY = e.clientY;
+        host.style.cursor = 'grabbing';
+        if (host.setPointerCapture) { try { host.setPointerCapture(e.pointerId); } catch (err) {} }
+        e.preventDefault();
+      });
+      document.addEventListener('pointermove', e => {
+        if (!dragging) return;
+        _finalView.yaw += (e.clientX - lastX) * SPEED;
+        // clamp short of the poles: at exactly +/-90 the view degenerates to an edge
+        _finalView.pitch = Math.max(-1.45, Math.min(1.45, _finalView.pitch + (e.clientY - lastY) * SPEED));
+        lastX = e.clientX; lastY = e.clientY;
+        redrawFinalView();
+      });
+      const endDrag = () => {
+        if (!dragging) return;
+        dragging = false;
+        const host = document.getElementById('final-canvas');
+        if (host) host.style.cursor = 'grab';
+      };
+      document.addEventListener('pointerup', endDrag);
+      document.addEventListener('pointercancel', endDrag);
+    })();
+
+    (function(){
+      const overlay = document.getElementById('settings-overlay');
+      document.getElementById('settings-close').addEventListener('click', closeSettings);
+      // click the backdrop (but not the panel itself) to dismiss
+      overlay.addEventListener('click', e => { if (e.target === overlay) closeSettings(); });
+      document.addEventListener('keydown', e => { if (e.key === 'Escape' && !overlay.hidden) closeSettings(); });
+    })();
+
+    loadSettings();   // must precede the first draw: the preview honours these
+    drawCuboid();
   </script>
 </body>
 </html>

@@ -26,6 +26,15 @@
 
   .wrap { max-width: 720px; margin: 0 auto; }
 
+  .backlink {
+    display: inline-block;
+    margin: 0 0 14px;
+    font-size: 0.85rem;
+    color: var(--muted);
+    text-decoration: none;
+  }
+  .backlink:hover { color: var(--text); text-decoration: underline; }
+
   h1 { font-size: 2rem; color: #fff; margin: 0 0 6px; }
   .sub { color: var(--muted); font-size: 0.95rem; margin: 0 0 24px; }
 
@@ -107,15 +116,47 @@
   }
   button:hover, .toggle:hover { background: #2a2d32; border-color: #4b4f57; }
   button:active { background: #34373c; }
+  /* the solver only knows the three-circle board, and only unbandaged */
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+  button:disabled:hover { background: var(--panel-2); border-color: var(--line); }
 
   .toggle { display: inline-flex; align-items: center; gap: 8px; }
   .toggle input { accent-color: #6ea8fe; cursor: pointer; margin: 0; }
 
   .counts { color: var(--muted); font-size: 0.9rem; margin: 16px 0 0; }
+
+  /* the answer written out: a hexagon's letter and a sign for each turn */
+  .plan {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 8px;
+    margin: 12px 0 0;
+    font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+    font-size: 0.9rem;
+    color: var(--muted);
+    user-select: none; -webkit-user-select: none;
+  }
+  .plan span { padding: 1px 4px; border-radius: 4px; cursor: pointer; }
+  .plan span:hover { background: #2f333a; color: var(--text); }
+  .plan .done { opacity: 0.3; }
+  .plan .next { color: #fff; background: #3a3f47; }
+
+  /* stepping through the answer: back, where we are, forward */
+  .nav { display: inline-flex; align-items: center; gap: 8px; }
+  .nav button { padding: 8px 12px; line-height: 1; }
+  .nav #where {
+    font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+    font-size: 0.85rem;
+    color: var(--muted);
+    min-width: 4.5em;
+    text-align: center;
+  }
 </style>
 </head>
 <body>
 <div class="wrap">
+  <a class="backlink" href="../index.html">&#8592; Back to reubogames</a>
+
   <h1>Rotating Puzzle</h1>
   <p class="sub">The rhombitrihexagonal tiling, 3.4.6.4, bowed onto circles — one
     about each hexagon, through the twelve corners of the collar it turns. Every
@@ -128,12 +169,20 @@
   <div class="controls">
     <button type="button" id="scramble">Scramble</button>
     <button type="button" id="reset">Reset puzzle</button>
+    <button type="button" id="solve">Solve</button>
+    <span class="nav" id="nav" style="display:none">
+      <button type="button" id="back" title="Back one move">&#9664;</button>
+      <span id="where"></span>
+      <button type="button" id="step" title="Forward one move">&#9654;</button>
+    </span>
     <label class="toggle"><input type="checkbox" id="invert">Invert controls</label>
     <label class="toggle"><input type="checkbox" id="bandaged">Bandaged</label>
     <label class="toggle"><input type="checkbox" id="three">Three circles</label>
   </div>
 
   <p class="counts" id="hint"></p>
+
+  <div class="plan" id="plan" style="display:none"></div>
 
   <p class="counts" id="counts"></p>
 </div>
@@ -713,7 +762,7 @@ function refresh() {
 // the bandages a collar carries round with it
 const bandsIn = hex => bands.filter(b => b.tiles.every(t => hex.holds.has(t))).map(b => b.el);
 
-function spin(hex, from) {
+function spin(hex, from, ms = SPIN_MS) {
   const els = [hex.hit, ...bandsIn(hex),
                ...hex.collar.flatMap(t => [t.el, ...t.parts.map(p => p.el)])];
   const [cx, cy] = hex.centre;
@@ -734,7 +783,7 @@ function spin(hex, from) {
        earlier than the moment the turn was asked for, and a negative fraction
        run through the easing sends the collar back past where it started —
        a sixth of a turn that jumps to a fifth before it comes down. */
-    const u = Math.min(1, Math.max(0, (now - t0) / SPIN_MS));
+    const u = Math.min(1, Math.max(0, (now - t0) / ms));
     if (u < 1) { place(from * (1 - ease(u))); raf = requestAnimationFrame(step); }
     else stop();
   };
@@ -746,7 +795,7 @@ function spin(hex, from) {
      a sixth from colours that had long since moved. A timer is not throttled
      the same way, so it puts the picture straight whether the frames ran or
      not — and if they did, it has nothing left to do. */
-  backstop = setTimeout(stop, SPIN_MS + 300);
+  backstop = setTimeout(stop, ms + 300);
 }
 
 /* Which way a plain click turns. Right-click is always the other way, so the
@@ -757,6 +806,7 @@ const clickDir = () => (inverted ? -1 : 1);
 // a turn, shown: made at once, then wound back a sixth and played forward
 function turn(hex, dir) {
   if (stuck(hex)) return;                 // a bandage lies across the collar
+  clearPlan();                            // a turn by hand leaves the answer stale
   settle();
   move(hex, dir);
   repaint();
@@ -783,6 +833,8 @@ let onBoard = new Set();
 
 function setPuzzle(p) {
   puzzle = p;
+  kit = null;                               // the solver's tables are one board's
+  bandKit = null;
   hexColour = new Map(p.hexes.map(h => [key(h[0], h[1]), h[2]]));
   boardHexes = p.hexes.map(h => hexAt.get(key(h[0], h[1])));
   onBoard = new Set();
@@ -818,6 +870,1108 @@ function scramble() {
   }
   repaint();
   refresh();
+}
+
+/* =====================================================================
+   THE SOLVER — three circles, unbandaged
+
+   The board cannot be searched. Its states grow by a factor of 4.9 a turn and
+   are still growing freely eight turns out, so the shortest solution is out of
+   reach and what is wanted instead is any solution at all.
+
+   Descending on the number of wrong parts does not give one. Taking the best
+   of every sequence of four turns or fewer walks the board down from about
+   forty wrong parts to two and then stops dead, and those last two are not
+   nearly solved: a meet-in-the-middle from there cannot bridge thirteen turns
+   to the end. Few wrong parts is not the same as few turns away.
+
+   What finishes it is having moves small enough to repair with. Every
+   permutation reachable in six turns disturbs at least seven of the 31 tiles,
+   which is a quarter of the board — too coarse. But commutators of those with
+   each other come down to three tiles: 7176 of them, sixteen turns apiece,
+   each moving six parts and leaving everything else alone. With those in hand
+   a descent can put one thing right without disturbing the rest.
+
+   Both are needed. The three-tile moves are commutators and so even, while a
+   turn is a six-cycle and odd, so a board left an odd permutation from solved
+   can never be finished by three-cycles alone. Searching the short sequences
+   and the three-cycles together settles it: the short ones carry the parity
+   and the bulk of the work, the three-cycles do the last of it.
+
+   The descent is a beam and not a greedy walk. Taking only the single best
+   move oscillates — five thousand turns to get from 46 wrong parts to 31 —
+   where a beam of eight goes to nothing.
+   ===================================================================== */
+
+/* Each board wants its own recipe. Seven circles has fourteen turns where three
+   has six, so every permutation within six turns is over a million of them
+   there against 21,706 here — far too many to write down. It does not need
+   them: a turn moves twelve of its sixty-one tiles rather than twelve of
+   thirty-one, so turns are more local and a four-turn table already holds
+   pieces small enough to commutate. Its three-cycles come out at eight turns,
+   half what they cost on the smaller board. */
+const RECIPE = {
+  three: { depth: 6, macro: 4, seedLen: 6, seedSupport: 8, commSupport: 4, aimDepth: 3,
+           budget: 6000, tries: 4, bandDepth: 5 },
+  /* Seven circles takes far longer and is worth waiting on: it has 54 tiles to
+     place against 28, over a library ten times the size. Measured over five
+     scrambles it wants 28 to 47 seconds, so it is given ninety and two goes at
+     it rather than four short ones. */
+  seven: { depth: 4, macro: 3, seedLen: 3, seedSupport: 12, commSupport: 3, aimDepth: 3,
+           reduce: true, budget: 90000, tries: 2, bandDepth: 6 }
+};
+
+/* Placing tiles rather than counting wrong parts, which the larger board needs.
+
+   Counting is nearly flat over 61 tiles: there is almost always a move that
+   puts one more part right and almost never one that puts many right, so a
+   descent creeps. Sixty rounds of it got from 106 wrong parts to 42 and stuck;
+   a library five times bigger got to 16 in two and a half minutes and stuck
+   too. It is not a matter of waiting longer.
+
+   Counting placed tiles instead gives a staircase to climb. Tiles are taken in
+   a fixed order — the ones fewest cycles can reach first, while there is still
+   room to work — and a move is only allowed if it leaves the placed ones
+   alone.
+
+   That order is the wrong tool for the end. A board can sit three tiles from
+   home and still read as stuck, because the tile the order wants next is one
+   of the three, and the search worries at it instead of finishing them. So
+   past a point the order is dropped and plain counting takes over, which is
+   how the smaller board is solved and which closes from there.
+
+   Two further things the trials insisted on. When nothing improves, the placed
+   tiles are unfrozen a few at a time, since the tiles left are often
+   unreachable without disturbing something. And the best position found is
+   kept: a beam replaced wholesale each round can walk downhill, and one run
+   reached 52 tiles of 54 and wandered back to 49 before giving up. */
+const PLACE_FOCUS = 14;                     // how far past the frontier to look
+const PLACE_ENDGAME = 20;                   // wrong parts at which order is dropped
+const PLACE_RELAX = [[5, 2], [10, 4], [16, 8], [24, 14]];
+const PLACE_GIVE_UP = 34;
+
+const SOLVE_BEAM = 8;
+const SOLVE_AIM_AFTER = 2;                  // rounds without progress before aiming
+const SOLVE_STALL = 12;                     // rounds without progress before restarting
+/* Every colouring met is remembered so the descent does not go round in
+   circles, but a round can throw up tens of thousands of them and the memory
+   is what actually stops the page. Past this the record is dropped and started
+   again; the beam carries on from where it is. */
+const SOLVE_SEEN_CAP = 300000;
+
+const solvable = () => true;
+
+// one letter to a colour, so a whole colouring is a string of one char per part
+const TOKEN = { white: 'W', red: 'R', orange: 'O', yellow: 'Y',
+                green: 'G', blue: 'B', purple: 'P', grey: '.' };
+const GAP = String();                       // joined with nothing between
+
+let kit = null;                             // the solver's tables, built once
+
+/* The board as the solver sees it: its parts in a fixed order, its turns as
+   permutations of them, and the library of moves to descend with. */
+async function buildKit(onStep) {
+  const recipe = puzzle === PUZZLES.three ? RECIPE.three : RECIPE.seven;
+  const seat = tiles.filter(t => onBoard.has(t));
+  const parts = seat.flatMap(t => t.parts);
+  const n = parts.length;
+  const at = new Map(parts.map((p, i) => [p, i]));
+  const tileOf = new Int32Array(n);
+  seat.forEach((t, ti) => t.parts.forEach(p => { tileOf[at.get(p)] = ti; }));
+
+  /* Turn g is hexagon g>>1 taken anticlockwise when g is even and clockwise
+     when it is odd, so g^1 is the same turn the other way. */
+  const gens = [];
+  for (const h of boardHexes) for (const map of [h.acw, h.cw]) {
+    const perm = new Int16Array(n);
+    for (let i = 0; i < n; i++) perm[i] = i;
+    for (const [part, src] of map) perm[at.get(part)] = at.get(src);
+    gens.push(perm);
+  }
+  const compose = (p, q) => {
+    const r = new Int16Array(n);
+    for (let i = 0; i < n; i++) r[i] = p[q[i]];
+    return r;
+  };
+  const invert = p => {
+    const r = new Int16Array(n);
+    for (let i = 0; i < n; i++) r[p[i]] = i;
+    return r;
+  };
+  const support = p => {
+    const s = new Set();
+    for (let i = 0; i < n; i++) if (p[i] !== i) s.add(tileOf[i]);
+    return s.size;
+  };
+
+  // every distinct permutation a short run of turns gives
+  const ident = new Int16Array(n);
+  for (let i = 0; i < n; i++) ident[i] = i;
+  const short = new Map([[ident.join(','), []]]);
+  let layer = [ident];
+  for (let d = 0; d < recipe.depth; d++) {
+    const next = [];
+    for (const p of layer) {
+      const seq = short.get(p.join(','));
+      for (let g = 0; g < gens.length; g++) {
+        const q = compose(p, gens[g]), k = q.join(',');
+        if (short.has(k)) continue;
+        short.set(k, seq.concat(g));
+        next.push(q);
+      }
+    }
+    layer = next;
+  }
+
+  const library = [], seeds = [];
+  for (const [k, seq] of short) {
+    if (!seq.length) continue;
+    const p = Int16Array.from(k.split(',').map(Number));
+    if (seq.length <= recipe.macro) library.push({ p, seq });
+    // the small ones, to commutate with each other
+    if (seq.length <= recipe.seedLen && support(p) <= recipe.seedSupport)
+      seeds.push({ p, seq });
+  }
+  // commutators of the small ones: three tiles apiece, and the repair tool
+  const back = seq => seq.slice().reverse().map(g => g ^ 1);
+  for (const X of seeds) {
+    const Xi = invert(X.p);
+    for (const Y of seeds) {
+      const c = compose(compose(compose(X.p, Y.p), Xi), invert(Y.p));
+      if (support(c) > recipe.commSupport || support(c) === 0) continue;
+      library.push({ p: c, seq: X.seq.concat(Y.seq, back(X.seq), back(Y.seq)) });
+    }
+  }
+  /* Aiming a three-cycle rather than hoping one in the library fits.
+     Conjugating a three-cycle by P moves it onto the tiles P sends its three
+     to, and which those are is the image of its triple under P's permutation
+     of the tiles — three lookups, not a composition of a hundred-odd elements.
+     So every triple that can be reached is indexed cheaply, and the turns are
+     only worked out for the conjugate actually wanted.
+
+     The board needs this. A fixed library of three-tile moves reaches 236 of
+     the 6084 triples of seven circles; conjugation carries that to thousands,
+     which is what lets the last few pieces be put right instead of the descent
+     wandering at four or five wrong parts. */
+  const bases = library.filter(m => support(m.p) === 3);
+  const prefixes = [{ p: ident, seq: [] }];
+  for (let d = 0, edge = [prefixes[0]]; d < recipe.aimDepth; d++) {
+    const next = [];
+    for (const b of edge)
+      for (let g = 0; g < gens.length; g++)
+        next.push({ p: compose(b.p, gens[g]), seq: b.seq.concat(g) });
+    prefixes.push(...next);
+    edge = next;
+  }
+  const tripleOf = p => {
+    const s = new Set();
+    for (let i = 0; i < n; i++) if (p[i] !== i) s.add(tileOf[i]);
+    return [...s].sort((x, y) => x - y).join(',');
+  };
+  const baseTriple = bases.map(m => [...new Set(
+    Array.from({ length: n }, (_, i) => i).filter(i => m.p[i] !== i).map(i => tileOf[i]))]);
+
+  // the parts of each tile, so a tile can be asked whether it is home
+  const tileParts = [];
+  for (let i = 0; i < n; i++) (tileParts[tileOf[i]] = tileParts[tileOf[i]] || []).push(i);
+
+  /* One three-cycle for each triple, kept for the smaller board, where the
+     descent only wants something to reach for when it sticks. */
+  const aim = new Map();
+  /* The larger board wants more: the same three tiles cycled a different way
+     round, or with a different twist on their parts, is a different tool, and
+     placing a tile exactly needs the right one. So the conjugates are kept
+     apart by what they do to the parts of the three tiles, not merely by which
+     tiles they move. */
+  const cycles = recipe.reduce ? [] : null;
+  const seenCycle = new Set();
+  /* The seven-circle board conjugates 1440 three-cycles by 2955 prefixes,
+     which is four million and takes some seconds. Left to run it would lock
+     the page up, so it lets go of the thread now and then and says how far it
+     has got. */
+  for (let pi = 0; pi < prefixes.length; pi++) {
+    if (onStep && (pi & 255) === 0) {
+      onStep(Math.round(100 * pi / prefixes.length));
+      await new Promise(r => setTimeout(r, 0));
+    }
+    // how this prefix moves whole tiles, so a triple can be carried by lookup
+    const P = prefixes[pi].p, tp = new Int16Array(seat.length);
+    /* Which tile each tile is carried to. The conjugate P·c·P⁻¹ moves the
+       part P[j] exactly where c moves j, so the map wanted runs from the tile
+       a part is on to the tile P takes it to — that way round, not the other,
+       or the triples come out belonging to the wrong conjugates. */
+    for (let i = 0; i < n; i++) tp[tileOf[i]] = tileOf[P[i]];
+    const Pi = invert(P), plen = prefixes[pi].seq.length;
+    for (let ci = 0; ci < bases.length; ci++) {
+      const t3 = baseTriple[ci].map(x => tp[x]).sort((x, y) => x - y);
+      const cost = 2 * plen + bases[ci].seq.length;
+      if (!recipe.reduce) {
+        const key = t3.join(',');
+        const had = aim.get(key);
+        if (!had || had.cost > cost) aim.set(key, { cost, pi, ci });
+        continue;
+      }
+      /* What a conjugate does to the three tiles' parts, as a cheap first
+         sieve: it takes three lookups a part, where composing the whole
+         permutation takes a hundred and thirty-nine. Four million conjugates
+         go through here, so almost all of them must be turned away cheaply. */
+      const c = bases[ci].p;
+      let sig = '';
+      for (const t of t3) for (const j of tileParts[t]) sig += ',' + P[c[Pi[j]]];
+      if (seenCycle.has(sig)) continue;
+      seenCycle.add(sig);
+      /* But the sieve lets nine of every ten through that are the same move
+         over again, so what survives is weighed properly. Deduping on the
+         permutation cut 267,520 cycles to 29,660 — and a round of the search
+         is every move tried against every state it is holding, so nine times
+         fewer moves is nine times less work, every round of every attempt. */
+      const p = compose(compose(P, c), Pi);
+      const pk = p.join(',');
+      if (seenCycle.has(pk)) continue;
+      seenCycle.add(pk);
+      const q = invert(p);
+      seenCycle.add(q.join(','));
+      const seq = prefixes[pi].seq.concat(bases[ci].seq, back(prefixes[pi].seq));
+      cycles.push({ p, seq, t3 });
+      cycles.push({ p: q, seq: back(seq), t3 });
+    }
+  }
+
+  /* Which tile to place first. A tile few cycles can reach is one to settle
+     while there is still room to work, so the scarce ones go to the front and
+     the well-served ones are left till last. */
+  let order = null, rank = null, moves = null;
+  if (recipe.reduce) {
+    const touch = new Map();
+    for (const mv of cycles) for (const t of mv.t3) touch.set(t, (touch.get(t) || 0) + 1);
+    order = seat.map((_, t) => t).filter(t => tileParts[t].length > 1)
+      .sort((a, b) => (touch.get(a) || 0) - (touch.get(b) || 0));
+    rank = new Int16Array(seat.length).fill(9999);
+    order.forEach((t, j) => { rank[t] = j; });
+    for (const mv of cycles) mv.low = Math.min(rank[mv.t3[0]], rank[mv.t3[1]], rank[mv.t3[2]]);
+    // a macro disturbs whatever it disturbs, and has no triple to aim
+    const lib = library.map(m => {
+      let low = 9999;
+      for (let i = 0; i < n; i++) if (m.p[i] !== i) low = Math.min(low, rank[tileOf[i]]);
+      return { p: m.p, seq: m.seq, t3: null, low };
+    });
+    moves = cycles.concat(lib);
+  }
+
+  return { parts, n, gens, library, short, compose, invert, tileOf, tileParts,
+           budget: recipe.budget, tries: recipe.tries,
+           bases, prefixes, aim, support, cycles, order, rank, moves,
+           reduce: !!recipe.reduce,
+           /* A colouring is one letter to a part, so the string is both the
+              board and the key it is remembered by. Colour names would not do:
+              they are words, and a string of them cannot be indexed by part,
+              which is what the permutations are written over. */
+           read: () => parts.map(p => TOKEN[p.colour]).join(GAP),
+           // and the colouring it is solved in: the point each part faces
+           home: seat.flatMap(t => t.on.map(pt => TOKEN[colourAt(...pt)])).join(GAP) };
+}
+
+/* Runs of turns on the one hexagon come to a single turn, or to none, and the
+   long way round a sixth-turn is the short way back. Applied until it settles,
+   because collapsing one run can bring two others together. */
+function simplifySolution(seq) {
+  let out = seq, changed = true;
+  while (changed) {
+    changed = false;
+    const next = [];
+    for (let i = 0; i < out.length; ) {
+      const hex = out[i] >> 1;
+      let turn = 0, j = i;
+      while (j < out.length && (out[j] >> 1) === hex) { turn += (out[j] & 1) ? -1 : 1; j++; }
+      turn = ((turn % 6) + 6) % 6;
+      const many = !turn ? 0 : (turn <= 3 ? turn : 6 - turn), dir = turn <= 3 ? 0 : 1;
+      // only a run that actually came out shorter is worth going round again
+      // for — saying so whenever a run was merged would never terminate
+      if (many !== j - i) changed = true;
+      for (let k = 0; k < many; k++) next.push(hex * 2 + dir);
+      i = j;
+    }
+    out = next;
+  }
+  return out;
+}
+
+/* Window optimisation. The answer is a run of commutators laid end to end, and
+   where one ends and the next begins they undo a good deal of each other, so
+   stretches of it are longer than they need to be.
+
+   Every permutation within six turns is already written down — the library was
+   sifted out of that table — so tightening is a lookup and not a search. Take
+   a stretch of the answer, work out what it does, and if the table knows a
+   shorter run of turns that does the same, swap it in. What the stretch does
+   is read off prefix permutations: if P[k] is what the first k turns come to,
+   the stretch from i to j does P[i] undone and then P[j].
+
+   Longest stretches first, since a long one swapped for six turns is the
+   biggest win, and round again from the start after each swap: a swap changes
+   what its neighbours sit next to, and the stretch that would not tighten
+   before may tighten now. */
+const TIGHTEN_WINDOW = 14;
+
+function tightenSolution(seq) {
+  const { n, gens, short, compose, invert } = kit;
+  const ident = new Int16Array(n);
+  for (let i = 0; i < n; i++) ident[i] = i;
+  let out = seq.slice(), again = true;
+  while (again) {
+    again = false;
+    const P = [ident];
+    for (let k = 0; k < out.length; k++) P.push(compose(P[k], gens[out[k]]));
+    for (let i = 0; i < out.length && !again; i++) {
+      const undo = invert(P[i]);
+      const far = Math.min(out.length, i + TIGHTEN_WINDOW);
+      for (let j = far; j > i + 1; j--) {
+        const found = short.get(compose(undo, P[j]).join(','));
+        if (!found || found.length >= j - i) continue;
+        out = out.slice(0, i).concat(found, out.slice(j));
+        again = true;
+        break;
+      }
+    }
+  }
+  return out;
+}
+
+/* Moves aimed at what is actually still wrong. A three-cycle is only worth
+   trying if it touches a tile that is out of place, and near the end there are
+   few of those, so the list stays short however many triples are indexed.
+   Both ways round: the inverse of a three-cycle is the same three tiles cycled
+   the other way, and only one of the two will be the one wanted. */
+function aimedRepairs(state) {
+  const { aim, bases, prefixes, compose, invert, tileOf, home } = kit;
+  const bad = new Set();
+  for (let i = 0; i < state.length; i++)
+    if (state[i] !== home[i]) bad.add(tileOf[i]);
+  if (!bad.size) return [];
+  const back = seq => seq.slice().reverse().map(g => g ^ 1);
+  const out = [];
+  for (const [key, hit] of aim) {
+    if (!key.split(',').some(x => bad.has(+x))) continue;
+    const P = prefixes[hit.pi], c = bases[hit.ci];
+    const p = compose(compose(P.p, c.p), invert(P.p));
+    const seq = P.seq.concat(c.seq, back(P.seq));
+    out.push({ p, seq });
+    out.push({ p: invert(p), seq: back(seq) });
+  }
+  return out;
+}
+
+/* Placing the tiles one by one, in the order laid down when the kit was built.
+   Scored on how many of that order are home, and once few parts are wrong, on
+   the wrong parts alone — see the note beside PLACE_ENDGAME for why both are
+   needed. One number covers the two, so "the best position so far" always
+   means something and the search can be put back on it when it drifts. */
+async function placeSolution(from, goal, walk, miss, onStep) {
+  const { order, rank, tileParts, moves } = kit;
+  const placed = s => {
+    let j = 0;
+    outer: for (; j < order.length; j++) {
+      for (const i of tileParts[order[j]]) if (s[i] !== goal[i]) break outer;
+    }
+    return j;
+  };
+  const score = (pre, w) =>
+    w <= PLACE_ENDGAME ? 100000 - w * 100 + pre : pre * 100 - w;
+  const trail = m => {
+    const seq = [];
+    for (let node = m; node.via; node = node.back) seq.unshift(...node.via);
+    return seq;
+  };
+
+  for (let attempt = 0; attempt < kit.tries; attempt++) {
+    const t0 = performance.now();
+    const root = { s: from, via: null, back: null, pre: placed(from), w: miss(from) };
+    root.sc = score(root.pre, root.w);
+    let beam = [root], top = root, idle = 0, relax = 0, round = 0;
+    const seen = new Set([from]);
+    while (performance.now() - t0 < kit.budget) {
+      const endgame = beam[0].w <= PLACE_ENDGAME;
+      // late on, only what touches a tile still wrong is worth trying
+      const bad = new Set();
+      if (endgame)
+        for (let i = 0; i < beam[0].s.length; i++)
+          if (beam[0].s[i] !== goal[i]) bad.add(kit.tileOf[i]);
+
+      const cand = [];
+      for (const b of beam) {
+        const floor = Math.max(0, b.pre - relax);
+        const ceiling = b.pre + PLACE_FOCUS + relax * 4;
+        for (const m of moves) {
+          if (endgame) {
+            if (m.t3 && !m.t3.some(t => bad.has(t))) continue;
+          } else {
+            if (m.low < floor) continue;             // would disturb a placed tile
+            if (m.t3 && m.low > ceiling) continue;   // too far ahead to be useful yet
+          }
+          const s = walk(b.s, m.p);
+          if (seen.has(s)) continue;
+          seen.add(s);
+          const w = miss(s);
+          if (w === 0) return trail({ via: m.seq, back: b });
+          const pre = placed(s);
+          cand.push({ s, via: m.seq, back: b, pre, w, sc: score(pre, w), r: Math.random() });
+        }
+      }
+      if (!cand.length) break;
+      cand.sort((x, y) => y.sc - x.sc || x.r - y.r);
+      beam = cand.slice(0, SOLVE_BEAM);
+      if (seen.size > SOLVE_SEEN_CAP) { seen.clear(); for (const b of beam) seen.add(b.s); }
+
+      if (beam[0].sc > top.sc) { top = beam[0]; idle = 0; relax = 0; }
+      else {
+        idle++;
+        for (const [after, r] of PLACE_RELAX) if (idle === after) relax = r;
+        if (idle >= PLACE_GIVE_UP) break;
+        // drifted below the best seen: go back to it rather than wander on
+        if (idle % 6 === 0 && beam[0].sc < top.sc) beam = [top];
+      }
+      if (onStep) onStep(beam[0].w, beam[0].pre, order.length);
+      if (++round % 2 === 0) await new Promise(r => setTimeout(r, 0));
+    }
+  }
+  return null;
+}
+
+/* =====================================================================
+   SOLVING A BANDAGED BOARD
+
+   A turn shifts the colours the same way whether or not anything is glued, so
+   every permutation already worked out still holds. What changes is which runs
+   of turns may be made at all, and where the bandages finish.
+
+   From a scrambled arrangement barely one move in fifty of the library is
+   playable; from the home arrangement it is one in three. So the bandages are
+   walked home first — there are only 153 arrangements on three circles and
+   72,259 on seven, so the shortest legal way home from every one of them is a
+   breadth-first search done once. After that the board is solved with runs
+   that put the bandages back where they found them. Those runs compose, so
+   among them the bandages can be forgotten.
+
+   And it cannot come unstuck for want of reach: a legal run from solved that
+   ends with the bandages home is itself one of those runs, so whatever
+   colouring the walk home leaves is one they can undo.
+
+   Three things the board then insists on.
+
+   The tiles under the bandages are not ordinary tiles. A glued trio travels as
+   one piece for ever, so no three-tile move can touch those places and they
+   have to be seated first — which is its own small puzzle, six blocks over six
+   places on seven circles, solved outright rather than searched.
+
+   The free tiles want moves aimed at them, and one aimed move per trio is not
+   enough: the same three tiles cycled with a different twist is a different
+   tool, and keeping only one threw away every twist the endgame needs.
+
+   And parity. Where every free triangle is a distinct piece, a residual that
+   swaps two of them is odd, and three-cycles and twists — all even — can never
+   finish it. It is read off the colours after seating and put right with one
+   odd move, after which only even moves may play or the fix is undone.
+   ===================================================================== */
+
+let bandKit = null;                         // built on demand, one board's
+
+async function buildBandKit(onStep) {
+  const breathe = async m => { if (onStep) onStep(m); await new Promise(r => setTimeout(r, 0)); };
+  const recipe = puzzle === PUZZLES.three ? RECIPE.three : RECIPE.seven;
+  const n = kit.n, tileOf = kit.tileOf, back = s => s.slice().reverse().map(g => g ^ 1);
+  const board = tiles.filter(t => onBoard.has(t));
+  const at = new Map(board.map((t, i) => [t, i]));
+
+  // the bandage model: what each collar holds, and where a turn takes it
+  const holds = boardHexes.map(h => new Set(h.collar.map(t => at.get(t))));
+  const goTile = boardHexes.map(h => [h.goACW, h.goCW].map(m => {
+    const a = new Int16Array(board.length);
+    for (let i = 0; i < board.length; i++) a[i] = i;
+    for (const [from, to] of m) a[at.get(from)] = at.get(to);
+    return a;
+  }));
+  const HOME = puzzle.bands().map(b => b.map(t => at.get(t)).sort((x, y) => x - y));
+  const cfgKey = cfg => cfg.map(b => b.join('.')).sort().join('|');
+  const HOMEKEY = cfgKey(HOME);
+  const canTurn = (cfg, h) => cfg.every(b => {
+    let m = 0;
+    for (const t of b) if (holds[h].has(t)) m++;
+    return m === 0 || m === b.length;
+  });
+  const shove = (cfg, h, dir) => {
+    const g = goTile[h][dir];
+    return cfg.map(b => b.every(t => holds[h].has(t))
+      ? b.map(t => g[t]).sort((x, y) => x - y) : b);
+  };
+  const playable = (cfg, seq) => {
+    let c = cfg;
+    for (const g of seq) {
+      if (!canTurn(c, g >> 1)) return null;
+      c = shove(c, g >> 1, g & 1);
+    }
+    return c;
+  };
+
+  // the shortest legal way home, from every arrangement there is
+  await breathe('finding the way home for the bandages');
+  const homeWay = new Map([[HOMEKEY, []]]);
+  {
+    let edge = [HOME];
+    while (edge.length) {
+      const next = [];
+      for (const cfg of edge) {
+        const from = homeWay.get(cfgKey(cfg));
+        for (let h = 0; h < boardHexes.length; h++) {
+          if (!canTurn(cfg, h)) continue;
+          for (const dir of [0, 1]) {
+            const c = shove(cfg, h, dir), key = cfgKey(c);
+            if (homeWay.has(key)) continue;
+            homeWay.set(key, [h * 2 + (dir ^ 1)].concat(from));
+            next.push(c);
+          }
+        }
+      }
+      edge = next;
+    }
+  }
+
+  /* Runs that put the bandages back are closed walks at home, and two ways out
+     to the same arrangement make one. The routes kept must come in by
+     different ways, though: routes sharing a last turn pair into walks where
+     that turn and its undoing cancel, leaving a shorter walk over again. */
+  await breathe('gathering the moves that put the bandages back');
+  const routes = new Map([[HOMEKEY, [[]]]]);
+  {
+    let edge = [{ cfg: HOME, key: HOMEKEY }];
+    for (let d = 0; d < recipe.bandDepth; d++) {
+      const next = [];
+      for (const { cfg, key } of edge) {
+        const way = routes.get(key)[0];
+        for (let h = 0; h < boardHexes.length; h++) {
+          if (!canTurn(cfg, h)) continue;
+          for (const dir of [0, 1]) {
+            const c = shove(cfg, h, dir), ck = cfgKey(c);
+            let list = routes.get(ck);
+            if (!list) { routes.set(ck, list = []); next.push({ cfg: c, key: ck }); }
+            if (list.length < 8) list.push(way.concat(h * 2 + dir));
+          }
+        }
+      }
+      edge = next;
+    }
+  }
+  const keepers = [], seenK = new Set();
+  const keep = (p, seq) => {
+    const pk = p.join(',');
+    if (seenK.has(pk)) return null;
+    seenK.add(pk);
+    const m = { p, seq, sup: kit.support(p) };
+    keepers.push(m);
+    return m;
+  };
+  const permOf = seq => {
+    let p = null;
+    for (const g of seq) p = p === null ? kit.gens[g] : kit.compose(p, kit.gens[g]);
+    return p;
+  };
+  for (const ways of routes.values())
+    for (let j = 1; j < ways.length; j++) {
+      const a = ways[0].concat(back(ways[j]));
+      if (a.length) keep(permOf(a), a);
+      const b = ways[j].concat(back(ways[0]));
+      if (b.length) keep(permOf(b), b);
+    }
+
+  // ---- the glued blocks ---------------------------------------------------
+  const tileParts = kit.tileParts;
+  const blockTiles = new Set();
+  for (const b of HOME) for (const t of b) blockTiles.add(t);
+  const blockParts = [];
+  for (const t of blockTiles) for (const i of tileParts[t]) blockParts.push(i);
+  const movable = [];
+  for (let t = 0; t < board.length; t++) if (tileParts[t] && tileParts[t].length > 1) movable.push(t);
+  const freeTiles = movable.filter(t => !blockTiles.has(t));
+
+  /* A glued block can only sit where a bandage sits, so a keeper projects to a
+     permutation of the block places alone. That puzzle is small enough to
+     solve outright: one Dijkstra out from the seated colouring gives the
+     cheapest seating for every block colouring that can arise. */
+  await breathe('working out how to seat the glued pieces');
+  const bpAt = new Int16Array(n).fill(-1);
+  blockParts.forEach((i, j) => { bpAt[i] = j; });
+  const actions = new Map();
+  for (const m of keepers) {
+    const bp = new Int16Array(blockParts.length);
+    let moves = false;
+    for (let j = 0; j < blockParts.length; j++) {
+      const to = bpAt[m.p[blockParts[j]]];
+      if (to < 0) throw new Error('a keeper that breaks a block');
+      bp[j] = to;
+      if (to !== j) moves = true;
+    }
+    if (!moves) continue;
+    const key = bp.join(',');
+    const had = actions.get(key);
+    if (!had || had.seq.length > m.seq.length) actions.set(key, { bp, p: m.p, seq: m.seq });
+  }
+  const goalBlocks = blockParts.map(i => kit.home[i]).join(GAP);
+  const seated = new Map([[goalBlocks, { cost: 0, act: null }]]);
+  {
+    const bApply = (str, bp) => {
+      let o = GAP;
+      for (let j = 0; j < bp.length; j++) o += str[bp[j]];
+      return o;
+    };
+    const undo = [...actions.values()].map(a => {
+      const r = new Int16Array(a.bp.length);
+      for (let j = 0; j < a.bp.length; j++) r[a.bp[j]] = j;
+      return { bp: r, a };
+    });
+    const q = [{ cost: 0, key: goalBlocks }];
+    const push = it => {
+      q.push(it);
+      let i = q.length - 1;
+      while (i > 0) {
+        const p = (i - 1) >> 1;
+        if (q[p].cost <= q[i].cost) break;
+        [q[p], q[i]] = [q[i], q[p]];
+        i = p;
+      }
+    };
+    const pop = () => {
+      const top = q[0], last = q.pop();
+      if (q.length) {
+        q[0] = last;
+        let i = 0;
+        for (;;) {
+          const l = 2 * i + 1, r = l + 1;
+          let m = i;
+          if (l < q.length && q[l].cost < q[m].cost) m = l;
+          if (r < q.length && q[r].cost < q[m].cost) m = r;
+          if (m === i) break;
+          [q[i], q[m]] = [q[m], q[i]];
+          i = m;
+        }
+      }
+      return top;
+    };
+    while (q.length) {
+      const { cost, key } = pop();
+      if (seated.get(key).cost !== cost) continue;
+      for (const { bp, a } of undo) {
+        const nk = bApply(key, bp), nc = cost + a.seq.length;
+        const had = seated.get(nk);
+        if (had && had.cost <= nc) continue;
+        seated.set(nk, { cost: nc, act: a });
+        push({ cost: nc, key: nk });
+      }
+    }
+  }
+
+  // ---- aimed cycles over the free tiles -----------------------------------
+  await breathe('building the moves that aim at single tiles');
+  const seeds = keepers.slice().sort((a, b) => a.sup - b.sup || a.seq.length - b.seq.length)
+    .slice(0, 700);
+  const cycles = [];
+  for (const X of seeds) {
+    const Xi = kit.invert(X.p);
+    for (const Y of seeds) {
+      const p = kit.compose(kit.compose(kit.compose(X.p, Y.p), Xi), kit.invert(Y.p));
+      if (kit.support(p) !== 3) continue;
+      const m = keep(p, X.seq.concat(Y.seq, back(X.seq), back(Y.seq)));
+      if (m) cycles.push(m);
+    }
+  }
+  const tripleOf = p => {
+    const s = new Set();
+    for (let i = 0; i < n; i++) if (p[i] !== i) s.add(tileOf[i]);
+    return [...s].sort((x, y) => x - y);
+  };
+  for (const c of cycles) c.t3 = tripleOf(c.p);
+  // the same three tiles twisted differently is a different tool, so keep them
+  const variants = new Map();
+  for (const c of cycles) {
+    const key = c.t3.join(',');
+    let list = variants.get(key);
+    if (!list) variants.set(key, list = new Map());
+    let sig = GAP;
+    for (const t of c.t3) for (const j of tileParts[t]) sig += ',' + c.p[j];
+    const had = list.get(sig);
+    if (!had || had.seq.length > c.seq.length) list.set(sig, c);
+  }
+
+  await breathe('carrying those moves round the board');
+  const conjMaps = new Map();
+  for (const m of keepers) {
+    if (m.seq.length > 26) continue;
+    const tm = new Int16Array(board.length);
+    for (let i = 0; i < n; i++) tm[tileOf[i]] = tileOf[m.p[i]];
+    const mk = tm.join(',');
+    const had = conjMaps.get(mk);
+    if (!had || had.m.seq.length > m.seq.length) conjMaps.set(mk, { tm, m });
+  }
+  const conjs = [...conjMaps.values()].filter(c => c.tm.some((v, i) => v !== i));
+
+  /* Which triples an aimed cycle can be carried to is the orbit of the ones
+     already had under those maps. Cheapest chain first, so a triple far from
+     any base cycle is still reached by as few turns as it can be. */
+  const reach = new Map();
+  {
+    const q = [];
+    const push = it => {
+      q.push(it);
+      let i = q.length - 1;
+      while (i > 0) {
+        const p = (i - 1) >> 1;
+        if (q[p].cost <= q[i].cost) break;
+        [q[p], q[i]] = [q[i], q[p]];
+        i = p;
+      }
+    };
+    const pop = () => {
+      const top = q[0], last = q.pop();
+      if (q.length) {
+        q[0] = last;
+        let i = 0;
+        for (;;) {
+          const l = 2 * i + 1, r = l + 1;
+          let m = i;
+          if (l < q.length && q[l].cost < q[m].cost) m = l;
+          if (r < q.length && q[r].cost < q[m].cost) m = r;
+          if (m === i) break;
+          [q[i], q[m]] = [q[m], q[i]];
+          i = m;
+        }
+      }
+      return top;
+    };
+    for (const [key, list] of variants) {
+      let cheap = Infinity;
+      for (const c of list.values()) cheap = Math.min(cheap, c.seq.length);
+      reach.set(key, { cost: cheap, base: true, via: null });
+    }
+    for (const [key, node] of reach) push({ cost: node.cost, key });
+    while (q.length) {
+      const { cost, key } = pop();
+      if (reach.get(key).cost !== cost) continue;
+      const t3 = key.split(',').map(Number);
+      for (const { tm, m } of conjs) {
+        const nk = [tm[t3[0]], tm[t3[1]], tm[t3[2]]].sort((x, y) => x - y).join(',');
+        const nc = cost + 2 * m.seq.length;
+        const had = reach.get(nk);
+        if (had && had.cost <= nc) continue;
+        reach.set(nk, { cost: nc, base: false, via: { from: key, by: m } });
+        push({ cost: nc, key: nk });
+      }
+    }
+  }
+  const built = new Map();
+  const make = key => {
+    if (built.has(key)) return built.get(key);
+    const node = reach.get(key);
+    let out;
+    if (node.base) out = [...variants.get(key).values()].slice(0, 12)
+      .map(c => ({ p: c.p, seq: c.seq }));
+    else {
+      const inner = make(node.via.from), P = node.via.by;
+      const Pi = kit.invert(P.p), Pb = back(P.seq);
+      out = inner.map(v => ({ p: kit.compose(kit.compose(P.p, v.p), Pi),
+                              seq: P.seq.concat(v.seq, Pb) }));
+    }
+    built.set(key, out);
+    return out;
+  };
+  const aimed = [], seenAim = new Set();
+  for (const key of reach.keys()) {
+    const t3 = key.split(',').map(Number);
+    for (const v of make(key))
+      for (const [p, seq] of [[v.p, v.seq], [kit.invert(v.p), back(v.seq)]]) {
+        const pk = p.join(',');
+        if (seenAim.has(pk)) continue;
+        seenAim.add(pk);
+        aimed.push({ p, seq, t3 });
+      }
+  }
+
+  /* A tile turned where it stands is wrong in every part and out of place in
+     none, and no three-tile move touches it alone. Two variants of one triple
+     compose to exactly that: the tile motion cancels, the twist is left. */
+  await breathe('building the moves that turn a tile in place');
+  const byTriple = new Map();
+  aimed.forEach((c, i) => {
+    const key = c.t3.join(',');
+    let l = byTriple.get(key);
+    if (!l) byTriple.set(key, l = []);
+    l.push(i);
+  });
+  let twists = [];
+  const seenTw = new Set();
+  for (const list of byTriple.values())
+    for (const ci of list) for (const cj of list) {
+      if (ci === cj) continue;
+      const p = kit.compose(aimed[ci].p, aimed[cj].p);
+      const sup = kit.support(p);
+      if (sup === 0 || sup > 2) continue;
+      const pk = p.join(',');
+      if (seenTw.has(pk)) continue;
+      seenTw.add(pk);
+      twists.push({ p, seq: aimed[ci].seq.concat(aimed[cj].seq), t3: tripleOf(p) });
+    }
+  {
+    const bestTw = new Map();
+    for (const tw of twists) {
+      const key = tw.t3.join(',');
+      const had = bestTw.get(key);
+      if (!had || had.seq.length > tw.seq.length) bestTw.set(key, tw);
+    }
+    const grow = [...bestTw.entries()].map(([key, tw]) => ({ key, tw }));
+    while (grow.length) {
+      const { key, tw } = grow.shift();
+      const spots = key.split(',').map(Number);
+      for (const { tm, m } of conjs) {
+        const nk = spots.map(t => tm[t]).sort((x, y) => x - y).join(',');
+        const nc = tw.seq.length + 2 * m.seq.length;
+        const had = bestTw.get(nk);
+        if (had && had.seq.length <= nc) continue;
+        const p = kit.compose(kit.compose(m.p, tw.p), kit.invert(m.p));
+        const nt = { p, seq: m.seq.concat(tw.seq, back(m.seq)), t3: nk.split(',').map(Number) };
+        bestTw.set(nk, nt);
+        grow.push({ key: nk, tw: nt });
+      }
+    }
+    twists = [];
+    for (const tw of bestTw.values()) {
+      twists.push(tw);
+      twists.push({ p: kit.invert(tw.p), seq: back(tw.seq), t3: tw.t3 });
+    }
+  }
+
+  // ---- parity over the free triangles -------------------------------------
+  const freeTri = freeTiles.filter(t => board[t].sides === 3);
+  const triName = t => tileParts[t].map(i => kit.home[i]).sort().join(GAP);
+  const triHome = new Map(freeTri.map(t => [triName(t), t]));
+  // where two free triangles look alike, a swap of them is no obstruction at
+  // all, and reading a parity off the colours would be reading it wrongly
+  const triTold = triHome.size === freeTri.length;
+  const cycleSign = to => {
+    const seen = new Set();
+    let sign = 0;
+    for (const t of freeTri) {
+      if (seen.has(t)) continue;
+      let len = 0, x = t;
+      do { seen.add(x); x = to.get(x); len++; } while (x !== t && !seen.has(x));
+      if (len % 2 === 0) sign ^= 1;
+    }
+    return sign;
+  };
+  const triParity = s => {
+    if (!triTold) return 0;
+    const to = new Map();
+    for (const t of freeTri) {
+      const home = triHome.get(tileParts[t].map(i => s[i]).sort().join(GAP));
+      if (home === undefined) return 0;
+      to.set(t, home);
+    }
+    return cycleSign(to);
+  };
+  const moveSign = p => {
+    if (!triTold) return 0;
+    const to = new Map();
+    for (const t of freeTri) to.set(t, tileOf[p[tileParts[t][0]]]);
+    return cycleSign(to);
+  };
+
+  const blockSafe = keepers.filter(m => {
+    for (const i of blockParts) if (m.p[i] !== i) return false;
+    return true;
+  });
+  let fixer = null;
+  for (const m of blockSafe) {
+    if (!moveSign(m.p)) continue;
+    if (!fixer || fixer.seq.length > m.seq.length) fixer = m;
+  }
+  // stage two must not undo the parity fix, so only even moves may play in it
+  const evenSafe = blockSafe.filter(m => !moveSign(m.p))
+    .map(m => ({ p: m.p, seq: m.seq, t3: null }));
+
+  // ---- the order the free tiles are placed in -----------------------------
+  const touch = new Map();
+  for (const c of aimed) for (const t of c.t3) touch.set(t, (touch.get(t) || 0) + 1);
+  const order = freeTiles.slice().sort((a, b) => (touch.get(a) || 0) - (touch.get(b) || 0));
+  const rank = new Int16Array(board.length).fill(9999);
+  order.forEach((t, j) => { rank[t] = j; });
+  const moves = aimed.concat(twists, evenSafe);
+  for (const m of moves) {
+    let low = 9999;
+    for (let i = 0; i < n; i++) if (m.p[i] !== i) low = Math.min(low, rank[tileOf[i]]);
+    m.low = low;
+  }
+
+  return { HOME, cfgKey, canTurn, shove, playable, homeWay, keepers, seated,
+           blockParts, goalBlocks, order, rank, moves, tileParts, fixer,
+           triParity, board };
+}
+
+/* Where the bandages are now, as the solver counts tiles. */
+function bandNow(bk) {
+  const board = bk.board, at = new Map(board.map((t, i) => [t, i]));
+  return bands.map(b => b.tiles.map(t => at.get(t)).sort((x, y) => x - y));
+}
+
+async function bandSolution(onStep) {
+  const bk = bandKit, n = kit.n, goal = kit.home, tileOf = kit.tileOf;
+  const walk = (s, p) => {
+    let o = GAP;
+    for (let i = 0; i < p.length; i++) o += s[p[i]];
+    return o;
+  };
+  const miss = s => {
+    let n2 = 0;
+    for (let i = 0; i < s.length; i++) if (s[i] !== goal[i]) n2++;
+    return n2;
+  };
+  const start = kit.read();
+  const way = bk.homeWay.get(bk.cfgKey(bandNow(bk)));
+  if (!way) return null;
+  let s = start, seq = way.slice();
+  for (const g of way) s = walk(s, kit.gens[g]);
+
+  // seat the glued blocks, straight off the table
+  for (;;) {
+    const node = bk.seated.get(bk.blockParts.map(i => s[i]).join(GAP));
+    if (!node) return null;
+    if (!node.act) break;
+    s = walk(s, node.act.p);
+    seq = seq.concat(node.act.seq);
+  }
+  if (bk.triParity(s) === 1) {
+    if (!bk.fixer) return null;
+    s = walk(s, bk.fixer.p);
+    seq = seq.concat(bk.fixer.seq);
+  }
+
+  const placed = t => {
+    let j = 0;
+    outer: for (; j < bk.order.length; j++)
+      for (const i of bk.tileParts[bk.order[j]]) if (t[i] !== goal[i]) break outer;
+    return j;
+  };
+  const score = (pre, w) => w <= PLACE_ENDGAME ? 100000 - w * 100 + pre : pre * 100 - w;
+  const trail = m => {
+    const out = [];
+    for (let node = m; node.via; node = node.back) out.unshift(...node.via);
+    return out;
+  };
+  for (let attempt = 0; attempt < kit.tries; attempt++) {
+    const t0 = performance.now();
+    const root = { s, via: null, back: null, pre: placed(s), w: miss(s) };
+    root.sc = score(root.pre, root.w);
+    let beam = [root], top = root, idle = 0, relax = 0, round = 0;
+    const seen = new Set([s]);
+    while (performance.now() - t0 < kit.budget) {
+      const endgame = beam[0].w <= PLACE_ENDGAME;
+      const bad = new Set();
+      if (endgame)
+        for (let i = 0; i < beam[0].s.length; i++)
+          if (beam[0].s[i] !== goal[i]) bad.add(tileOf[i]);
+      const cand = [];
+      for (const b of beam) {
+        const floor = Math.max(0, b.pre - relax);
+        const ceiling = b.pre + PLACE_FOCUS + relax * 4;
+        for (const m of bk.moves) {
+          if (endgame) { if (m.t3 && !m.t3.some(t => bad.has(t))) continue; }
+          else { if (m.low < floor) continue; if (m.t3 && m.low > ceiling) continue; }
+          const t = walk(b.s, m.p);
+          if (seen.has(t)) continue;
+          seen.add(t);
+          const w = miss(t);
+          if (w === 0) return seq.concat(trail({ via: m.seq, back: b }));
+          const pre = placed(t);
+          cand.push({ s: t, via: m.seq, back: b, pre, w, sc: score(pre, w), r: Math.random() });
+        }
+      }
+      if (!cand.length) break;
+      cand.sort((x, y) => y.sc - x.sc || x.r - y.r);
+      beam = cand.slice(0, SOLVE_BEAM);
+      if (seen.size > SOLVE_SEEN_CAP) { seen.clear(); for (const b of beam) seen.add(b.s); }
+      if (beam[0].sc > top.sc) { top = beam[0]; idle = 0; relax = 0; }
+      else {
+        idle++;
+        for (const [after, r] of PLACE_RELAX) if (idle === after) relax = r;
+        if (idle >= PLACE_GIVE_UP) break;
+        if (idle % 6 === 0 && beam[0].sc < top.sc) beam = [top];
+      }
+      if (onStep) onStep(beam[0].w, beam[0].pre, bk.order.length);
+      if (++round % 2 === 0) await new Promise(r => setTimeout(r, 0));
+    }
+  }
+  return null;
+}
+
+/* The descent. Yields to the page between rounds so the button can say what it
+   is doing, and is tried again on a fresh tie-break if a round of it stalls —
+   the time it takes varies a good deal from one scramble to the next. */
+async function findSolution(onStep) {
+  const goal = kit.home, from = kit.read();
+  // the turned board, built straight as a string: it is its own key
+  const walk = (s, p) => {
+    let o = GAP;
+    for (let i = 0; i < p.length; i++) o += s[p[i]];
+    return o;
+  };
+  const miss = s => {
+    let n = 0;
+    for (let i = 0; i < s.length; i++) if (s[i] !== goal[i]) n++;
+    return n;
+  };
+  if (bandaged) return bandSolution(onStep);
+  if (kit.reduce) return placeSolution(from, goal, walk, miss, onStep);
+  for (let attempt = 0; attempt < kit.tries; attempt++) {
+    const t0 = performance.now();
+    /* Each candidate remembers the one it came from and the move that got it
+       there, rather than the whole run of turns. Carrying the run would mean
+       building an array for every candidate of every round — tens of thousands
+       of them, growing by sixteen turns a round — which is enough allocation on
+       its own to bring the page down. Only the winner's is ever assembled. */
+    const trail = m => {
+      const seq = [];
+      for (let node = m; node.via; node = node.back) seq.unshift(...node.via);
+      return seq;
+    };
+    let beam = [{ s: from, via: null, back: null }];
+    const seen = new Set([from]);
+    let floor = miss(from), idle = 0, round = 0;
+    while (performance.now() - t0 < kit.budget) {
+      /* While the descent is still finding its way down, the library is enough
+         and is the same every round. Once it sticks, the moves that will shift
+         it are the ones aimed at the tiles still wrong, so those are worked out
+         for where it has got to and tried alongside. */
+      const moves = idle >= SOLVE_AIM_AFTER
+        ? kit.library.concat(aimedRepairs(beam[0].s)) : kit.library;
+      const cand = [];
+      for (const b of beam) for (const m of moves) {
+        const s = walk(b.s, m.p);
+        if (seen.has(s)) continue;
+        seen.add(s);
+        const w = miss(s);
+        if (w === 0) return trail({ via: m.seq, back: b });
+        cand.push({ s, via: m.seq, back: b, w, r: Math.random() });
+      }
+      if (!cand.length) break;
+      cand.sort((x, y) => x.w - y.w || x.r - y.r);
+      beam = cand.slice(0, SOLVE_BEAM);
+      if (seen.size > SOLVE_SEEN_CAP) { seen.clear(); for (const b of beam) seen.add(b.s); }
+      /* A descent that has stopped getting anywhere is better started again
+         than waited out: the tie-break is random, so the next attempt takes a
+         different way down and usually finds one. */
+      if (beam[0].w < floor) { floor = beam[0].w; idle = 0; } else idle++;
+      if (idle >= SOLVE_STALL) break;
+      if (onStep) onStep(beam[0].w);
+      // let the page draw now and then, without paying for it every round
+      if (++round % 4 === 0) await new Promise(r => setTimeout(r, 0));
+    }
+  }
+  return null;
 }
 
 /* How far the drawing has to reach, over the tiles this puzzle is playing on.
@@ -941,9 +2095,96 @@ function showHint() {
     (bandaged ? ' A collar a bandage lies across will not turn.' : '');
 }
 
+/* An answer is written down rather than played out. A settled run of turns on
+   one hexagon is one to three of them the same way about, so it reads as the
+   hexagon's letter and that many signs — R+ , R++ , W- — and the whole answer
+   is a line of those. Stepping takes one at a time, and since a collar is a
+   circle and turns onto itself at any angle, a run of two or three is shown as
+   the one sweep of 120° or 180° that it is. */
+let plan = null, planAt = 0;
+
+const clearPlan = () => { plan = null; planAt = 0; showPlan(); };
+
+// consecutive turns of the same hexagon the same way come out as one token
+function asPlan(seq) {
+  const out = [];
+  for (let i = 0; i < seq.length; ) {
+    let j = i;
+    while (j < seq.length && seq[j] === seq[i]) j++;
+    out.push({ hex: seq[i] >> 1, dir: (seq[i] & 1) ? -1 : 1, n: j - i });
+    i = j;
+  }
+  return out;
+}
+
+const tokenText = t =>
+  boardHexes[t.hex].parts[0].colour[0].toUpperCase() + (t.dir > 0 ? '+' : '-').repeat(t.n);
+
+function showPlan() {
+  const box = document.getElementById('plan'), nav = document.getElementById('nav');
+  if (!plan) {
+    box.style.display = 'none';
+    box.replaceChildren();
+    nav.style.display = 'none';
+    return;
+  }
+  box.style.display = '';
+  nav.style.display = '';
+  document.getElementById('back').disabled = planAt <= 0;
+  document.getElementById('step').disabled = planAt >= plan.length;
+  document.getElementById('where').textContent = `${planAt} / ${plan.length}`;
+  box.replaceChildren(...plan.map((t, i) => {
+    const el = document.createElement('span');
+    el.textContent = tokenText(t);
+    el.className = i < planAt ? 'done' : i === planAt ? 'next' : '';
+    el.title = `Wind the board back to just before this move`;
+    // clicking a move winds to just before it, so it is the one coming next
+    el.addEventListener('click', () => goTo(i));
+    return el;
+  }));
+}
+
+/* Anywhere in the answer, forwards or back. Every turn undoes, so winding back
+   is the same walk the other way about. One move either side is shown turning;
+   a longer jump is not, since watching forty of them go by is no use. */
+function goTo(target) {
+  if (!plan) return;
+  target = Math.max(0, Math.min(plan.length, target));
+  if (target === planAt) return;
+  const single = Math.abs(target - planAt) === 1;
+  settle();
+  let last = null, way = 0;
+  while (planAt < target) {
+    last = plan[planAt];
+    way = 1;
+    for (let k = 0; k < last.n; k++) move(boardHexes[last.hex], last.dir);
+    planAt++;
+  }
+  while (planAt > target) {
+    planAt--;
+    last = plan[planAt];
+    way = -1;
+    for (let k = 0; k < last.n; k++) move(boardHexes[last.hex], -last.dir);
+  }
+  repaint(); refresh();
+  if (single && last) {
+    const turn = last.dir * way;           // undoing a move runs it the other way
+    spin(boardHexes[last.hex], -turn * 60 * last.n, SPIN_MS + 70 * (last.n - 1));
+  }
+  showPlan();
+}
+
+function showSolveButton() {
+  const b = document.getElementById('solve');
+  b.disabled = !solvable();
+  b.title = solvable() ? 'Work out an answer for this board'
+    : 'The solver only knows the three-circle puzzle, unbandaged';
+}
+
 // everything the board shows, after anything that changes what it should show
 function redraw() {
-  settle(); reset(); repaint(); refresh(); frame(); showHint();
+  settle(); clearPlan(); reset(); repaint(); refresh(); frame(); showHint();
+  showSolveButton();
 }
 
 setPuzzle(PUZZLES.seven);
@@ -951,9 +2192,53 @@ reset();
 render();
 redraw();
 
-document.getElementById('scramble').addEventListener('click', scramble);
+document.getElementById('scramble').addEventListener('click', () => {
+  clearPlan(); scramble(); showSolveButton();
+});
+
+/* The tables take a moment to build and the search a few seconds, so the line
+   under the board reports as it goes and the page is let breathe between
+   rounds. Kept for as long as the puzzle does not change. */
+document.getElementById('solve').addEventListener('click', async () => {
+  if (!solvable()) return;
+  const say = t => { document.getElementById('hint').textContent = t; };
+  const b = document.getElementById('solve');
+  b.disabled = true;
+  settle(); clearPlan();
+  say('Working out an answer — building the moves to work with.');
+  await new Promise(r => setTimeout(r, 0));
+  if (!kit) kit = await buildKit(pc => say(`Working out an answer — building the moves to work with (${pc}%).`));
+  if (bandaged && !bandKit)
+    bandKit = await buildBandKit(m => say(`Working out an answer — ${m}.`));
+  // the placing search knows how many tiles it has settled; the other does not
+  const raw = await findSolution((n, done, all) => say(done === undefined
+    ? `Working out an answer — ${n} parts still out of place.`
+    : `Working out an answer — ${done} of ${all} tiles placed, ${n} parts out.`));
+  showSolveButton();
+  if (!raw) { say('No answer found. Scramble again and try once more.'); return; }
+  const loose = simplifySolution(raw);
+  /* Tightening swaps a stretch of the answer for a shorter run of turns out of
+     a table that knows nothing about bandages, so on a glued board almost any
+     swap it made would be a run that cannot be played. Simplifying is safe —
+     cancelling turns of one hexagon against each other leaves every bandage
+     where the rest of the answer expects it. */
+  let tight = loose;
+  if (!bandaged) {
+    say('Working out an answer — tightening it.');
+    await new Promise(r => setTimeout(r, 0));
+    tight = simplifySolution(tightenSolution(loose));
+  }
+  plan = asPlan(tight);
+  planAt = 0;
+  showPlan();
+  const turns = plan.reduce((n, t) => n + t.n, 0);
+  say(`${turns} turns in ${plan.length} moves, down from ${raw.length}. ` +
+      `Step through them with the arrows, or click a move to wind there.`);
+});
+document.getElementById('step').addEventListener('click', () => goTo(planAt + 1));
+document.getElementById('back').addEventListener('click', () => goTo(planAt - 1));
 document.getElementById('reset').addEventListener('click', () => {
-  settle(); reset(); repaint(); refresh();
+  settle(); clearPlan(); reset(); repaint(); refresh(); showHint(); showSolveButton();
 });
 document.getElementById('invert').addEventListener('change', e => {
   inverted = e.target.checked;
