@@ -36,7 +36,14 @@
     padding: 10px;
   }
 
-  #board { width: 100%; height: auto; display: block; touch-action: manipulation; }
+  /* A turn is a click, and turns come in quick succession, so the board must
+     not be somewhere a selection can start: without this a double-click on a
+     hexagon runs off and picks out the button labels underneath it. */
+  #board {
+    width: 100%; height: auto; display: block;
+    touch-action: manipulation;
+    user-select: none; -webkit-user-select: none;
+  }
 
   /* stroke-width is set on the <g>s in render(): the tiling is built on edge
      length 1, so it is a constant in user units and must not be set here. */
@@ -65,7 +72,7 @@
 
   .controls { display: flex; flex-wrap: wrap; gap: 10px; margin: 16px 0 0; }
 
-  button {
+  button, .toggle {
     font: inherit;
     font-size: 0.95rem;
     color: var(--text);
@@ -74,9 +81,13 @@
     border-radius: 8px;
     padding: 8px 16px;
     cursor: pointer;
+    user-select: none; -webkit-user-select: none;
   }
-  button:hover { background: #2a2d32; border-color: #4b4f57; }
+  button:hover, .toggle:hover { background: #2a2d32; border-color: #4b4f57; }
   button:active { background: #34373c; }
+
+  .toggle { display: inline-flex; align-items: center; gap: 8px; }
+  .toggle input { accent-color: #6ea8fe; cursor: pointer; margin: 0; }
 
   .counts { color: var(--muted); font-size: 0.9rem; margin: 16px 0 0; }
 </style>
@@ -95,10 +106,10 @@
   <div class="controls">
     <button type="button" id="scramble">Scramble</button>
     <button type="button" id="reset">Reset puzzle</button>
+    <label class="toggle"><input type="checkbox" id="invert">Invert controls</label>
   </div>
 
-  <p class="counts">Click a hexagon to turn its collar anticlockwise, right-click to
-    turn it clockwise.</p>
+  <p class="counts" id="hint"></p>
 
   <p class="counts" id="counts"></p>
 </div>
@@ -466,8 +477,14 @@ const ease = u => 1 - (1 - u) ** 3;       // away quickly, settling onto the end
 let spinning = null;                      // undoes the turn being shown, if any
 const settle = () => { if (spinning) spinning(); };
 
+/* The hexagon's own target turns with it. It is the shape the hover outline is
+   drawn on, so leaving it behind would hold the highlight still against a
+   hexagon visibly turning under it — and since the browser hit-tests the shape
+   where the transform puts it, carrying it round also keeps the hover honest:
+   it is live against where the hexagon has got to, not where it set off from.
+   No other hexagon's target moves, none of them being in this collar. */
 function spin(hex, from) {
-  const els = hex.collar.flatMap(t => [t.el, ...t.parts.map(p => p.el)]);
+  const els = [hex.hit, ...hex.collar.flatMap(t => [t.el, ...t.parts.map(p => p.el)])];
   const [cx, cy] = hex.centre;
   const place = a => {
     const tr = `rotate(${a.toFixed(3)} ${cx.toFixed(4)} ${cy.toFixed(4)})`;
@@ -500,6 +517,11 @@ function spin(hex, from) {
      not — and if they did, it has nothing left to do. */
   backstop = setTimeout(stop, SPIN_MS + 300);
 }
+
+/* Which way a plain click turns. Right-click is always the other way, so the
+   toggle swaps the pair rather than setting either on its own. */
+let inverted = false;
+const clickDir = () => (inverted ? -1 : 1);
 
 // a turn, shown: made at once, then wound back a sixth and played forward
 function turn(hex, dir) {
@@ -573,8 +595,9 @@ function render() {
   const hits = svgEl('g', { 'stroke-width': '0.06' });
   for (const h of hexTiles) {
     h.hit = svgEl('path', { class: 'hit', d: pathOf(h.outline) });
-    h.hit.addEventListener('click', () => turn(h, 1));
-    h.hit.addEventListener('contextmenu', e => { e.preventDefault(); turn(h, -1); });
+    // read when the click happens, so the toggle takes effect at once
+    h.hit.addEventListener('click', () => turn(h, clickDir()));
+    h.hit.addEventListener('contextmenu', e => { e.preventDefault(); turn(h, -clickDir()); });
     hits.appendChild(h.hit);
   }
 
@@ -588,11 +611,24 @@ function render() {
     `${tiles.length} tiles — ${n(6)} hexagons, ${n(4)} squares, ${n(3)} triangles.`;
 }
 
+// said in the one place the toggle can change it, so the two cannot disagree
+function showHint() {
+  const way = d => d > 0 ? 'anticlockwise' : 'clockwise';
+  document.getElementById('hint').textContent =
+    `Click a hexagon to turn its collar ${way(clickDir())}, ` +
+    `right-click to turn it ${way(-clickDir())}.`;
+}
+
 reset();
 render();
+showHint();
 document.getElementById('scramble').addEventListener('click', scramble);
 document.getElementById('reset').addEventListener('click', () => {
   settle(); reset(); repaint();
+});
+document.getElementById('invert').addEventListener('change', e => {
+  inverted = e.target.checked;
+  showHint();
 });
 </script>
 </body>
