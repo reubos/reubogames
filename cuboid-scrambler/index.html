@@ -690,6 +690,7 @@
       const cy=Math.cos(yaw), sy=Math.sin(yaw), cp=Math.cos(pitch), sp=Math.sin(pitch);
       return matMul([[1,0,0],[0,cp,-sp],[0,sp,cp]], [[cy,0,sy],[0,1,0],[-sy,0,cy]]);
     }
+    // Orthographic: a linear map, so parallel edges stay parallel at every angle.
     function projectPt(p, view) {
       if (!view) return project(p);
       const q = matVec(view, p);
@@ -744,8 +745,16 @@
     // bottom image: all six faces become candidates and are culled by facing,
     // and depth comes from the true view axis instead of the fixed-view x+y+z
     // shortcut. Without it the original fixed-view path runs unchanged.
-    function renderStateSVG(cubies, hi, constCube, maxPx, fit, view) {
+    function renderStateSVG(cubies, hi, constCube, maxPx, fit, viewM) {
       const occ=new Set(cubies.map(c=>c.pos.join(',')));
+      const view = viewM || null;
+      // Per-axis half-extents of the drawn solid: sizes the fixed canvas, and in
+      // constant-cube mode also defines the cube's surface (see the cull below).
+      const E=[0,0,0];
+      for (const c of cubies) {
+        const p = constCube ? c.vpos : c.pos, hh = constCube ? c.vhalf : [1,1,1];
+        for (let k=0;k<3;k++) E[k]=Math.max(E[k], Math.abs(p[k])+hh[k]);
+      }
       // Facing depends only on the camera, so resolve it once rather than per cubie.
       const dirs = view ? Object.keys(DIRS).filter(d => matVec(view, DIRS[d])[2] > 1e-9) : VIS;
       const faces=[];
@@ -754,8 +763,19 @@
         const ws = worldStickers(c);
         for (const dir of dirs) {
           const n=DIRS[dir];
-          const nb=[c.pos[0]+2*n[0],c.pos[1]+2*n[1],c.pos[2]+2*n[2]];
-          if(occ.has(nb.join(',')))continue;   // interior face (real adjacency, unaffected by display stretch)
+          const ax = n[0] ? 0 : n[1] ? 1 : 2;
+          if (constCube) {
+            // Real adjacency is the wrong cull here: the drawn geometry is the
+            // VIRTUAL cube, and once a shapeshifting move makes real and virtual
+            // adjacency diverge, faces buried inside the cube stop being culled
+            // and paint over its surface at some angles. The virtual boxes tile
+            // the cube exactly, so a face is on the surface iff its plane is the
+            // cube's boundary -- an exact test that needs no adjacency at all.
+            if (Math.abs(c.vpos[ax] + n[ax]*c.vhalf[ax] - n[ax]*E[ax]) > 1e-9) continue;
+          } else {
+            const nb=[c.pos[0]+2*n[0],c.pos[1]+2*n[1],c.pos[2]+2*n[2]];
+            if(occ.has(nb.join(',')))continue;   // interior face
+          }
           const [u0,v0]=INPLANE[dir];
           let center,u,v;
           if(constCube){
@@ -767,16 +787,16 @@
           }
           const corners=[[+1,+1],[+1,-1],[-1,-1],[-1,+1]].map(([su,sv])=>
             projectPt([center[0]+su*u[0]+sv*v[0], center[1]+su*u[1]+sv*v[1], center[2]+su*u[2]+sv*v[2]], view));
-          const name=ws[dir]; const isBody=!name;
+          const name=ws[dir];
           let col=shade(HEX[name]||HEX.Body, SHADE[dir]);
           if(hi && !isSel) col=shade(col,0.4);   // dull everything but the turning layer
-          // A body face should never be visibly exposed in constant-cube mode (it
-          // only exists because the puzzle briefly shapeshifts, which this mode
-          // hides), so force it furthest back rather than trusting the depth key.
-          let depth = view
+          // In constant-cube mode the drawn solid is now exactly the cube's
+          // surface, so nothing overlaps and this ordering is only a formality
+          // (the old "force body faces to the back" hack papered over the cull
+          // bug fixed above, and is no longer needed).
+          const depth = view
             ? matVec(view, center)[2]
             : center[0]+center[1]+center[2] + (dir==='+z'?0.5:dir==='+y'?0.25:0);
-          if(constCube && isBody) depth -= 1000;
           faces.push({corners,col,depth,isSel});
         }
       }
@@ -807,12 +827,7 @@
       // bounding sphere instead -- the puzzle rotates about the origin, so a
       // square that fits the sphere fits every orientation, at a constant scale.
       if (view) {
-        const E=[0,0,0];
-        for (const c of cubies) {
-          const p = constCube ? c.vpos : c.pos, hh = constCube ? c.vhalf : [1,1,1];
-          for (let k=0;k<3;k++) E[k]=Math.max(E[k], Math.abs(p[k])+hh[k]);
-        }
-        const R = Math.hypot(E[0],E[1],E[2]) * PS;
+        const R = (Math.hypot(E[0],E[1],E[2]) || 1) * PS;
         pad = 4; w = h = 2*R + 2*pad;
         T = p => `${(p[0]+R+pad).toFixed(1)},${(p[1]+R+pad).toFixed(1)}`;
       }
@@ -823,11 +838,11 @@
       }
       if(arrow){
         const ac='#ff4500';
-        const head=(pen,tip)=>{ const dx=tip[0]-pen[0],dy=tip[1]-pen[1],l=Math.hypot(dx,dy)||1,ux=dx/l,uy=dy/l,s2=6;
+        const head=(pen,tip)=>{ const dx=tip[0]-pen[0],dy=tip[1]-pen[1],l=Math.hypot(dx,dy)||1,ux=dx/l,uy=dy/l,s2=10;
           const bx=tip[0]-ux*s2,by=tip[1]-uy*s2;
-          return `<polygon points="${T(tip)} ${T([bx-uy*s2*0.6,by+ux*s2*0.6])} ${T([bx+uy*s2*0.6,by-ux*s2*0.6])}" fill="${ac}"/>`; };
+          return `<polygon points="${T(tip)} ${T([bx-uy*s2*0.7,by+ux*s2*0.7])} ${T([bx+uy*s2*0.7,by-ux*s2*0.7])}" fill="${ac}"/>`; };
         for(const path of arrow.paths){
-          body+=`<polyline points="${path.map(T).join(' ')}" fill="none" stroke="${ac}" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>`;
+          body+=`<polyline points="${path.map(T).join(' ')}" fill="none" stroke="${ac}" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/>`;
           body+=head(path[1],path[2]);
         }
       }
