@@ -206,7 +206,7 @@
       input[type="number"], .slider-num { background: #2a2a28; border-color: #444; color: #e8e8e4; }
       button { background: #2a2a28; border-color: #444; color: #e8e8e4; }
       button:hover { background: #333330; }
-      label, .phase-label, .scramble-header span, .slider-row span, #outside-numbering-note { color: #999; }
+      label, .phase-label, .scramble-header span, .slider-row span, #outside-numbering-note, #constcube-note { color: #999; }
       .phase-label strong { color: #e8e8e4; }
       .move { background: #2a2a28; border-color: #444; color: #e8e8e4; }
       .move.qt { background: #0c2a44; border-color: #185fa5; color: #78b4e8; }
@@ -253,94 +253,60 @@
         <input type="checkbox" id="outside-numbering-toggle" onchange="clearScramble()">
         Outside-numbered layers
       </label>
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;user-select:none;" title="All-even or all-odd puzzles only: draw as a fixed N=max(w,h,d) cube, with shorter axes' outer layers drawn thicker instead of shapeshifting. Display only -- the scramble and its reductions are unchanged.">
+        <input type="checkbox" id="constcube-toggle" onchange="onDisplayOptionChange()">
+        Constant-cube view
+      </label>
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;user-select:none;" title="Hovering a move shows the coloured puzzle state just before that move, with the turning layer highlighted. Unchecked shows the plain reduced-cuboid schematic instead.">
+        <input type="checkbox" id="state-diagram-toggle" checked onchange="onDisplayOptionChange()">
+        Coloured state on hover
+      </label>
     </div>
     <div id="outside-numbering-note" style="display:none;font-size:12px;color:#666;margin-top:-6px;margin-bottom:8px;"></div>
+    <div id="constcube-note" style="display:none;font-size:12px;color:#666;margin-top:-6px;margin-bottom:8px;"></div>
 
     <div id="out"></div>
   </div>
   <div id="move-tooltip"><div id="move-tooltip-inner"></div></div>
 
   <script>
+    function isConstCube() { return document.getElementById('constcube-toggle').checked; }
+    function isStateDiagram() { return document.getElementById('state-diagram-toggle').checked; }
+    // Coloured diagrams simulate every cubie, so cost grows with cubies x moves.
+    // Past this size the puzzle is far beyond any real cuboid, and both the
+    // replay and the SVG get slow enough to stutter on hover -- fall back to the
+    // schematic, which is cheap and size-independent.
+    const STATE_MAX_CUBIES = 1500;
+    function canRenderState(W, H, D) { return W * H * D <= STATE_MAX_CUBIES; }
+    // Constant-cube view needs one shared N across all axes, so it requires
+    // all-even or all-odd dimensions; otherwise fall back to the true shape.
+    function constCubeN(W, H, D) {
+      return (isConstCube() && sameParity(W, H, D)) ? Math.max(W, H, D) : null;
+    }
+    function updateConstCubeNote(W, H, D) {
+      const note = document.getElementById('constcube-note');
+      const unavailable = isConstCube() && !sameParity(W, H, D);
+      note.style.display = unavailable ? 'block' : 'none';
+      if (unavailable) note.textContent = `Constant-cube view needs all-even or all-odd dimensions (got ${W}×${H}×${D}) — drawing the true shape instead.`;
+    }
+    // Solved-state preview, in colour.
     function drawCuboid() {
       const W = Math.max(1, parseInt(document.getElementById('iw').value) || 1);
       const H = Math.max(1, parseInt(document.getElementById('ih').value) || 1);
       const D = Math.max(1, parseInt(document.getElementById('id').value) || 1);
-
-      const VW = 320, VH = 180;
-      const PL = 52, PR = 24, PT = 18, PB = 36;
-      const dw = VW - PL - PR, dh = VH - PT - PB;
-      const AX = 0.48, AY = 0.28;
-
-      let s = Math.min(dw / (W + D * AX), dh / (H + D * AY));
-      s = Math.min(s, 28);
-
-      const cw = W * s, ch = H * s, ddx = D * s * AX, ddy = D * s * AY;
-      const ox = PL + (dw - cw - ddx) / 2;
-      const oy = PT + ddy + (dh - ch - ddy) / 2 + ch;
-
-      const C = {
-        fbl:[ox,oy], fbr:[ox+cw,oy], ftr:[ox+cw,oy-ch], ftl:[ox,oy-ch],
-        bbl:[ox+ddx,oy-ddy], bbr:[ox+cw+ddx,oy-ddy],
-        btr:[ox+cw+ddx,oy-ch-ddy], btl:[ox+ddx,oy-ch-ddy]
-      };
-      const v = n => n.toFixed(1);
-      const ps = ks => ks.map(k => C[k].map(v).join(',')).join(' ');
-      const ln = (a,b,cls) => `<line x1="${v(a[0])}" y1="${v(a[1])}" x2="${v(b[0])}" y2="${v(b[1])}" class="${cls}" stroke-width="1" fill="none"/>`;
-
-      let svg = `<svg width="100%" viewBox="0 0 ${VW} ${VH}" xmlns="http://www.w3.org/2000/svg">`;
-
-      // Hidden back edges
-      svg += ln(C.fbl, C.bbl, 'cv-hidden cv-dim');
-      svg += ln(C.bbl, C.bbr, 'cv-hidden cv-dim');
-      svg += ln(C.bbl, C.btl, 'cv-hidden cv-dim');
-
-      // Three visible faces
-      svg += `<polygon points="${ps(['fbr','bbr','btr','ftr'])}" class="cv-right cv-stroke" stroke-width="1.5"/>`;
-      svg += `<polygon points="${ps(['ftl','ftr','btr','btl'])}" class="cv-top cv-stroke" stroke-width="1.5"/>`;
-      svg += `<polygon points="${ps(['fbl','fbr','ftr','ftl'])}" class="cv-front cv-stroke" stroke-width="1.5"/>`;
-
-      // Interior grid lines
-      function lerp2(a, b, t) { return [a[0] + (b[0]-a[0])*t, a[1] + (b[1]-a[1])*t]; }
-      function faceGrid(tl, tr, br, bl, cols, rows, cls) {
-        for (let i = 1; i < cols; i++) {
-          const t = i / cols;
-          const p1 = lerp2(tl, tr, t), p2 = lerp2(bl, br, t);
-          svg += `<line x1="${v(p1[0])}" y1="${v(p1[1])}" x2="${v(p2[0])}" y2="${v(p2[1])}" class="${cls}" stroke-width="0.8" fill="none"/>`;
-        }
-        for (let i = 1; i < rows; i++) {
-          const t = i / rows;
-          const p1 = lerp2(tl, bl, t), p2 = lerp2(tr, br, t);
-          svg += `<line x1="${v(p1[0])}" y1="${v(p1[1])}" x2="${v(p2[0])}" y2="${v(p2[1])}" class="${cls}" stroke-width="0.8" fill="none"/>`;
-        }
-      }
-      // Front face: W columns, H rows; corners tl,tr,br,bl
-      faceGrid(C.ftl, C.ftr, C.fbr, C.fbl, W, H, 'cv-grid');
-      // Top face: W columns, D rows
-      faceGrid(C.btl, C.btr, C.ftr, C.ftl, W, D, 'cv-grid');
-      // Right face: D columns, H rows
-      faceGrid(C.ftr, C.btr, C.bbr, C.fbr, D, H, 'cv-grid');
-
-      const lf = `font-size="11" font-family="Segoe UI, sans-serif"`;
-
-      // Width: arrow + label below front-bottom edge
-      const wMx = v(ox + cw / 2), wAy = v(oy + 7), wLy = v(oy + 19);
-      svg += `<line x1="${v(ox+2)}" y1="${wAy}" x2="${v(ox+cw-2)}" y2="${wAy}" class="cv-dim" stroke-width="1" fill="none"/>`;
-      svg += `<text x="${wMx}" y="${wLy}" text-anchor="middle" ${lf} class="cv-label">width ${W}</text>`;
-
-      // Height: arrow + label left of front-left edge
-      const hMy = v(oy - ch / 2), hAx = v(ox - 8), hLx = v(ox - 20);
-      svg += `<line x1="${hAx}" y1="${v(oy-2)}" x2="${hAx}" y2="${v(oy-ch+2)}" class="cv-dim" stroke-width="1" fill="none"/>`;
-      svg += `<text x="${hLx}" y="${hMy}" text-anchor="middle" ${lf} class="cv-label" transform="rotate(-90,${hLx},${hMy})">height ${H}</text>`;
-
-      // Depth: label along the bottom-right depth edge
-      const dMx = v((C.fbr[0] + C.bbr[0]) / 2 + 6);
-      const dMy = v((C.fbr[1] + C.bbr[1]) / 2 + 12);
-      svg += `<line x1="${v(C.fbr[0]+1)}" y1="${v(C.fbr[1]-1)}" x2="${v(C.bbr[0]-1)}" y2="${v(C.bbr[1]+1)}" class="cv-dim" stroke-width="1" fill="none"/>`;
-      svg += `<text x="${dMx}" y="${dMy}" text-anchor="start" ${lf} class="cv-label">depth ${D}</text>`;
-
-      svg += '</svg>';
-      document.getElementById('cuboid-vis').innerHTML = svg;
+      const N = constCubeN(W, H, D);
+      const cubies = buildSolved(W, H, D);
+      if (N) seedVirtual(cubies, [W, H, D], N);
+      document.getElementById('cuboid-vis').innerHTML = renderStateSVG(cubies, null, !!N, 260);
+      updateConstCubeNote(W, H, D);
       renderSliders(W, H, D);
+    }
+    // Constant-cube view and hover style are display-only: redraw what's already
+    // on screen rather than discarding the scramble.
+    function onDisplayOptionChange() {
+      drawCuboid();
+      _tipCache = null; _replay = null;
+      renderFinalState();
     }
 
     function getN() {
@@ -396,7 +362,9 @@
     ['iw', 'ih', 'id'].forEach(id => {
       document.getElementById(id).addEventListener('input', () => { drawCuboid(); clearScramble(); });
     });
-    drawCuboid();
+    // NB: the initial drawCuboid() call lives at the very end of this script --
+    // it now depends on const declarations further down (COLORS, HEX, ...),
+    // which are in their temporal dead zone until then.
 
     function faceAxis(f) { return f === 'R' || f === 'L' ? 'x' : f === 'U' || f === 'D' ? 'y' : 'z'; }
     function faceAvail(f, w, h, d) { return f === 'R' || f === 'L' ? w >= 2 : f === 'U' || f === 'D' ? h >= 2 : d >= 2; }
@@ -441,15 +409,15 @@
     }
     function isOutsideNumbered() { return document.getElementById('outside-numbering-toggle').checked; }
 
-    // ---- minimal cubie engine (position + functional coordinate only) ----
-    // Needed to detect outside-numbered layers whose true physical width has
-    // been inflated by rotation history: fc merges on whichever axis is being
-    // reduced at a given phase, and a LATER rotation on a DIFFERENT axis can
-    // import that already-merged group via a 90-degree swap, even onto an
-    // axis that never reduced on its own. This is a runtime property of the
-    // actual rotation sequence, not derivable from a static formula, so a
-    // real (if minimal -- no orientation/stickers needed, nothing here is
-    // rendered as cubies) simulation is required.
+    // ---- cubie engine ----
+    // A real rotation simulation is required for two things a static formula
+    // can't give: (1) outside-numbered layers whose true physical width has
+    // been inflated by rotation history -- fc merges on whichever axis is
+    // being reduced at a given phase, and a LATER rotation on a DIFFERENT
+    // axis can import that already-merged group via a 90-degree swap, even
+    // onto an axis that never reduced on its own; and (2) the coloured state
+    // diagrams, which need each cubie's live position, orientation and
+    // stickers at an arbitrary point in the scramble.
     const AXIS = { R:'x', L:'x', U:'y', D:'y', F:'z', B:'z' };
     const IDX = { x:0, y:1, z:2 };
     const POSITIVE = new Set(['R','U','F']);
@@ -460,11 +428,6 @@
     function matMul(A,B) { const Bt=transpose(B); return A.map(row => Bt.map(col => row[0]*col[0]+row[1]*col[1]+row[2]*col[2])); }
     function matPow(M,e) { return e===1 ? M : e===-1 ? transpose(M) : matMul(M,M); }
     function span(n) { return Array.from({length:n}, (_,i) => -(n-1)+2*i); }
-    function buildFC(w,h,d) {
-      const cubies=[];
-      for (const x of span(w)) for (const y of span(h)) for (const z of span(d)) cubies.push({ pos:[x,y,z], fc:[x,y,z] });
-      return cubies;
-    }
     function coarsenFC(cubies, eff) {
       const lim = eff.map(e => e-1);
       for (const c of cubies) c.fc = c.fc.map((v,k) => Math.max(-lim[k], Math.min(lim[k], v)));
@@ -488,12 +451,6 @@
       const sel = new Set();
       for (const c of cubies) { const fc=c.fc[k]; if (wide ? (positive?fc>=target:fc<=target) : fc===target) sel.add(fc); }
       return sel;
-    }
-    function applyMoveFC(cubies, mv, Nper, eff) {
-      const ax = AXIS[mv.face], k = IDX[ax];
-      const sel = selectCoordsCC(cubies, mv, Nper, eff);
-      const sign = baseSign(mv.face), exp = mv.mod==='2'?2:mv.mod==="'"?-sign:sign, R = matPow(P[ax], exp);
-      for (const c of cubies) { if (!sel.has(c.fc[k])) continue; c.pos=matVec(R,c.pos); c.fc=matVec(R,c.fc); }
     }
     // Outside-numbered pool: layer numbers count from the outside of each
     // axis's own native size (Nper), never renumbered per phase.
@@ -530,6 +487,196 @@
         if (positive ? fc>=target : fc<=target) cumRaw.add(c.pos[k]);
       }
       return { depth: cumRaw.size, ownWide: ownRaw.size>1 };
+    }
+
+    // ---- full cubie state (orientation + stickers), for coloured diagrams ----
+    const COLORS = { '+x':'Red','-x':'Orange','+y':'White','-y':'Yellow','+z':'Green','-z':'Blue' };
+    const HEX = { Red:'#dd2222', Orange:'#ff8800', White:'#f0f0f0', Yellow:'#ffdd00', Green:'#00aa55', Blue:'#0066cc', Body:'#2a2a2a' };
+    const DIRS = { '+x':[1,0,0],'-x':[-1,0,0],'+y':[0,1,0],'-y':[0,-1,0],'+z':[0,0,1],'-z':[0,0,-1] };
+    const I3 = [[1,0,0],[0,1,0],[0,0,1]];
+    const vecEq = (a,b) => a[0]===b[0]&&a[1]===b[1]&&a[2]===b[2];
+    function buildSolved(w,h,d) {
+      const xs=span(w), ys=span(h), zs=span(d);
+      const xmax=Math.max(...xs),xmin=Math.min(...xs),ymax=Math.max(...ys),ymin=Math.min(...ys),zmax=Math.max(...zs),zmin=Math.min(...zs);
+      const cubies=[];
+      for (const x of xs) for (const y of ys) for (const z of zs) {
+        const st={};
+        if(x===xmax)st['+x']=COLORS['+x']; if(x===xmin)st['-x']=COLORS['-x'];
+        if(y===ymax)st['+y']=COLORS['+y']; if(y===ymin)st['-y']=COLORS['-y'];
+        if(z===zmax)st['+z']=COLORS['+z']; if(z===zmin)st['-z']=COLORS['-z'];
+        cubies.push({ pos:[x,y,z], ori:I3, fc:[x,y,z], stickers:st });
+      }
+      return cubies;
+    }
+    function worldStickers(c) {
+      const out={}, oriT=transpose(c.ori);
+      for (const [key,wv] of Object.entries(DIRS)) {
+        const lv=matVec(oriT,wv);
+        const lk=Object.keys(DIRS).find(kk=>vecEq(DIRS[kk],lv));
+        if(c.stickers[lk])out[key]=c.stickers[lk];
+      }
+      return out;
+    }
+    // phase-relative selection (normal numbering): the k-th distinct functional
+    // layer counting in from the named face.
+    function selectCoords(cubies, mv) {
+      const { face, layer, wide } = mv;
+      const k=IDX[AXIS[face]], positive=POSITIVE.has(face);
+      const coords=[...new Set(cubies.map(c=>c.fc[k]))].sort((a,b)=>positive?b-a:a-b);
+      return new Set(wide ? coords.slice(0,layer) : [coords[layer-1]]);
+    }
+    // Unified simulation step. `wide` on the move is the flag actually DISPLAYED
+    // to the user (it changes which cubies physically turn), so the simulation
+    // always matches what the notation tells them to do.
+    function simSelect(cubies, mv, sim) {
+      return sim.outsideNum ? selectCoordsCC(cubies, mv, sim.Nper, mv.eff) : selectCoords(cubies, mv);
+    }
+    function applySimMove(cubies, mv, sim) {
+      const ax=AXIS[mv.face], k=IDX[ax];
+      const sel=simSelect(cubies, mv, sim);
+      const sign=baseSign(mv.face), exp=mv.mod==='2'?2:mv.mod==="'"?-sign:sign, R=matPow(P[ax],exp);
+      const absR=R.map(row=>row.map(Math.abs)); // permutation only: for extents (vhalf), which aren't directional
+      for (const c of cubies) {
+        if(!sel.has(c.fc[k]))continue;
+        c.pos=matVec(R,c.pos); c.ori=matMul(R,c.ori); c.fc=matVec(R,c.fc);
+        if(c.vpos){ c.vpos=matVec(R,c.vpos); c.vhalf=matVec(absR,c.vhalf); }
+      }
+    }
+
+    // ---- constant-cube display: fixed N-cube, shorter axes' outer layers drawn thicker ----
+    function sameParity(w,h,d) { return (w%2)===(h%2) && (h%2)===(d%2); }
+    function renderMap(p,d,N) {
+      if(d===N) return {c:p,h:1};
+      if(d===1) return {c:0,h:N};
+      if(Math.abs(p)===d-1){ const s=Math.sign(p); return {c:s*(d-2+N)/2, h:(N-d)/2+1}; }
+      return {c:p,h:1};
+    }
+    // vpos/vhalf are seeded once and then rotated alongside pos, never re-derived
+    // from a lookup -- a later-phase turn on a bandaged axis genuinely shapeshifts
+    // the raw puzzle, which would put pos outside its native range.
+    function seedVirtual(cubies, dims, N) {
+      for (const c of cubies) {
+        const rm=[0,1,2].map(k=>renderMap(c.pos[k], dims[k], N));
+        c.vpos=rm.map(r=>r.c); c.vhalf=rm.map(r=>r.h);
+      }
+    }
+
+    // ---- axonometric renderer ----
+    const PS=20, PAX=0.55, PAY=0.42;
+    const project=([x,y,z])=>[ x*PS - z*PS*PAX, -y*PS + z*PS*PAY ];
+    const VIS=['+x','+y','+z'];
+    const SHADE={ '+z':1.0, '+y':0.86, '+x':0.72 };
+    function shade(hex,f) {
+      const n=parseInt(hex.slice(1),16); let r=(n>>16)&255,g=(n>>8)&255,b=n&255;
+      r=Math.round(r*f); g=Math.round(g*f); b=Math.round(b*f);
+      return '#'+((1<<24)+(r<<16)+(g<<8)+b).toString(16).slice(1);
+    }
+    const INPLANE={ '+x':[[0,1,0],[0,0,1]], '+y':[[1,0,0],[0,0,1]], '+z':[[1,0,0],[0,1,0]] };
+    // Bent arrow hugging one cube corner from outside; legs run parallel to the
+    // two silhouette edges meeting there, so the bend matches the outline.
+    const ARROW_CORNER={ U:[-1,+1,-1], D:[+1,-1,+1], R:[+1,-1,-1], L:[-1,+1,+1], F:[-1,-1,+1], B:[+1,+1,-1] };
+    function buildArrow(cubies, mv, constCube) {
+      const M = constCube
+        ? [0,1,2].map(k=>Math.max(1,...cubies.map(c=>Math.abs(c.vpos[k]))))
+        : [0,1,2].map(k=>Math.max(1,...cubies.map(c=>Math.abs(c.pos[k]))));
+      const sgn=ARROW_CORNER[mv.face];
+      const C=[sgn[0]*M[0], sgn[1]*M[1], sgn[2]*M[2]];
+      const Cs=project(C);
+      const legDirs=[];
+      for (let a=0;a<3;a++) {
+        const o=[0,1,2].filter(i=>i!==a);
+        if((sgn[o[0]]>0)===(sgn[o[1]]>0)) continue;   // interior edge, not a silhouette edge
+        const nb=[...C]; nb[a]=-nb[a];
+        const ns=project(nb); const dd=[ns[0]-Cs[0], ns[1]-Cs[1]]; const l=Math.hypot(dd[0],dd[1])||1;
+        legDirs.push([dd[0]/l, dd[1]/l]);
+      }
+      if(legDirs.length<2) return null;
+      let ox=-(legDirs[0][0]+legDirs[1][0]), oy=-(legDirs[0][1]+legDirs[1][1]);
+      const ol=Math.hypot(ox,oy)||1; ox/=ol; oy/=ol;
+      const ax=AXIS[mv.face], sign=baseSign(mv.face), dirExp=mv.mod==="'"?-sign:sign;
+      const Cs2=project(matVec(matPow(P[ax],dirExp), C));
+      const m=[Cs2[0]-Cs[0], Cs2[1]-Cs[1]];
+      const dt=dv=>dv[0]*m[0]+dv[1]*m[1];
+      const end=dt(legDirs[0])>=dt(legDirs[1])?legDirs[0]:legDirs[1];
+      const startL=end===legDirs[0]?legDirs[1]:legDirs[0];
+      const pushOut=6, legLen=17, ringGap=12;
+      const bracket=(r)=>{
+        const vx=[Cs[0]+ox*r, Cs[1]+oy*r];
+        return [ [vx[0]+startL[0]*legLen,vx[1]+startL[1]*legLen], vx, [vx[0]+end[0]*legLen,vx[1]+end[1]*legLen] ];
+      };
+      return { bx:ox, by:oy, paths: mv.mod==='2' ? [bracket(pushOut), bracket(pushOut+ringGap)] : [bracket(pushOut)] };
+    }
+    // Returns a self-contained <svg> string for the given state.
+    function renderStateSVG(cubies, hi, constCube, maxPx) {
+      const occ=new Set(cubies.map(c=>c.pos.join(',')));
+      const faces=[];
+      for (const c of cubies) {
+        const isSel = hi && hi.sel.has(c.fc[hi.k]);
+        const ws = worldStickers(c);
+        for (const dir of VIS) {
+          const n=DIRS[dir];
+          const nb=[c.pos[0]+2*n[0],c.pos[1]+2*n[1],c.pos[2]+2*n[2]];
+          if(occ.has(nb.join(',')))continue;   // interior face (real adjacency, unaffected by display stretch)
+          const [u0,v0]=INPLANE[dir];
+          let center,u,v;
+          if(constCube){
+            center=[0,1,2].map(k=>c.vpos[k] + n[k]*c.vhalf[k]);
+            u=u0.map((x,k)=>x*c.vhalf[k]); v=v0.map((x,k)=>x*c.vhalf[k]);
+          } else {
+            center=[c.pos[0]+n[0],c.pos[1]+n[1],c.pos[2]+n[2]];
+            u=u0; v=v0;
+          }
+          const corners=[[+1,+1],[+1,-1],[-1,-1],[-1,+1]].map(([su,sv])=>
+            project([center[0]+su*u[0]+sv*v[0], center[1]+su*u[1]+sv*v[1], center[2]+su*u[2]+sv*v[2]]));
+          const name=ws[dir]; const isBody=!name;
+          let col=shade(HEX[name]||HEX.Body, SHADE[dir]);
+          if(hi && !isSel) col=shade(col,0.4);   // dull everything but the turning layer
+          // A body face should never be visibly exposed in constant-cube mode (it
+          // only exists because the puzzle briefly shapeshifts, which this mode
+          // hides), so force it furthest back rather than trusting the scalar depth.
+          let depth = center[0]+center[1]+center[2] + (dir==='+z'?0.5:dir==='+y'?0.25:0);
+          if(constCube && isBody) depth -= 1000;
+          faces.push({corners,col,depth,isSel});
+        }
+      }
+      faces.sort((a,b)=>a.depth-b.depth);
+      const arrow = hi ? buildArrow(cubies, hi.mv, constCube) : null;
+      let dminX=1e9,dminY=1e9,dmaxX=-1e9,dmaxY=-1e9;
+      for(const f of faces)for(const p of f.corners){ dminX=Math.min(dminX,p[0]);dminY=Math.min(dminY,p[1]);dmaxX=Math.max(dmaxX,p[0]);dmaxY=Math.max(dmaxY,p[1]); }
+      if(!faces.length) return '';
+      // Separating-axis shift: push the arrow along its outward normal until every
+      // arrow point clears every actual diagram vertex (bbox corners overshoot).
+      if(arrow){
+        const gap=4;
+        const proj=p=>p[0]*arrow.bx+p[1]*arrow.by;
+        const diagMaxProj=Math.max(...faces.flatMap(f=>f.corners).map(proj));
+        const arrowMinProj=Math.min(...arrow.paths.flat().map(proj));
+        if(arrowMinProj < diagMaxProj+gap){
+          const s=(diagMaxProj+gap)-arrowMinProj, sx=arrow.bx*s, sy=arrow.by*s;
+          arrow.paths=arrow.paths.map(path=>path.map(p=>[p[0]+sx,p[1]+sy]));
+        }
+      }
+      let minX=dminX,minY=dminY,maxX=dmaxX,maxY=dmaxY;
+      if(arrow) for(const path of arrow.paths)for(const p of path){ minX=Math.min(minX,p[0]);minY=Math.min(minY,p[1]);maxX=Math.max(maxX,p[0]);maxY=Math.max(maxY,p[1]); }
+      const pad=10, w=(maxX-minX)+2*pad, h=(maxY-minY)+2*pad;
+      const T=p=>`${(p[0]-minX+pad).toFixed(1)},${(p[1]-minY+pad).toFixed(1)}`;
+      let body='';
+      for(const f of faces){
+        const stroke=f.isSel?'#bbbbbb':'#111';
+        body+=`<polygon points="${f.corners.map(T).join(' ')}" fill="${f.col}" stroke="${stroke}" stroke-width="1" stroke-linejoin="round"/>`;
+      }
+      if(arrow){
+        const ac='#ff4500';
+        const head=(pen,tip)=>{ const dx=tip[0]-pen[0],dy=tip[1]-pen[1],l=Math.hypot(dx,dy)||1,ux=dx/l,uy=dy/l,s2=6;
+          const bx=tip[0]-ux*s2,by=tip[1]-uy*s2;
+          return `<polygon points="${T(tip)} ${T([bx-uy*s2*0.6,by+ux*s2*0.6])} ${T([bx+uy*s2*0.6,by-ux*s2*0.6])}" fill="${ac}"/>`; };
+        for(const path of arrow.paths){
+          body+=`<polyline points="${path.map(T).join(' ')}" fill="none" stroke="${ac}" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>`;
+          body+=head(path[1],path[2]);
+        }
+      }
+      const scale = maxPx ? Math.min(1, maxPx/Math.max(w,h)) : 1;
+      return `<svg width="${(w*scale).toFixed(1)}" height="${(h*scale).toFixed(1)}" viewBox="0 0 ${w.toFixed(1)} ${h.toFixed(1)}" xmlns="http://www.w3.org/2000/svg">${body}</svg>`;
     }
     function applyEquiv(face, mod) {
       const opp = { R:'L', L:'R', U:'D', D:'U', F:'B', B:'F' }[face];
@@ -736,6 +883,50 @@
     }
     function clearScramble() {
       document.getElementById('out').innerHTML = '';
+      _sim = null; _tipCache = null; _replay = null;
+    }
+    // Recorded scramble, replayed on demand for the hover and final-state
+    // diagrams (cheaper than snapshotting every intermediate state).
+    let _sim = null, _tipCache = null, _replay = null;
+    function stateAtIndex(k) {
+      if (!_sim) return null;
+      const { W, H, D } = _sim;
+      const N = constCubeN(W, H, D);
+      const upto = Math.min(k, _sim.moves.length);
+      // Hovering normally scans forward, so continue from the cached state when
+      // possible; only a backward jump needs rebuilding from solved. Without
+      // this a deep hover on a large puzzle replays the whole scramble.
+      let c, start;
+      if (_replay && _replay.sim === _sim && _replay.N === N && _replay.idx <= upto) {
+        c = _replay.cubies; start = _replay.idx;
+      } else {
+        c = buildSolved(W, H, D);
+        if (N) seedVirtual(c, [W, H, D], N);
+        start = 0;
+      }
+      for (let i = start; i < upto; i++) {
+        const m = _sim.moves[i];
+        coarsenFC(c, m.eff);   // idempotent within a phase, and eff only shrinks across phases
+        applySimMove(c, m, _sim);
+      }
+      _replay = { sim: _sim, N, idx: upto, cubies: c };
+      // Enter the upcoming move's phase context too, so its highlight is
+      // computed against the same bandaging the move itself will use. (Also
+      // idempotent -- the next forward step re-applies the same clamp.)
+      if (k < _sim.moves.length) coarsenFC(c, _sim.moves[k].eff);
+      return c;
+    }
+    // State just before move `idx`, with that move's turning layer highlighted.
+    function stateTooltipSVG(idx) {
+      if (_tipCache && _tipCache.idx === idx) return _tipCache.svg;
+      const c = stateAtIndex(idx);
+      if (!c) return '';
+      const m = _sim.moves[idx];
+      const N = constCubeN(_sim.W, _sim.H, _sim.D);
+      const hi = m ? { k: IDX[AXIS[m.face]], sel: simSelect(c, m, _sim), mv: m } : null;
+      const svg = renderStateSVG(c, hi, !!N, 210);
+      _tipCache = { idx, svg };
+      return svg;
     }
     function isEfficient() { return document.getElementById('efficient-toggle').checked; }
     // Which axis bandages when going from dimsA -> dimsB, and how many outer layers freeze.
@@ -764,17 +955,29 @@
       // phase, instead of the current reduction's movable layers. Needs a
       // real (minimal) rotation simulation alongside generation, since a
       // layer's true bandaged width is a runtime property of the rotation
-      // history, not derivable from a static formula (see buildFC etc above).
+      // history, not derivable from a static formula (see the engine above).
       const outsideNum = isOutsideNumbered();
       const Nper = [W, H, D];
-      const cubies = outsideNum ? buildFC(W, H, D) : null;
+      // One live simulation drives everything: outside-numbered relabelling
+      // (which needs each move's true bandaged width at that exact point), and
+      // the recorded move list that the hover/final-state diagrams replay.
+      // Outside-numbering *requires* it; otherwise it's only worth running when
+      // the puzzle is small enough to draw coloured diagrams at all.
+      const wantState = canRenderState(W, H, D);
+      const simOn = outsideNum || wantState;
+      _sim = simOn ? { W, H, D, outsideNum, Nper, moves: [] } : null;
+      const simN = constCubeN(W, H, D);
+      const cubies = simOn ? buildSolved(W, H, D) : null;
+      if (cubies && simN) seedVirtual(cubies, [W, H, D], simN);
+      _tipCache = null; _replay = null;
       const note = document.getElementById('outside-numbering-note');
       note.style.display = outsideNum && isEfficient() ? 'block' : 'none';
       if (outsideNum && isEfficient()) note.textContent = 'Efficient mode is not currently combined with outside-numbered layers -- efficient-mode layer restriction is skipped while outside-numbering is on.';
       for (let i = 0; i < stages.length; i++) {
         const [w, h, d] = stages[i].dims;
-        const canonPool = outsideNum ? getConstantCubePool(Nper, [w, h, d]) : getCanonicalPool(w, h, d);
-        if (outsideNum && cubies) coarsenFC(cubies, [w, h, d]);
+        const eff = [w, h, d];
+        const canonPool = outsideNum ? getConstantCubePool(Nper, eff) : getCanonicalPool(w, h, d);
+        if (cubies) coarsenFC(cubies, eff);
         if (!canonPool.length) continue;
         const curQTFaces = new Set(canonPool.filter(t => t.qt).map(t => t.face));
         const forcedFirstPool = i > 0 ? canonPool.filter(t => t.qt && !prevQTFaces.has(t.face) && t.mod !== '2') : null;
@@ -795,19 +998,31 @@
         const phaseLabel = `Phase ${i + 1} · ${w}×${h}×${d}${effLabel}`;
         const n = ns[i] ?? ns[ns.length - 1];
         let moves = scramblePhase(effPool, n, lastRef, phaseLabel, forcedFirstPool && forcedFirstPool.length ? forcedFirstPool : null);
-        if (outsideNum && cubies && moves.length) {
-          // Re-derive each move's true depth/width against the live cubie
-          // state, right before applying it, and relabel accordingly.
-          moves = moves.map(m => {
-            const pm = parseMove(m);
-            const { depth, ownWide } = outsideNumberedInfo(cubies, pm, Nper, [w, h, d]);
-            applyMoveFC(cubies, pm, Nper, [w, h, d]);
-            const correctedLayer = depth > 1 ? depth : pm.layer;
-            return moveStr(pm.face, correctedLayer, pm.mod, ownWide);
-          });
-        }
-        if (moves.length) phasesData.push({ dims: stages[i].dims, qt: stages[i].qt, moves });
+        // Record the canonical descriptor for each move and advance the sim.
+        // `wide` is taken from the label actually shown, because the wide/slice
+        // distinction changes which cubies physically turn -- so the simulation
+        // always matches what the notation instructs.
+        const startIdx = _sim ? _sim.moves.length : 0;
+        if (_sim) moves = moves.map(m => {
+          const pm = parseMove(m);
+          if (!pm) return m;
+          let label = m, raw = { face: pm.face, layer: pm.layer, mod: pm.mod, wide: pm.wide, eff };
+          if (outsideNum) {
+            // Re-derive true depth/width against the live state, before applying.
+            const { depth, ownWide } = outsideNumberedInfo(cubies, pm, Nper, eff);
+            label = moveStr(pm.face, depth > 1 ? depth : pm.layer, pm.mod, ownWide);
+            raw.wide = !!parseMove(label).wide;
+          }
+          applySimMove(cubies, raw, _sim);
+          _sim.moves.push(raw);
+          return label;
+        });
+        if (moves.length) phasesData.push({ dims: stages[i].dims, qt: stages[i].qt, moves, startIdx });
       }
+      // The generation sim has already walked the whole scramble, so hand it
+      // straight to the replay cache rather than replaying it again to draw
+      // the final state.
+      if (_sim) _replay = { sim: _sim, N: simN, idx: _sim.moves.length, cubies };
       const out = document.getElementById('out');
       if (!phasesData.length) {
         out.innerHTML = '<p style="color:#666;font-size:14px;margin-top:1rem;">No moves possible for this puzzle.</p>';
@@ -824,9 +1039,9 @@
         // phase's own w/h/d, so the diagram must use Nper to stay in bounds
         // and stay consistent with what the notation actually means.
         const [hw, hh, hd] = outsideNum ? Nper : [w, h, d];
-        p.moves.forEach(m => {
+        p.moves.forEach((m, j) => {
           const pm = parseMove(m);
-          const da = pm ? ` data-face="${pm.face}" data-layer="${pm.layer}" data-mod="${pm.mod}" data-wide="${pm.wide}" data-w="${hw}" data-h="${hh}" data-d="${hd}"` : '';
+          const da = pm ? ` data-face="${pm.face}" data-layer="${pm.layer}" data-mod="${pm.mod}" data-wide="${pm.wide}" data-w="${hw}" data-h="${hh}" data-d="${hd}" data-idx="${p.startIdx + j}"` : '';
           html += `<span class="move${pm && pm.mod !== '2' ? ' qt' : ''}"${da}>${m}</span>`;
         });
         html += `</div>`;
@@ -837,8 +1052,26 @@
           <button onclick="copyScramble(this)"><i class="ti ti-copy" style="font-size:13px;margin-right:4px;vertical-align:-1px;"></i>Copy</button>
         </div>
         <div class="full-scramble" id="full-scr">${allMoves.join(' ')}</div>
+        <div id="final-state" style="margin-top:14px;display:flex;flex-direction:column;align-items:center;gap:4px;"></div>
       </div>`;
       out.innerHTML = html;
+      renderFinalState();
+    }
+    // The fully-scrambled state, shown under the scramble text.
+    function renderFinalState() {
+      const el = document.getElementById('final-state');
+      if (!el) return;
+      const W = Math.max(1, parseInt(document.getElementById('iw').value) || 1);
+      const H = Math.max(1, parseInt(document.getElementById('ih').value) || 1);
+      const D = Math.max(1, parseInt(document.getElementById('id').value) || 1);
+      if (!canRenderState(W, H, D)) {
+        el.innerHTML = `<span style="font-size:12px;color:#666;">Coloured diagrams are off above ${STATE_MAX_CUBIES} cubies (this puzzle has ${W * H * D}).</span>`;
+        return;
+      }
+      if (!_sim) { el.innerHTML = ''; return; }
+      const c = stateAtIndex(_sim.moves.length);
+      const N = constCubeN(_sim.W, _sim.H, _sim.D);
+      el.innerHTML = `<span style="font-size:12px;color:#666;">Scrambled state</span>` + renderStateSVG(c, null, !!N, 240);
     }
     function copyScramble(btn) {
       navigator.clipboard.writeText(document.getElementById('full-scr').textContent).then(() => {
@@ -847,14 +1080,24 @@
       });
     }
 
+    // Either the coloured state just before this move, or the plain
+    // reduced-cuboid schematic, per the "Coloured state on hover" setting.
+    function moveTooltipSVG(span) {
+      const { face, layer, mod, wide, w, h, d, idx } = span.dataset;
+      if (isStateDiagram() && _sim && idx !== undefined && canRenderState(_sim.W, _sim.H, _sim.D)) {
+        const svg = stateTooltipSVG(+idx);
+        if (svg) return svg;
+      }
+      return cuboidSVG(+w, +h, +d, face, +layer, mod, wide === 'true');
+    }
+
     (function(){
       const tt = document.getElementById('move-tooltip');
       const tti = document.getElementById('move-tooltip-inner');
       document.getElementById('out').addEventListener('mouseover', function(e) {
         const span = e.target.closest('.move[data-face]');
         if (!span) return;
-        const {face, layer, mod, wide, w, h, d} = span.dataset;
-        tti.innerHTML = cuboidSVG(+w, +h, +d, face, +layer, mod, wide === 'true');
+        tti.innerHTML = moveTooltipSVG(span);
         tt.style.display = 'block';
       });
       document.getElementById('out').addEventListener('mouseout', function(e) {
@@ -869,8 +1112,7 @@
         const span = e.target.closest('.move[data-face]');
         if (!span) { tt.style.display = 'none'; return; }
         e.preventDefault();
-        const {face, layer, mod, wide, w, h, d} = span.dataset;
-        tti.innerHTML = cuboidSVG(+w, +h, +d, face, +layer, mod, wide === 'true');
+        tti.innerHTML = moveTooltipSVG(span);
         tt.style.display = 'block';
         const r = span.getBoundingClientRect();
         tt.style.left = Math.min(r.left, window.innerWidth - 210) + 'px';
@@ -880,6 +1122,8 @@
         if (!e.target.closest('#out') && !e.target.closest('#move-tooltip')) tt.style.display = 'none';
       });
     })();
+
+    drawCuboid();
   </script>
 </body>
 </html>
