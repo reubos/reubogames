@@ -115,6 +115,21 @@
   .toggle input { accent-color: #6ea8fe; cursor: pointer; margin: 0; }
 
   .counts { color: var(--muted); font-size: 0.9rem; margin: 16px 0 0; }
+
+  /* the answer written out: a hexagon's letter and a sign for each turn */
+  .plan {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 8px;
+    margin: 12px 0 0;
+    font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+    font-size: 0.9rem;
+    color: var(--muted);
+    user-select: none; -webkit-user-select: none;
+  }
+  .plan span { padding: 1px 4px; border-radius: 4px; }
+  .plan .done { opacity: 0.3; }
+  .plan .next { color: #fff; background: #3a3f47; }
 </style>
 </head>
 <body>
@@ -132,12 +147,15 @@
     <button type="button" id="scramble">Scramble</button>
     <button type="button" id="reset">Reset puzzle</button>
     <button type="button" id="solve">Solve</button>
+    <button type="button" id="step" style="display:none">Step</button>
     <label class="toggle"><input type="checkbox" id="invert">Invert controls</label>
     <label class="toggle"><input type="checkbox" id="bandaged">Bandaged</label>
     <label class="toggle"><input type="checkbox" id="three">Three circles</label>
   </div>
 
   <p class="counts" id="hint"></p>
+
+  <div class="plan" id="plan" style="display:none"></div>
 
   <p class="counts" id="counts"></p>
 </div>
@@ -761,7 +779,7 @@ const clickDir = () => (inverted ? -1 : 1);
 // a turn, shown: made at once, then wound back a sixth and played forward
 function turn(hex, dir) {
   if (stuck(hex)) return;                 // a bandage lies across the collar
-  stopPlaying();                          // a turn by hand takes the board back
+  clearPlan();                            // a turn by hand leaves the answer stale
   settle();
   move(hex, dir);
   repaint();
@@ -868,7 +886,6 @@ const SOLVE_STALL = 10;                     // rounds without progress before re
    is what actually stops the page. Past this the record is dropped and started
    again; the beam carries on from where it is. */
 const SOLVE_SEEN_CAP = 300000;
-const SOLVE_STEP_MS = 90;                   // how fast the answer is played back
 
 const solvable = () => puzzle === PUZZLES.three && !bandaged;
 
@@ -1164,37 +1181,75 @@ function showHint() {
     (bandaged ? ' A collar a bandage lies across will not turn.' : '');
 }
 
-/* Playing an answer back. Each turn is shown, only faster than a turn made by
-   hand, and any click on the board stops it where it stands — the moves are
-   made one at a time, so stopping leaves a position like any other. */
-let playing = false;
-const stopPlaying = () => { playing = false; };
+/* An answer is written down rather than played out. A settled run of turns on
+   one hexagon is one to three of them the same way about, so it reads as the
+   hexagon's letter and that many signs — R+ , R++ , W- — and the whole answer
+   is a line of those. Stepping takes one at a time, and since a collar is a
+   circle and turns onto itself at any angle, a run of two or three is shown as
+   the one sweep of 120° or 180° that it is. */
+let plan = null, planAt = 0;
 
-async function playSolution(seq, say) {
-  playing = true;
-  for (let i = 0; i < seq.length && playing; i++) {
-    const g = seq[i], hex = boardHexes[g >> 1], dir = (g & 1) ? -1 : 1;
-    settle();
-    move(hex, dir);
-    repaint(); refresh();
-    spin(hex, -dir * 60, SOLVE_STEP_MS);
-    say(`Solving — turn ${i + 1} of ${seq.length}.`);
-    await new Promise(r => setTimeout(r, SOLVE_STEP_MS));
+const clearPlan = () => { plan = null; planAt = 0; showPlan(); };
+
+// consecutive turns of the same hexagon the same way come out as one token
+function asPlan(seq) {
+  const out = [];
+  for (let i = 0; i < seq.length; ) {
+    let j = i;
+    while (j < seq.length && seq[j] === seq[i]) j++;
+    out.push({ hex: seq[i] >> 1, dir: (seq[i] & 1) ? -1 : 1, n: j - i });
+    i = j;
   }
+  return out;
+}
+
+const tokenText = t =>
+  boardHexes[t.hex].parts[0].colour[0].toUpperCase() + (t.dir > 0 ? '+' : '-').repeat(t.n);
+
+function showPlan() {
+  const box = document.getElementById('plan');
+  const step = document.getElementById('step');
+  if (!plan) {
+    box.style.display = 'none';
+    box.replaceChildren();
+    step.style.display = 'none';
+    return;
+  }
+  box.style.display = '';
+  step.style.display = '';
+  step.disabled = planAt >= plan.length;
+  step.textContent = planAt >= plan.length ? 'Done' : `Step (${planAt + 1}/${plan.length})`;
+  box.replaceChildren(...plan.map((t, i) => {
+    const el = document.createElement('span');
+    el.textContent = tokenText(t);
+    el.className = i < planAt ? 'done' : i === planAt ? 'next' : '';
+    return el;
+  }));
+}
+
+function stepPlan() {
+  if (!plan || planAt >= plan.length) return;
+  const t = plan[planAt];
+  const hex = boardHexes[t.hex];
   settle();
-  playing = false;
+  for (let k = 0; k < t.n; k++) move(hex, t.dir);
+  repaint(); refresh();
+  // wound back the whole run, so two turns sweep 120° and three sweep 180°
+  spin(hex, -t.dir * 60 * t.n, SPIN_MS + 70 * (t.n - 1));
+  planAt++;
+  showPlan();
 }
 
 function showSolveButton() {
   const b = document.getElementById('solve');
-  b.disabled = !solvable() || playing;
-  b.title = solvable() ? 'Solve this board'
+  b.disabled = !solvable();
+  b.title = solvable() ? 'Work out an answer for this board'
     : 'The solver only knows the three-circle puzzle, unbandaged';
 }
 
 // everything the board shows, after anything that changes what it should show
 function redraw() {
-  settle(); stopPlaying(); reset(); repaint(); refresh(); frame(); showHint();
+  settle(); clearPlan(); reset(); repaint(); refresh(); frame(); showHint();
   showSolveButton();
 }
 
@@ -1204,30 +1259,33 @@ render();
 redraw();
 
 document.getElementById('scramble').addEventListener('click', () => {
-  stopPlaying(); scramble(); showSolveButton();
+  clearPlan(); scramble(); showSolveButton();
 });
 
 /* The tables take a moment to build and the search a few seconds, so the line
    under the board reports as it goes and the page is let breathe between
    rounds. Kept for as long as the puzzle does not change. */
 document.getElementById('solve').addEventListener('click', async () => {
-  if (!solvable() || playing) return;
+  if (!solvable()) return;
   const say = t => { document.getElementById('hint').textContent = t; };
   const b = document.getElementById('solve');
   b.disabled = true;
-  settle();
-  say('Solving — building the moves to work with.');
+  settle(); clearPlan();
+  say('Working out an answer — building the moves to work with.');
   await new Promise(r => setTimeout(r, 0));
   if (!kit) kit = buildKit();
-  const raw = await findSolution(n => say(`Solving — ${n} parts still out of place.`));
-  if (!raw) { say('No solution found. Try scrambling again.'); showSolveButton(); return; }
-  const seq = simplifySolution(raw);
-  await playSolution(seq, say);
-  showHint();
+  const raw = await findSolution(n => say(`Working out an answer — ${n} parts still out of place.`));
   showSolveButton();
+  if (!raw) { say('No answer found. Scramble again and try once more.'); return; }
+  plan = asPlan(simplifySolution(raw));
+  planAt = 0;
+  showPlan();
+  const turns = plan.reduce((n, t) => n + t.n, 0);
+  say(`${turns} turns in ${plan.length} moves. Step through them, or turn the board yourself.`);
 });
+document.getElementById('step').addEventListener('click', stepPlan);
 document.getElementById('reset').addEventListener('click', () => {
-  settle(); stopPlaying(); reset(); repaint(); refresh(); showHint(); showSolveButton();
+  settle(); clearPlan(); reset(); repaint(); refresh(); showHint(); showSolveButton();
 });
 document.getElementById('invert').addEventListener('change', e => {
   inverted = e.target.checked;
