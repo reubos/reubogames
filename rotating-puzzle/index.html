@@ -84,8 +84,9 @@
 <body>
 <div class="wrap">
   <h1>Rotating Puzzle</h1>
-  <p class="sub">The rhombitrihexagonal tiling, 3.4.6.4, cut to the 61-tile honeycomb.
-    Every tile is divided between the hexagons around it.</p>
+  <p class="sub">The rhombitrihexagonal tiling, 3.4.6.4, cut to the 61-tile honeycomb
+    and bowed onto circles — one about each hexagon, through the twelve corners of
+    the collar it turns. Every tile is divided between the hexagons around it.</p>
 
   <div class="panel">
     <svg id="board" xmlns="http://www.w3.org/2000/svg"></svg>
@@ -182,12 +183,71 @@ for (let a = -RANGE; a <= RANGE; a++)
       if (tri.some(p => isHex(...p))) FACES.push(tri);
     }
 
+/* =====================================================================
+   THE CIRCLES
+
+   A collar is cut on a dodecagon, and that dodecagon is regular: all twelve
+   corners stand at 2·cos15° from the hexagon's centre, thirty degrees apart.
+   So there is a circle through every one of them, and swapping the dodecagon
+   for its own circumcircle moves no corner of the tiling at all — it only bows
+   each of the twelve edges out by a sagitta of 0.066.
+
+   Every edge of the tiling lies on exactly one collar boundary. A square's two
+   long edges are the boundaries of the two hexagons it does not touch across
+   them, and a triangle's three edges are the boundaries of the three hexagons
+   its corners point at; between them that is every edge there is. So bowing
+   the collars bows the whole tiling, and what is left is the arrangement of
+   one circle about every lattice point: the same corners, the same pieces, the
+   same counts, with every edge an arc.
+
+   The pieces change shape rather than number. A hexagon has all six edges
+   bowed into it and goes concave; a triangle has all three bowed out of it; a
+   square has the two facing hexagons bowed out and the two facing triangles
+   bowed in, so it keeps its area and leans.
+
+   A circle is carried to itself by any turn about its centre, so the collar
+   still turns — and more easily than the dodecagon did.
+   ===================================================================== */
+
+const ARC_R = 2 * Math.cos(Math.PI / 12);      // 1.9319, the dodecagon's circumradius
+
+// The rim of the board is cut by the circles of the hexagons that would have
+// stood outside it, so the lattice is needed a ring wider than the board is.
+const LATTICE = [];
+for (let a = -RANGE - 1; a <= RANGE + 1; a++)
+  for (let b = -RANGE - 1; b <= RANGE + 1; b++) LATTICE.push(at(a, b));
+
+/* The circle an edge runs on is the one with both of its ends on it, and since
+   every edge lies on exactly one collar boundary that is a lookup rather than a
+   choice — checked, because taking the first of two would be silently wrong. */
+function arcCentre(p, q) {
+  const on = v => LATTICE.filter(Z =>
+    Math.abs(Math.hypot(v[0] - Z[0], v[1] - Z[1]) - ARC_R) < 1e-9);
+  const both = on(p).filter(Z => on(q).some(W => W === Z));
+  if (both.length !== 1) throw new Error(`edge on ${both.length} circles`);
+  return both[0];
+}
+
+// An edge that gets cut in two is cut on its arc, not across its chord, so both
+// halves stay on the circle. The two circles either side of a lattice edge are
+// the same distance from both its ends, so this lands where the straight
+// midpoint used to: on the line of symmetry.
+function arcMid(p, q, Z) {
+  const x = (p[0] + q[0]) / 2 - Z[0], y = (p[1] + q[1]) / 2 - Z[1];
+  const l = Math.hypot(x, y);
+  return [Z[0] + ARC_R * x / l, Z[1] + ARC_R * y / l];
+}
+
 // --- the tiles --------------------------------------------------------
 
 const unit = (p, q) => {
   const x = q[0] - p[0], y = q[1] - p[1], l = Math.hypot(x, y);
   return [x / l, y / l];
 };
+
+// the edges of a shape that is all tiling edges: each corner and the circle the
+// edge leaving it runs on
+const arcs = poly => poly.map((v, k) => [v, arcCentre(v, poly[(k + 1) % poly.length])]);
 
 const mid = (p, q) => [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2];
 
@@ -199,10 +259,17 @@ const mid = (p, q) => [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2];
 
    Which point a part faces is written down once, in the order of `on`: part k
    of a tile faces `on[k]`. That is the whole of the colouring — reset() reads
-   it — so the parts of a tile must be built in the order its points are. */
+   it — so the parts of a tile must be built in the order its points are.
+
+   Each shape carries its corners as `poly`, which is what its centre and the
+   size of the board are worked out from, and an `outline` beside it saying how
+   to get from one corner to the next: along the circle named there, or straight
+   where the edge is a cut through the middle of a tile rather than an edge of
+   the tiling. */
 const tiles = [];
 
-// hexagon: side 1, corners at 0°, 60°, ... so its edges face the neighbours
+// hexagon: side 1, corners at 0°, 60°, ... so its edges face the neighbours.
+// Every edge is the boundary of the collar next door, so all six bow inwards.
 for (const [a, b] of HEXES) {
   const c = at(a, b);
   const poly = [];
@@ -210,7 +277,9 @@ for (const [a, b] of HEXES) {
     const t = k * Math.PI / 3;
     poly.push([c[0] + Math.cos(t), c[1] + Math.sin(t)]);
   }
-  tiles.push({ sides: 6, on: [[a, b]], centre: c, poly, parts: [{ poly }] });
+  const outline = arcs(poly);
+  tiles.push({ sides: 6, on: [[a, b]], centre: c, poly, outline,
+               parts: [{ poly, outline }] });
 }
 
 /* square: astride a lattice edge, one edge shared with each hexagon. Built on
@@ -222,10 +291,19 @@ for (const [p, q] of EDGES) {
   const [ux, uy] = unit(P, Q), wx = -uy, wy = ux;
   const corner = (s, t) =>
     [m[0] + (s * ux + t * wx) / 2, m[1] + (s * uy + t * wy) / 2];
-  const poly = [corner(-1, -1), corner(1, -1), corner(1, 1), corner(-1, 1)];
-  tiles.push({ sides: 4, on: [p, q], centre: m, poly, parts: [
-    { poly: [corner(-1, -1), corner(0, -1), corner(0, 1), corner(-1, 1)] },
-    { poly: [corner(0, -1), corner(1, -1), corner(1, 1), corner(0, 1)] }
+  // the two ends, across the lattice edge, and the two sides, along it
+  const [e0, e1, s1, s0] = [corner(-1, -1), corner(1, -1), corner(1, 1), corner(-1, 1)];
+  const poly = [e0, e1, s1, s0];
+  const [Zb, Zr, Zt, Zl] = [arcCentre(e0, e1), arcCentre(e1, s1),
+                            arcCentre(s1, s0), arcCentre(s0, e0)];
+  // the split runs down the middle of the two sides, and it meets them on the arc
+  const cut0 = arcMid(e0, e1, Zb), cut1 = arcMid(s1, s0, Zt);
+  tiles.push({ sides: 4, on: [p, q], centre: m, poly,
+    outline: [[e0, Zb], [e1, Zr], [s1, Zt], [s0, Zl]], parts: [
+    { poly: [e0, cut0, cut1, s0],
+      outline: [[e0, Zb], [cut0, null], [cut1, Zt], [s0, Zl]] },
+    { poly: [cut0, e1, s1, cut1],
+      outline: [[cut0, Zb], [e1, Zr], [s1, Zt], [cut1, null]] }
   ] });
 }
 
@@ -240,10 +318,15 @@ for (const tri of FACES) {
     const [ux, uy] = unit(f, c);
     return [f[0] + ux / S3, f[1] + uy / S3];
   });
-  const parts = poly.map((v, k) => ({
-    poly: [mid(poly[(k + 2) % 3], v), v, mid(v, poly[(k + 1) % 3]), f]
-  }));
-  tiles.push({ sides: 3, on: tri, centre: f, poly, parts });
+  const outline = arcs(poly);                 // edge k runs from corner k to k+1
+  const cut = poly.map((v, k) => arcMid(v, poly[(k + 1) % 3], outline[k][1]));
+  const parts = poly.map((v, k) => {
+    const b = (k + 2) % 3;                    // the edge arriving at corner k
+    return { poly: [cut[b], v, cut[k], f],
+             outline: [[cut[b], outline[b][1]], [v, outline[k][1]],
+                       [cut[k], null], [f, null]] };
+  });
+  tiles.push({ sides: 3, on: tri, centre: f, poly, outline, parts });
 }
 
 /* =====================================================================
@@ -327,7 +410,22 @@ const svgEl = (name, attrs) => {
   for (const k in attrs) el.setAttribute(k, attrs[k]);
   return el;
 };
-const pts = poly => poly.map(p => p[0].toFixed(4) + ',' + p[1].toFixed(4)).join(' ');
+const xy = p => p[0].toFixed(4) + ',' + p[1].toFixed(4);
+
+/* An outline drawn as a path. Every arc is a thirtieth-turn of its circle, well
+   under a half, so it is always the small one; which way round it goes is
+   whether its far end lies anticlockwise of its near end, and anticlockwise is
+   the sweep flag here because the frame this is drawn in has y running up. */
+function pathOf(outline) {
+  let d = 'M' + xy(outline[0][0]);
+  for (let i = 0; i < outline.length; i++) {
+    const [a, Z] = outline[i], b = outline[(i + 1) % outline.length][0];
+    if (!Z) { d += 'L' + xy(b); continue; }
+    const turn = (a[0] - Z[0]) * (b[1] - Z[1]) - (a[1] - Z[1]) * (b[0] - Z[0]);
+    d += `A${ARC_R.toFixed(4)},${ARC_R.toFixed(4)} 0 0 ${turn > 0 ? 1 : 0} ${xy(b)}`;
+  }
+  return d + 'Z';
+}
 
 // the hairline is the fill again, so the two halves of a tile meet without the
 // background showing through the seam between them
@@ -372,11 +470,18 @@ function scramble() {
 function render() {
   const svg = document.getElementById('board');
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-  for (const t of tiles) for (const [x, y] of t.poly) {
+  const reach = ([x, y]) => {
     if (x < x0) x0 = x;
     if (y < y0) y0 = y;
     if (x > x1) x1 = x;
     if (y > y1) y1 = y;
+  };
+  // an arc on the rim of the board bulges past both its ends, so the middle of
+  // every one of them has to be measured too
+  for (const t of tiles) for (let i = 0; i < t.outline.length; i++) {
+    const [a, Z] = t.outline[i], b = t.outline[(i + 1) % t.outline.length][0];
+    reach(a);
+    if (Z) reach(arcMid(a, b, Z));
   }
   /* The maths has y running up, the way the angles above are written, and SVG
      has it running down, so the board is flipped once here rather than every
@@ -388,14 +493,14 @@ function render() {
 
   const fills = svgEl('g', { 'stroke-width': '0.01' });
   for (const part of allParts) {
-    part.el = svgEl('polygon', { class: 'part', points: pts(part.poly) });
+    part.el = svgEl('path', { class: 'part', d: pathOf(part.outline) });
     paint(part);
     fills.appendChild(part.el);
   }
 
   const edges = svgEl('g', { 'stroke-width': '0.05' });
   for (const t of tiles) {
-    t.el = svgEl('polygon', { class: 'cell', points: pts(t.poly) });
+    t.el = svgEl('path', { class: 'cell', d: pathOf(t.outline) });
     edges.appendChild(t.el);
   }
 
@@ -404,7 +509,7 @@ function render() {
      one part today and need not stay that way. */
   const hits = svgEl('g', { 'stroke-width': '0.06' });
   for (const h of hexTiles) {
-    h.hit = svgEl('polygon', { class: 'hit', points: pts(h.poly) });
+    h.hit = svgEl('path', { class: 'hit', d: pathOf(h.outline) });
     h.hit.addEventListener('click', () => turn(h, h.acw));
     h.hit.addEventListener('contextmenu', e => { e.preventDefault(); turn(h, h.cw); });
     hits.appendChild(h.hit);
