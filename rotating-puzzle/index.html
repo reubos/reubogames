@@ -61,6 +61,14 @@
     pointer-events: none;
   }
 
+  /* a bandage: one outline round the lens, the lines inside it hidden */
+  .band {
+    fill: none;
+    stroke: #17181a;
+    stroke-linejoin: round;
+    pointer-events: none;
+  }
+
   /* transparent, not none: a hexagon has to be there to be clicked */
   .hit {
     fill: transparent;
@@ -69,6 +77,9 @@
     cursor: pointer;
   }
   .hit:hover { stroke: rgba(255, 255, 255, 0.75); }
+  /* a collar a bandage lies across says so before it is clicked */
+  .hit.stuck { cursor: not-allowed; }
+  .hit.stuck:hover { stroke: rgba(255, 110, 110, 0.9); }
 
   .controls { display: flex; flex-wrap: wrap; gap: 10px; margin: 16px 0 0; }
 
@@ -107,6 +118,7 @@
     <button type="button" id="scramble">Scramble</button>
     <button type="button" id="reset">Reset puzzle</button>
     <label class="toggle"><input type="checkbox" id="invert">Invert controls</label>
+    <label class="toggle"><input type="checkbox" id="bandaged">Bandaged</label>
   </div>
 
   <p class="counts" id="hint"></p>
@@ -409,7 +421,80 @@ function turnMap(hex, ang) {
 for (const h of hexTiles) {
   h.cw = turnMap(h, Math.PI / 3);
   h.acw = turnMap(h, -Math.PI / 3);
+  h.holds = new Set(h.collar);
 }
+
+/* =====================================================================
+   THE BANDAGES
+
+   Two neighbouring circles cross in a lens — a vesica piscis — and the lens is
+   exactly three tiles: the square astride the lattice edge between them and the
+   triangles on the faces either side. Their areas come to 2.1302 and so does
+   the lens, so there is nothing else in it and nothing of them outside it.
+
+   Bandaging one glues its three into a single piece. A lens sits in the collar
+   of each end of its edge and nowhere else, since the square does; so where a
+   bandage lies in the collar being turned it goes round whole, onto the next
+   lens along. What stops a turn is a bandage the collar only partly holds — one
+   of its triangles inside, the square and the other triangle out — which
+   happens when the hexagon being turned is the third corner of one of the
+   bandage's faces. Then the collar cannot turn at all, either way.
+
+   The six they start on are the lens at the far point of each outer hexagon.
+   Those are the only lenses whose three tiles lie in one collar and no other,
+   both of their third corners being off the board, so nothing is blocked to
+   begin with — the bandages have to be dragged inwards before they bite. They
+   are also the six the board bulges out at, each with half of itself on the rim
+   and grey.
+   ===================================================================== */
+
+const pairKey = ps => ps.map(p => key(...p)).sort().join('|');
+
+// the square and the two triangles that fill each lattice edge's lens
+const bySeat = new Map();                   // a tile by the points it sits on
+for (const t of tiles) if (t.sides !== 6) bySeat.set(pairKey(t.on), t);
+
+const SLOTS = EDGES.map(([p, q]) => {
+  const has = (f, r) => f.some(s => key(...s) === key(...r));
+  const faces = FACES.filter(f => has(f, p) && has(f, q));
+  if (faces.length !== 2) throw new Error('a lattice edge without two faces');
+  const tiles3 = [bySeat.get(pairKey([p, q])), ...faces.map(f => bySeat.get(pairKey(f)))];
+  if (tiles3.some(t => !t)) throw new Error('a lens off the board');
+  // the lens outline: the two corners where the circles cross, and the ninety
+  // degrees of each circle that runs between them
+  const P = at(...p), Q = at(...q), m = mid(P, Q), [ux, uy] = unit(P, Q);
+  const h = Math.sqrt(ARC_R * ARC_R - (PITCH / 2) ** 2);
+  const V = s => [m[0] - s * uy * h, m[1] + s * ux * h];
+  return { edge: [p, q], tiles: tiles3, outline: [[V(1), P], [V(-1), Q]] };
+});
+
+const slotBy = new Map(SLOTS.map(s => [pairKey(s.edge), s]));
+const slotAt = (p, q) => slotBy.get(pairKey([p, q]));
+
+// the six neighbour offsets in order of angle, so a sixth-turn is one step on
+const NB = [[1, 0], [0, 1], [-1, 1], [-1, 0], [0, -1], [1, -1]];
+const nbAt = new Map(NB.map((o, i) => [key(...o), i]));
+
+/* Where a bandage goes when the collar holding it turns. The lens keeps the
+   hexagon it is turning about and takes the next neighbour round, which is the
+   whole of it — no geometry needed, the lattice says it. */
+function slotTurn(slot, hex, dir) {
+  const H = hex.on[0], hk = key(...H);
+  const other = key(...slot.edge[0]) === hk ? slot.edge[1] : slot.edge[0];
+  const i = nbAt.get(key(other[0] - H[0], other[1] - H[1]));
+  const [da, db] = NB[(i + (dir > 0 ? 1 : 5)) % 6];
+  return slotAt(H, [H[0] + da, H[1] + db]);
+}
+
+const HOME_BANDS = HEXES.slice(1).map(([a, b]) => slotAt([a, b], [2 * a, 2 * b]));
+let bandaged = false;                       // whether the alternate puzzle is on
+let bands = new Set();                      // the lenses glued, where they are now
+
+// a collar turns unless a bandage is only partly in it
+const stuck = hex => [...bands].some(s => {
+  const n = s.tiles.filter(t => hex.holds.has(t)).length;
+  return n && n < s.tiles.length;
+});
 
 // --- drawing ----------------------------------------------------------
 
@@ -456,6 +541,10 @@ function move(hex, dir) {
   const map = dir > 0 ? hex.acw : hex.cw;
   const taken = map.map(([part, src]) => [part, src.colour]);
   for (const [part, colour] of taken) { part.colour = colour; paint(part); }
+  // a bandage the collar holds whole goes round with it, onto the next lens
+  if (bands.size)
+    bands = new Set([...bands].map(s =>
+      hex.holds.has(s.tiles[0]) ? slotTurn(s, hex, dir) : s));
 }
 
 /* ---- showing a turn -------------------------------------------------
@@ -483,8 +572,28 @@ const settle = () => { if (spinning) spinning(); };
    where the transform puts it, carrying it round also keeps the hover honest:
    it is live against where the hexagon has got to, not where it set off from.
    No other hexagon's target moves, none of them being in this collar. */
+/* What a bandage looks like: its own outline drawn, and the lines between the
+   three tiles under it gone, so it reads as the one piece it now is. The parts
+   keep their colours — the gluing is about what may move, not what colour it
+   is — so a bandage shows the same halves it did before, the inner one the
+   hexagon's and the outer one grey. */
+function refresh() {
+  const glued = new Set();
+  for (const s of SLOTS) {
+    const on = bands.has(s);
+    s.el.style.display = on ? '' : 'none';
+    if (on) for (const t of s.tiles) glued.add(t);
+  }
+  for (const t of tiles) t.el.style.display = glued.has(t) ? 'none' : '';
+  for (const h of hexTiles) h.hit.classList.toggle('stuck', stuck(h));
+}
+
+// the bandages a collar carries round with it
+const bandsIn = hex => [...bands].filter(s => hex.holds.has(s.tiles[0])).map(s => s.el);
+
 function spin(hex, from) {
-  const els = [hex.hit, ...hex.collar.flatMap(t => [t.el, ...t.parts.map(p => p.el)])];
+  const els = [hex.hit, ...bandsIn(hex),
+               ...hex.collar.flatMap(t => [t.el, ...t.parts.map(p => p.el)])];
   const [cx, cy] = hex.centre;
   const place = a => {
     const tr = `rotate(${a.toFixed(3)} ${cx.toFixed(4)} ${cy.toFixed(4)})`;
@@ -525,8 +634,10 @@ const clickDir = () => (inverted ? -1 : 1);
 
 // a turn, shown: made at once, then wound back a sixth and played forward
 function turn(hex, dir) {
+  if (stuck(hex)) return;                 // a bandage lies across the collar
   settle();
   move(hex, dir);
+  refresh();
   spin(hex, -dir * 60);
 }
 
@@ -537,6 +648,7 @@ function turn(hex, dir) {
 function reset() {
   for (const t of tiles)
     t.parts.forEach((part, k) => { part.colour = colourAt(...t.on[k]); });
+  bands = new Set(bandaged ? HOME_BANDS : []);
 }
 
 /* Turns taken at random. Every one of them is a legal move, so a scramble is
@@ -547,9 +659,14 @@ function reset() {
 const SCRAMBLE_TURNS = 40;
 function scramble() {
   settle();
-  for (let i = 0; i < SCRAMBLE_TURNS; i++)
-    move(hexTiles[Math.floor(Math.random() * hexTiles.length)],
-         Math.random() < 0.5 ? 1 : -1);
+  for (let i = 0; i < SCRAMBLE_TURNS; i++) {
+    // only from the collars that will turn, so a scramble is a run of real
+    // moves and can always be walked back the way it came
+    const free = hexTiles.filter(h => !stuck(h));
+    if (!free.length) break;
+    move(free[Math.floor(Math.random() * free.length)], Math.random() < 0.5 ? 1 : -1);
+  }
+  refresh();
 }
 
 function render() {
@@ -589,6 +706,14 @@ function render() {
     edges.appendChild(t.el);
   }
 
+  // one outline per lens, ready for whichever of them are glued at the time
+  const bandLayer = svgEl('g', { 'stroke-width': '0.05' });
+  for (const s of SLOTS) {
+    s.el = svgEl('path', { class: 'band', d: pathOf(s.outline) });
+    s.el.style.display = 'none';
+    bandLayer.appendChild(s.el);
+  }
+
   /* What is clicked is the hexagon, so the hexagons get a layer of their own
      over the top: the parts underneath would do for a target, but a hexagon is
      one part today and need not stay that way. */
@@ -601,7 +726,7 @@ function render() {
     hits.appendChild(h.hit);
   }
 
-  root.append(fills, edges, hits);
+  root.append(fills, edges, bandLayer, hits);
   svg.replaceChildren(root);
   // right-clicking is a move, so the menu never wants to come up over the board
   svg.addEventListener('contextmenu', e => e.preventDefault());
@@ -611,24 +736,34 @@ function render() {
     `${tiles.length} tiles — ${n(6)} hexagons, ${n(4)} squares, ${n(3)} triangles.`;
 }
 
-// said in the one place the toggle can change it, so the two cannot disagree
+// said in the one place the toggles can change it, so they cannot disagree
 function showHint() {
   const way = d => d > 0 ? 'anticlockwise' : 'clockwise';
   document.getElementById('hint').textContent =
     `Click a hexagon to turn its collar ${way(clickDir())}, ` +
-    `right-click to turn it ${way(-clickDir())}.`;
+    `right-click to turn it ${way(-clickDir())}.` +
+    (bandaged ? ' A collar a bandage lies across will not turn.' : '');
 }
 
 reset();
 render();
+refresh();
 showHint();
 document.getElementById('scramble').addEventListener('click', scramble);
 document.getElementById('reset').addEventListener('click', () => {
-  settle(); reset(); repaint();
+  settle(); reset(); repaint(); refresh();
 });
 document.getElementById('invert').addEventListener('change', e => {
   inverted = e.target.checked;
   showHint();
+});
+/* Changing puzzle puts the board back to the start. Where the bandages would
+   go on a board already scrambled has no answer — they were never carried
+   through those turns — and dropping them onto it could leave colours that no
+   run of bandaged moves can reach. */
+document.getElementById('bandaged').addEventListener('change', e => {
+  bandaged = e.target.checked;
+  settle(); reset(); repaint(); refresh(); showHint();
 });
 </script>
 </body>
