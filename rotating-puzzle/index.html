@@ -2417,11 +2417,25 @@ async function bandBrute() {
           if (!bk.canTurn(cfg, h)) continue;
           for (const dir of [0, 1]) {
             const g = h * 2 + dir;
-            const k2 = keyOf(k, kit.gens[g ^ 1], bk.shove(cfg, h, dir ^ 1));
-            if (B.has(k2)) continue;
-            B.set(k2, { g, from: k });
-            next.push(k2);
-            if (B.size >= BRUTE_HOME) break grow;
+            /* One turn, and the same turn again, each a step of its own. On
+               a board fused into lenses the answers run almost wholly in
+               120-degree turns — measured, singles come at the ends and
+               doubles are everything between — and a search that takes a
+               double in one stride covers those answers in half the depth,
+               which for a meeting in the middle is most of the battle. */
+            const c1 = bk.shove(cfg, h, dir ^ 1);
+            const k1 = keyOf(k, kit.gens[g ^ 1], c1);
+            if (!B.has(k1)) {
+              B.set(k1, { g, n: 1, from: k });
+              next.push(k1);
+              if (B.size >= BRUTE_HOME) break grow;
+            }
+            const k2 = keyOf(k1, kit.gens[g ^ 1], bk.shove(c1, h, dir ^ 1));
+            if (!B.has(k2)) {
+              B.set(k2, { g, n: 2, from: k });
+              next.push(k2);
+              if (B.size >= BRUTE_HOME) break grow;
+            }
           }
         }
         if ((++tick & 1023) === 0) await new Promise(r => setTimeout(r, 0));
@@ -2434,7 +2448,7 @@ async function bandBrute() {
   // the turns that take a position the homeward side holds on to home
   const wayOn = k => {
     const w = [];
-    for (let e = B.get(k); e; e = B.get(e.from)) w.push(e.g);
+    for (let e = B.get(k); e; e = B.get(e.from)) { w.push(e.g); if (e.n === 2) w.push(e.g); }
     return w;
   };
   const k0 = keyOf(kit.read(), ident, bandNow(bk));
@@ -2443,7 +2457,7 @@ async function bandBrute() {
   const A = new Map([[k0, null]]);
   const wayOut = k => {
     const w = [];
-    for (let e = A.get(k); e; e = A.get(e.from)) w.unshift(e.g);
+    for (let e = A.get(k); e; e = A.get(e.from)) { w.unshift(e.g); if (e.n === 2) w.unshift(e.g); }
     return w;
   };
   let front = [k0], tick = 0;
@@ -2455,12 +2469,21 @@ async function bandBrute() {
         if (!bk.canTurn(cfg, h)) continue;
         for (const dir of [0, 1]) {
           const g = h * 2 + dir;
-          const k2 = keyOf(k, kit.gens[g], bk.shove(cfg, h, dir));
-          if (A.has(k2)) continue;
-          if (B.has(k2)) return wayOut(k).concat(g, wayOn(k2));
-          A.set(k2, { g, from: k });
-          next.push(k2);
-          if (A.size >= BRUTE_SEEK) return null;
+          const c1 = bk.shove(cfg, h, dir);
+          const k1 = keyOf(k, kit.gens[g], c1);
+          if (!A.has(k1)) {
+            if (B.has(k1)) return wayOut(k).concat(g, wayOn(k1));
+            A.set(k1, { g, n: 1, from: k });
+            next.push(k1);
+            if (A.size >= BRUTE_SEEK) return null;
+          }
+          const k2 = keyOf(k1, kit.gens[g], bk.shove(c1, h, dir));
+          if (!A.has(k2)) {
+            if (B.has(k2)) return wayOut(k).concat(g, g, wayOn(k2));
+            A.set(k2, { g, n: 2, from: k });
+            next.push(k2);
+            if (A.size >= BRUTE_SEEK) return null;
+          }
         }
       }
       // let the page breathe now and then; this can run some seconds
