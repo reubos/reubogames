@@ -89,6 +89,26 @@
     pointer-events: none;                 /* the hexagon under it is still the target */
   }
 
+  /* Choosing the bandaging: the seams between tiles, shown only while they are
+     being chosen. A seam still there is drawn faintly; one taken out is not
+     drawn at all, the bandage outline having taken over saying where it went.
+     Hovering lights whichever seam the pointer would toggle, so a seam that
+     has gone can still be found and cut open again. */
+  .cut {
+    fill: none;
+    stroke: #6ea8fe;
+    stroke-width: 0.05;
+    stroke-linecap: round;
+    opacity: 0.5;
+    pointer-events: none;                 /* the grab beneath it is the target */
+  }
+  .cut.gone { opacity: 0; }
+  /* a hairline arc is far too fine a thing to aim at, so the target is fat */
+  .grab { fill: none; stroke: transparent; stroke-width: 0.24; cursor: pointer; }
+  .grab:hover + .cut { opacity: 1; stroke-width: 0.09; }
+  /* while the seams are being chosen the collars are not for turning */
+  #board.cutting .hit { pointer-events: none; }
+
   /* transparent, not none: a hexagon has to be there to be clicked */
   .hit {
     fill: transparent;
@@ -175,6 +195,9 @@
       <span id="where"></span>
       <button type="button" id="step" title="Forward one move">&#9654;</button>
     </span>
+    <button type="button" id="cuts">Choose bandages</button>
+    <button type="button" id="allcuts" style="display:none">Cut them all open</button>
+    <button type="button" id="shipcuts" style="display:none">Back to the standard ones</button>
     <label class="toggle"><input type="checkbox" id="invert">Invert controls</label>
     <label class="toggle"><input type="checkbox" id="bandaged">Bandaged</label>
     <label class="toggle"><input type="checkbox" id="three">Three circles</label>
@@ -627,6 +650,101 @@ const stuck = hex => bands.some(b => {
   return n && n < b.tiles.length;
 });
 
+/* ---- bandaging to taste ---------------------------------------------
+
+   A seam is where two tiles meet, and taking one out glues them. In this
+   tiling every seam is a square's: a hexagon's six edges each face a square,
+   a triangle's three each face a square, and no two squares touch — so what
+   can be taken out is the four edges of every square, 48 of them on the
+   three-circle board and 120 on the seven.
+
+   Where a seam lies is fixed. Tiles do not move — the colours do, and a
+   bandage is handed from tile to tile as its collar turns — so a seam names
+   the same place whatever state the board is in, and the groups are worked
+   out at home from the seams that have gone. That is also why the seams are
+   only offered at home: a bandage dropped onto a scrambled board was never
+   carried through the turns that scrambled it, and there is no saying where
+   it ought to have ended up.
+
+   The groups this gives are any shape and size at all, which the rest of the
+   puzzle does not mind — nothing in it counts to three. A collar turns unless
+   a group is partly in it, a bandage is drawn by stitching its tiles'
+   outlines together, and the solver asks a pair or a run of five exactly what
+   it asks the trios the puzzle ships with. */
+
+// the seams of the whole tiling, each with the two tiles it parts
+const everyCut = (() => {
+  const spot = p => p[0].toFixed(4) + ',' + p[1].toFixed(4);
+  const bySeam = new Map();
+  for (const t of tiles)
+    for (let i = 0; i < t.outline.length; i++) {
+      const [a, Z] = t.outline[i], b = t.outline[(i + 1) % t.outline.length][0];
+      const k = [spot(a), spot(b)].sort().join('|');
+      let e = bySeam.get(k);
+      if (!e) bySeam.set(k, e = { key: k, a, b, Z, tiles: [] });
+      e.tiles.push(t);
+    }
+  // a seam with one tile on it is on the rim, with nothing across it to glue to
+  return [...bySeam.values()].filter(e => e.tiles.length === 2);
+})();
+
+let cutList = [];                           // the seams of the board in play
+let cutting = false;                        // whether the player is choosing them
+
+// the seams taken out, one set to a puzzle, so the two boards keep their own
+const cutsGone = () => puzzle.gone || (puzzle.gone = new Set());
+/* Whether the bandaging is the player's, which is not the same as their having
+   glued anything: opening the chooser hands the board over, and cutting every
+   seam open again is then a board with no bandages on it and not a board back
+   on the shipped ones. */
+const ownBands = () => bandaged && !!puzzle.own;
+
+/* The bandaging the board starts from, asked for in one place. Both the board
+   and the solver's tables have to be built on the same answer: tables built on
+   the shipped shapes while the board wore the player's would have no entry for
+   any arrangement the board could actually be in. */
+const homeBands = () => ownBands() ? cutBands() : bandaged ? puzzle.bands() : [];
+
+/* The groups the missing seams leave: tiles joined wherever the seam between
+   them has gone, and every group of more than one is a bandage. */
+function cutBands() {
+  const board = tiles.filter(t => onBoard.has(t));
+  const idx = new Map(board.map((t, i) => [t, i]));
+  const owner = board.map((_, i) => i);
+  const find = i => { while (owner[i] !== i) i = owner[i] = owner[owner[i]]; return i; };
+  const gone = cutsGone();
+  for (const c of cutList) {
+    if (!gone.has(c.key)) continue;
+    const a = find(idx.get(c.tiles[0])), b = find(idx.get(c.tiles[1]));
+    if (a !== b) owner[a] = b;
+  }
+  const groups = new Map();
+  board.forEach((t, i) => {
+    const r = find(i);
+    if (!groups.has(r)) groups.set(r, []);
+    groups.get(r).push(t);
+  });
+  return [...groups.values()].filter(g => g.length > 1);
+}
+
+/* Opening the chooser starts from the bandaging the puzzle ships with rather
+   than from a bare board, so those shapes are there to be added to or taken
+   apart. Every seam inside a shipped group is one that has gone.
+
+   Only ever the once, though — after that the board is the player's and
+   whatever they have left it as stands, including nothing at all. Pressing
+   for the shipped ones again is what puts it back. */
+function seedCuts() {
+  if (puzzle.own) return;
+  puzzle.own = true;
+  const gone = cutsGone();
+  for (const group of puzzle.bands()) {
+    const has = new Set(group);
+    for (const c of cutList)
+      if (has.has(c.tiles[0]) && has.has(c.tiles[1])) gone.add(c.key);
+  }
+}
+
 /* The outline of a bandage: every edge of every tile under it, with the ones
    they share dropped and the rest stitched end to end. The tiles are all wound
    the same way round, so a shared edge is walked once in each direction and the
@@ -642,12 +760,36 @@ function unionOutline(group) {
   const seen = new Map();
   for (const s of steps) seen.set(span(s), (seen.get(span(s)) || 0) + 1);
   const rim = steps.filter(s => seen.get(span(s)) === 1);
-  const next = new Map(rim.map(s => [spot(s.a), s]));
-  const out = [];
-  let s = rim[0];
-  do { out.push([s.a, s.Z]); s = next.get(spot(s.b)); } while (s && s !== rim[0]);
-  if (out.length !== rim.length) throw new Error('a bandage in more than one piece');
-  return out;
+
+  /* Walked into loops — more than one where the shape wants it. A group the
+     player made can have a hole in it: glue the twelve tiles of a collar and
+     leave its hexagon out, and the rim is a ring with the hexagon's own
+     outline inside it. It can also pinch, meeting itself at a corner, so what
+     leaves a point is kept as a list and taken from rather than looked up. */
+  const leaving = new Map();
+  for (const s of rim) {
+    const k = spot(s.a);
+    if (!leaving.has(k)) leaving.set(k, []);
+    leaving.get(k).push(s);
+  }
+  const loops = [];
+  let left = rim.length;
+  while (left > 0) {
+    let s = null;
+    for (const list of leaving.values()) if (list.length) { s = list[0]; break; }
+    const loop = [];
+    while (s) {
+      const list = leaving.get(spot(s.a)), i = list.indexOf(s);
+      if (i < 0) break;                     // back where this loop began
+      list.splice(i, 1);
+      left--;
+      loop.push([s.a, s.Z]);
+      const on = leaving.get(spot(s.b));
+      s = on && on.length ? on[0] : null;
+    }
+    loops.push(loop);
+  }
+  return loops;
 }
 
 // --- drawing ----------------------------------------------------------
@@ -676,6 +818,17 @@ function pathOf(outline) {
   }
   return d + 'Z';
 }
+
+// a shape of several loops is those loops one after another in the one path
+const pathOfLoops = loops => loops.map(pathOf).join('');
+
+/* One edge on its own, which pathOf will not do — it draws closed outlines.
+   Used for the seams, where each is drawn and clicked by itself. */
+const arcPath = (a, b, Z) => {
+  if (!Z) return 'M' + xy(a) + 'L' + xy(b);
+  const turn = (a[0] - Z[0]) * (b[1] - Z[1]) - (a[1] - Z[1]) * (b[0] - Z[0]);
+  return `M${xy(a)}A${ARC_R.toFixed(4)},${ARC_R.toFixed(4)} 0 0 ${turn > 0 ? 1 : 0} ${xy(b)}`;
+};
 
 // the hairline is the fill again, so the two halves of a tile meet without the
 // background showing through the seam between them
@@ -746,10 +899,23 @@ function refresh() {
   }
   bands.forEach((b, i) => {
     b.el = bandPool[i];
-    b.el.setAttribute('d', pathOf(unionOutline(b.tiles)));
+    b.el.setAttribute('d', pathOfLoops(unionOutline(b.tiles)));
     b.el.style.display = '';
     for (const t of b.tiles) glued.add(t);
   });
+
+  /* The seams, while they are being chosen. One still there is drawn, one
+     taken out is not — the bandage outline has taken over saying where it
+     went — and both stay clickable so a seam can be cut open again. */
+  const gone = cutsGone();
+  document.getElementById('board').classList.toggle('cutting', cutting);
+  for (const c of everyCut) {
+    if (!c.grab) continue;                  // the board is not drawn yet
+    const show = cutting && c.live;
+    c.grab.style.display = show ? '' : 'none';
+    c.line.style.display = show ? '' : 'none';
+    c.line.classList.toggle('gone', gone.has(c.key));
+  }
   // a tile off this puzzle's board is not drawn at all
   for (const t of tiles) {
     const playing = onBoard.has(t);
@@ -811,6 +977,7 @@ const clickDir = () => (inverted ? -1 : 1);
 
 // a turn, shown: made at once, then wound back a sixth and played forward
 function turn(hex, dir) {
+  if (cutting) return;                    // the board is being cut, not played
   if (stuck(hex)) return;                 // a bandage lies across the collar
   clearPlan();                            // a turn by hand leaves the answer stale
   settle();
@@ -827,7 +994,7 @@ function turn(hex, dir) {
 function reset() {
   for (const t of tiles)
     t.parts.forEach((part, k) => { part.colour = colourAt(...t.on[k]); });
-  bands = bandaged ? puzzle.bands().map(tiles => ({ tiles })) : [];
+  bands = homeBands().map(tiles => ({ tiles }));
 }
 
 /* Choosing a puzzle is choosing which hexagons are in play. The board is then
@@ -845,6 +1012,9 @@ function setPuzzle(p) {
   boardHexes = p.hexes.map(h => hexAt.get(key(h[0], h[1])));
   onBoard = new Set();
   for (const h of boardHexes) for (const t of h.collar) onBoard.add(t);
+  // a seam is only offered where both the tiles it parts are being played
+  for (const c of everyCut) c.live = onBoard.has(c.tiles[0]) && onBoard.has(c.tiles[1]);
+  cutList = everyCut.filter(c => c.live);
 }
 
 /* Turns taken at random, every one of them a legal move, so a scramble is
@@ -926,6 +1096,16 @@ const RECIPE = {
   seven: { depth: 4, macro: 3, seedLen: 3, seedSupport: 12, commSupport: 3, aimDepth: 3,
            reduce: true, budget: 90000, tries: 2, bandDepth: 6 }
 };
+
+/* How much further than that the harvest may go when the seating will not
+   close. Those depths are what the two shipped bandagings want and no more;
+   a bandaging the player invented can want a wider net, and measured over
+   random fusings of the three-circle board every one that fell short at the
+   shipped depth was covered one turn further out. Three is room to spare.
+
+   It is a cap and not a target: the harvest stops as soon as the seating
+   holds, so the shipped puzzles never pay for it. */
+const BAND_DEEPEN = 3;
 
 /* Placing tiles rather than counting wrong parts, which the larger board needs.
 
@@ -1381,9 +1561,11 @@ async function placeSolution(from, goal, walk, miss, onStep) {
 
 let bandKit = null;                         // built on demand, one board's
 
-async function buildBandKit(onStep) {
+async function buildBandKit(onStep, from) {
   const breathe = async m => { if (onStep) onStep(m); await new Promise(r => setTimeout(r, 0)); };
   const recipe = puzzle === PUZZLES.three ? RECIPE.three : RECIPE.seven;
+  const deepest = recipe.bandDepth + BAND_DEEPEN;
+  const start = Math.min(from || recipe.bandDepth, deepest);
   const n = kit.n, tileOf = kit.tileOf, back = s => s.slice().reverse().map(g => g ^ 1);
   const board = tiles.filter(t => onBoard.has(t));
   const at = new Map(board.map((t, i) => [t, i]));
@@ -1396,7 +1578,7 @@ async function buildBandKit(onStep) {
     for (const [from, to] of m) a[at.get(from)] = at.get(to);
     return a;
   }));
-  const HOME = puzzle.bands().map(b => b.map(t => at.get(t)).sort((x, y) => x - y));
+  const HOME = homeBands().map(b => b.map(t => at.get(t)).sort((x, y) => x - y));
   const cfgKey = cfg => cfg.map(b => b.join('.')).sort().join('|');
   const HOMEKEY = cfgKey(HOME);
   const canTurn = (cfg, h) => cfg.every(b => {
@@ -1444,12 +1626,35 @@ async function buildBandKit(onStep) {
   /* Runs that put the bandages back are closed walks at home, and two ways out
      to the same arrangement make one. The routes kept must come in by
      different ways, though: routes sharing a last turn pair into walks where
-     that turn and its undoing cancel, leaving a shorter walk over again. */
-  await breathe('gathering the moves that put the bandages back');
-  const routes = new Map([[HOMEKEY, [[]]]]);
-  {
+     that turn and its undoing cancel, leaving a shorter walk over again.
+
+     How far out to go is not fixed. The keepers are what everything else is
+     built from, and a bandaging the player invented can need a wider net than
+     one the puzzle ships with — so the depth is a knob here, turned up below
+     until the seating holds. Going deeper costs little: the walk stops at
+     every arrangement the first time it reaches it, and there are only so
+     many arrangements, so depth decides how much of that graph is seen and
+     not how much work each part of it takes. */
+  const keepers = [], seenK = new Set();
+  const keep = (p, seq) => {
+    const pk = p.join(',');
+    if (seenK.has(pk)) return null;
+    seenK.add(pk);
+    const m = { p, seq, sup: kit.support(p) };
+    keepers.push(m);
+    return m;
+  };
+  const permOf = seq => {
+    let p = null;
+    for (const g of seq) p = p === null ? kit.gens[g] : kit.compose(p, kit.gens[g]);
+    return p;
+  };
+  const harvest = depth => {
+    keepers.length = 0;
+    seenK.clear();
+    const routes = new Map([[HOMEKEY, [[]]]]);
     let edge = [{ cfg: HOME, key: HOMEKEY }];
-    for (let d = 0; d < recipe.bandDepth; d++) {
+    for (let d = 0; d < depth; d++) {
       const next = [];
       for (const { cfg, key } of edge) {
         const way = routes.get(key)[0];
@@ -1465,28 +1670,14 @@ async function buildBandKit(onStep) {
       }
       edge = next;
     }
-  }
-  const keepers = [], seenK = new Set();
-  const keep = (p, seq) => {
-    const pk = p.join(',');
-    if (seenK.has(pk)) return null;
-    seenK.add(pk);
-    const m = { p, seq, sup: kit.support(p) };
-    keepers.push(m);
-    return m;
+    for (const ways of routes.values())
+      for (let j = 1; j < ways.length; j++) {
+        const a = ways[0].concat(back(ways[j]));
+        if (a.length) keep(permOf(a), a);
+        const b = ways[j].concat(back(ways[0]));
+        if (b.length) keep(permOf(b), b);
+      }
   };
-  const permOf = seq => {
-    let p = null;
-    for (const g of seq) p = p === null ? kit.gens[g] : kit.compose(p, kit.gens[g]);
-    return p;
-  };
-  for (const ways of routes.values())
-    for (let j = 1; j < ways.length; j++) {
-      const a = ways[0].concat(back(ways[j]));
-      if (a.length) keep(permOf(a), a);
-      const b = ways[j].concat(back(ways[0]));
-      if (b.length) keep(permOf(b), b);
-    }
 
   // ---- the glued blocks ---------------------------------------------------
   const tileParts = kit.tileParts;
@@ -1505,24 +1696,30 @@ async function buildBandKit(onStep) {
   await breathe('working out how to seat the glued pieces');
   const bpAt = new Int16Array(n).fill(-1);
   blockParts.forEach((i, j) => { bpAt[i] = j; });
-  const actions = new Map();
-  for (const m of keepers) {
-    const bp = new Int16Array(blockParts.length);
-    let moves = false;
-    for (let j = 0; j < blockParts.length; j++) {
-      const to = bpAt[m.p[blockParts[j]]];
-      if (to < 0) throw new Error('a keeper that breaks a block');
-      bp[j] = to;
-      if (to !== j) moves = true;
-    }
-    if (!moves) continue;
-    const key = bp.join(',');
-    const had = actions.get(key);
-    if (!had || had.seq.length > m.seq.length) actions.set(key, { bp, p: m.p, seq: m.seq });
-  }
   const goalBlocks = blockParts.map(i => kit.home[i]).join(GAP);
-  const seated = new Map([[goalBlocks, { cost: 0, act: null }]]);
-  {
+  const walkOn = (s, p) => {
+    let o = GAP;
+    for (let i = 0; i < p.length; i++) o += s[p[i]];
+    return o;
+  };
+
+  const buildSeats = () => {
+    const actions = new Map();
+    for (const m of keepers) {
+      const bp = new Int16Array(blockParts.length);
+      let moves = false;
+      for (let j = 0; j < blockParts.length; j++) {
+        const to = bpAt[m.p[blockParts[j]]];
+        if (to < 0) throw new Error('a keeper that breaks a block');
+        bp[j] = to;
+        if (to !== j) moves = true;
+      }
+      if (!moves) continue;
+      const key = bp.join(',');
+      const had = actions.get(key);
+      if (!had || had.seq.length > m.seq.length) actions.set(key, { bp, p: m.p, seq: m.seq });
+    }
+    const seated = new Map([[goalBlocks, { cost: 0, act: null }]]);
     const bApply = (str, bp) => {
       let o = GAP;
       for (let j = 0; j < bp.length; j++) o += str[bp[j]];
@@ -1572,6 +1769,53 @@ async function buildBandKit(onStep) {
         push({ cost: nc, key: nk });
       }
     }
+    return seated;
+  };
+
+  /* Whether that table can seat what play actually throws up.
+
+     It is a closure over the block side of the keepers harvested, and nothing
+     says a harvest generates the whole of what the blocks can be left in — a
+     shallow one often does not, and then a position arrives that the table has
+     no entry for and the answer is given up on before any searching is done.
+     So the table is tried against random legal play before it is trusted.
+
+     The trial is run in the solver's own model rather than on the board, since
+     the board is sitting in the very position the player is waiting to have
+     solved. Play wanders from home, the bandages are walked back, and the
+     blocks are looked up: a colouring that is not there is the failure, and
+     the answer is to harvest wider. */
+  const SEAT_PROBES = 12, SEAT_PLAY = 300;
+  const seatsHold = seated => {
+    for (let probe = 0; probe < SEAT_PROBES; probe++) {
+      let cfg = HOME, s = kit.home;
+      for (let i = 0; i < SEAT_PLAY; i++) {
+        const open = [];
+        for (let h = 0; h < boardHexes.length; h++) if (canTurn(cfg, h)) open.push(h);
+        if (!open.length) break;
+        const h = open[Math.floor(Math.random() * open.length)];
+        const dir = Math.random() < 0.5 ? 0 : 1;
+        s = walkOn(s, kit.gens[h * 2 + dir]);
+        cfg = shove(cfg, h, dir);
+      }
+      const way = homeWay.get(cfgKey(cfg));
+      if (!way) return false;
+      for (const g of way) s = walkOn(s, kit.gens[g]);
+      if (!seated.get(blockParts.map(i => s[i]).join(GAP))) return false;
+    }
+    return true;
+  };
+
+  await breathe('gathering the moves that put the bandages back');
+  let seated = null, seatGap = false, settled = start;
+  for (let depth = start; ; depth++) {
+    settled = depth;
+    harvest(depth);
+    await breathe('working out how to seat the glued pieces');
+    seated = buildSeats();
+    if (seatsHold(seated)) break;
+    if (depth >= deepest) { seatGap = true; break; }
+    await breathe('the glued pieces need a wider net — looking one turn further');
   }
 
   // ---- aimed cycles over the free tiles -----------------------------------
@@ -1813,9 +2057,43 @@ async function buildBandKit(onStep) {
     m.low = low;
   }
 
+  /* Whether the library falls short. A free tile no three-cycle can touch is
+     one the placing search can never put right, so the board cannot come out
+     however long the search is given — and unlike a search that merely ran out
+     of time, this is worth knowing before the searching starts.
+
+     Measured over random fusings of the three-circle board it tells the two
+     apart cleanly: every bandaging that beat the solver had a third or more of
+     its free tiles out of reach, and every one the solver got had all or all
+     but one of them in reach. */
+  const touched = new Set();
+  for (const m of moves) if (m.t3) for (const t of m.t3) touched.add(t);
+  const short = order.some(t => !touched.has(t));
+
   return { HOME, cfgKey, canTurn, shove, playable, homeWay, keepers, seated,
            blockParts, goalBlocks, order, rank, moves, tileParts, fixer,
-           triParity, board };
+           triParity, board, seatGap, short, depth: settled };
+}
+
+/* The tables, built again deeper if what came out cannot reach every tile.
+
+   The depths in the recipe are what the two shipped bandagings want and no
+   more. A bandaging the player invented can want a wider net, and the only
+   way to know is to build and look: a harvest that stopped too soon leaves
+   whole tiles with no move that touches them, and going a turn further out
+   picks them up. Boards that come out short build quickly — being short is
+   what makes them quick — so the throwing away costs little, and a board that
+   is not short is never built twice. */
+async function bandKitFor(onStep) {
+  const recipe = puzzle === PUZZLES.three ? RECIPE.three : RECIPE.seven;
+  const deepest = recipe.bandDepth + BAND_DEEPEN;
+  let bk = null;
+  for (let d = recipe.bandDepth; ; d = bk.depth + 1) {
+    bk = await buildBandKit(onStep, d);
+    if (!bk.short || bk.depth >= deepest) return bk;
+    if (onStep) onStep('the moves fall short of some tiles — looking further out');
+    await new Promise(r => setTimeout(r, 0));
+  }
 }
 
 /* Where the bandages are now, as the solver counts tiles. */
@@ -1823,6 +2101,13 @@ function bandNow(bk) {
   const board = bk.board, at = new Map(board.map((t, i) => [t, i]));
   return bands.map(b => b.tiles.map(t => at.get(t)).sort((x, y) => x - y));
 }
+
+/* Why the last attempt came to nothing, for the line under the board to say.
+   A bandaged answer can fail before any searching is done — the tables are
+   built at home and a position can fall outside them — and "no answer found"
+   on its own would leave the player retrying something that cannot come out
+   differently. */
+let whyNoAnswer = '';
 
 async function bandSolution(onStep) {
   const bk = bandKit, n = kit.n, goal = kit.home, tileOf = kit.tileOf;
@@ -1838,20 +2123,31 @@ async function bandSolution(onStep) {
   };
   const start = kit.read();
   const way = bk.homeWay.get(bk.cfgKey(bandNow(bk)));
-  if (!way) return null;
+  if (!way) {
+    whyNoAnswer = 'The bandages cannot be walked back to where they started.';
+    return null;
+  }
   let s = start, seq = way.slice();
   for (const g of way) s = walk(s, kit.gens[g]);
 
   // seat the glued blocks, straight off the table
   for (;;) {
     const node = bk.seated.get(bk.blockParts.map(i => s[i]).join(GAP));
-    if (!node) return null;
+    if (!node) {
+      whyNoAnswer = 'The glued pieces have ended up in an order the solver has ' +
+        'no seating for. This bandaging is beyond it, not just this scramble.';
+      return null;
+    }
     if (!node.act) break;
     s = walk(s, node.act.p);
     seq = seq.concat(node.act.seq);
   }
   if (bk.triParity(s) === 1) {
-    if (!bk.fixer) return null;
+    if (!bk.fixer) {
+      whyNoAnswer = 'Two triangles are swapped and this bandaging has no move ' +
+        'that swaps a pair back.';
+      return null;
+    }
     s = walk(s, bk.fixer.p);
     seq = seq.concat(bk.fixer.seq);
   }
@@ -1863,6 +2159,13 @@ async function bandSolution(onStep) {
     return j;
   };
   const score = (pre, w) => w <= PLACE_ENDGAME ? 100000 - w * 100 + pre : pre * 100 - w;
+  /* Said before the search rather than after it, since a library that cannot
+     reach every tile will not come out however long it is left to run, and
+     saying "try again" to that would be sending the player round in circles. */
+  if (bk.short)
+    whyNoAnswer = 'This bandaging leaves tiles that no move the solver has can ' +
+      'reach. Another scramble may come out if it happens to leave those tiles ' +
+      'alone, but cutting a seam back open is the surer way.';
   const trail = m => {
     const out = [];
     for (let node = m; node.via; node = node.back) out.unshift(...node.via);
@@ -1930,6 +2233,8 @@ async function findSolution(onStep) {
     for (let i = 0; i < s.length; i++) if (s[i] !== goal[i]) n++;
     return n;
   };
+  whyNoAnswer = 'The search ran out of time before it closed. Scramble again ' +
+    'and try once more.';
   if (bandaged) return bandSolution(onStep);
   if (kit.reduce) return placeSolution(from, goal, walk, miss, onStep);
   for (let attempt = 0; attempt < kit.tries; attempt++) {
@@ -2083,19 +2388,61 @@ function render() {
     hits.appendChild(h.hit);
   }
 
-  root.append(fills, edges, bandLayer, marks, hits);
+  /* The seams, over everything, since while they are being chosen they are
+     what the board is for. Each is drawn twice: a fat transparent path to
+     catch the pointer, and a thin one over it that shows. The grab comes
+     first of the pair so the seam can be lit from its hover. */
+  const seams = svgEl('g');
+  for (const c of everyCut) {
+    const d = arcPath(c.a, c.b, c.Z);
+    c.grab = svgEl('path', { class: 'grab', d });
+    c.line = svgEl('path', { class: 'cut', d });
+    c.grab.addEventListener('click', () => toggleCut(c));
+    c.grab.style.display = 'none';
+    c.line.style.display = 'none';
+    seams.append(c.grab, c.line);
+  }
+
+  root.append(fills, edges, bandLayer, marks, hits, seams);
   svg.replaceChildren(root);
   // right-clicking is a move, so the menu never wants to come up over the board
   svg.addEventListener('contextmenu', e => e.preventDefault());
 }
 
+/* Taking a seam out, or putting it back. The tables are one bandaging's, so
+   they go; the board is at home while this is going on, so there is nothing
+   to put straight beyond drawing it again. */
+function toggleCut(c) {
+  if (!cutting || !c.live) return;
+  const gone = cutsGone();
+  if (gone.has(c.key)) gone.delete(c.key); else gone.add(c.key);
+  bandKit = null;
+  redraw();
+}
+
 // said in the one place the toggles can change it, so they cannot disagree
 function showHint() {
+  const free = boardHexes.filter(h => !stuck(h)).length;
+  const el = document.getElementById('hint');
+  if (cutting) {
+    const n = bands.length;
+    el.textContent =
+      'Click a seam to glue the two tiles it parts, or a glued seam to cut it ' +
+      'open again. ' +
+      (n === 0 ? 'Nothing is glued yet.'
+        : `${n} bandage${n === 1 ? '' : 's'} — ` +
+          (free === 0
+            ? 'and nothing on the board will turn. This one is welded solid.'
+            : `${free} of ${boardHexes.length} collars still free to turn.`));
+    return;
+  }
   const way = d => d > 0 ? 'anticlockwise' : 'clockwise';
-  document.getElementById('hint').textContent =
+  el.textContent =
     `Click a hexagon to turn its collar ${way(clickDir())}, ` +
     `right-click to turn it ${way(-clickDir())}.` +
-    (bandaged ? ' A collar a bandage lies across will not turn.' : '');
+    (bandaged ? ' A collar a bandage lies across will not turn.' : '') +
+    (ownBands() ? ' These bandages are your own.' : '') +
+    (bandaged && free === 0 ? ' Nothing on this board will turn as it stands.' : '');
 }
 
 /* An answer is written down rather than played out. A settled run of turns on
@@ -2179,9 +2526,16 @@ function goTo(target) {
 
 function showSolveButton() {
   const b = document.getElementById('solve');
-  b.disabled = !solvable();
-  b.title = solvable() ? 'Work out an answer for this board'
-    : 'The solver only knows the three-circle puzzle, unbandaged';
+  const free = boardHexes.filter(h => !stuck(h)).length;
+  b.disabled = cutting || !free || !solvable();
+  b.title = cutting ? 'Finish choosing the bandaging first'
+    : !free ? 'Nothing on this board will turn, so there is nothing to solve'
+    : 'Work out an answer for this board';
+  // a board with nothing to turn cannot be scrambled either
+  document.getElementById('scramble').disabled = cutting || !free;
+  document.getElementById('cuts').textContent = cutting ? 'Done' : 'Choose bandages';
+  document.getElementById('allcuts').style.display = cutting ? '' : 'none';
+  document.getElementById('shipcuts').style.display = cutting ? '' : 'none';
 }
 
 // everything the board shows, after anything that changes what it should show
@@ -2203,7 +2557,7 @@ document.getElementById('scramble').addEventListener('click', () => {
    under the board reports as it goes and the page is let breathe between
    rounds. Kept for as long as the puzzle does not change. */
 document.getElementById('solve').addEventListener('click', async () => {
-  if (!solvable()) return;
+  if (!solvable() || cutting) return;
   const say = t => { document.getElementById('hint').textContent = t; };
   const b = document.getElementById('solve');
   b.disabled = true;
@@ -2212,13 +2566,13 @@ document.getElementById('solve').addEventListener('click', async () => {
   await new Promise(r => setTimeout(r, 0));
   if (!kit) kit = await buildKit(pc => say(`Working out an answer — building the moves to work with (${pc}%).`));
   if (bandaged && !bandKit)
-    bandKit = await buildBandKit(m => say(`Working out an answer — ${m}.`));
+    bandKit = await bandKitFor(m => say(`Working out an answer — ${m}.`));
   // the placing search knows how many tiles it has settled; the other does not
   const raw = await findSolution((n, done, all) => say(done === undefined
     ? `Working out an answer — ${n} parts still out of place.`
     : `Working out an answer — ${done} of ${all} tiles placed, ${n} parts out.`));
   showSolveButton();
-  if (!raw) { say('No answer found. Scramble again and try once more.'); return; }
+  if (!raw) { say('No answer found. ' + whyNoAnswer); return; }
   const loose = simplifySolution(raw);
   /* Tightening swaps a stretch of the answer for a shorter run of turns out of
      a table that knows nothing about bandages, so on a glued board almost any
@@ -2253,10 +2607,41 @@ document.getElementById('invert').addEventListener('change', e => {
    onto it could leave colours that no run of bandaged moves can reach. */
 document.getElementById('bandaged').addEventListener('change', e => {
   bandaged = e.target.checked;
+  // choosing bandages with the gluing switched off would say nothing, so
+  // switching it off closes the chooser rather than leaving it up saying it
+  if (!bandaged) cutting = false;
   redraw();
 });
 document.getElementById('three').addEventListener('change', e => {
   setPuzzle(e.target.checked ? PUZZLES.three : PUZZLES.seven);
+  if (cutting) seedCuts();                // the other board keeps its own seams
+  redraw();
+});
+
+/* Choosing the bandaging. It is chosen at home — a bandage is named by the
+   tiles under it and a scrambled board has them somewhere else — so opening
+   the chooser puts the board back, which redraw() does anyway. Bandaging with
+   the gluing switched off would say nothing, so it is switched on. */
+document.getElementById('cuts').addEventListener('click', () => {
+  cutting = !cutting;
+  if (cutting) {
+    bandaged = true;
+    document.getElementById('bandaged').checked = true;
+    seedCuts();
+  }
+  bandKit = null;
+  redraw();
+});
+document.getElementById('allcuts').addEventListener('click', () => {
+  cutsGone().clear();                     // the board stays the player's, bare
+  bandKit = null;
+  redraw();
+});
+document.getElementById('shipcuts').addEventListener('click', () => {
+  cutsGone().clear();
+  puzzle.own = false;                     // handed back, then taken again as new
+  seedCuts();
+  bandKit = null;
   redraw();
 });
 </script>
