@@ -1671,38 +1671,67 @@ async function buildBandKit(onStep, from) {
      turned straight back — and growing whichever side is smaller keeps it
      from fanning out on one side alone. */
   const WAY_CAP = 150000;                   // arrangements one search may hold
-  const wayHome = cfg => {
-    const key = cfgKey(cfg);
-    if (key === HOMEKEY) return [];
-    // ahead: turns from the board to here. behind: turns from here to home.
-    const ahead = new Map([[key, []]]), behind = new Map([[HOMEKEY, []]]);
-    let front = [{ cfg, key }], rear = [{ cfg: HOME, key: HOMEKEY }], held = 2;
-    while (front.length && rear.length) {
-      const out = front.length <= rear.length;
-      const edge = out ? front : rear;
-      const mine = out ? ahead : behind, theirs = out ? behind : ahead;
+  const BALL_CAP = 80000;                   // the ground held around home
+
+  /* The ground around home, walked once and kept: for every arrangement it
+     holds, the turns that take the bandages home from there. The seating
+     probe below asks the way home over and over, and every asking used to
+     walk this same ground again from scratch — on the bandagings that widen
+     their net a few times, that walking was nearly the whole of a build that
+     ran to minutes. On the two shipped bandagings the ball holds the entire
+     graph, and asking the way home is not a search at all. */
+  await breathe('walking the ground around home');
+  const ball = new Map([[HOMEKEY, []]]);
+  {
+    let edge = [{ cfg: HOME, key: HOMEKEY }];
+    while (edge.length && ball.size < BALL_CAP) {
       const next = [];
-      for (const it of edge) {
-        const way = mine.get(it.key);
+      grow: for (const it of edge) {
+        const way = ball.get(it.key);
         for (let h = 0; h < boardHexes.length; h++) {
           if (!canTurn(it.cfg, h)) continue;
           for (const dir of [0, 1]) {
             const c = shove(it.cfg, h, dir), ck = cfgKey(c);
-            if (mine.has(ck)) continue;
-            /* Going out, the step is taken after the way so far. Coming back,
-               the step found is the one that got here, so what is wanted is
-               its undoing, in front of the way home from where it started. */
-            const step = out ? way.concat(h * 2 + dir)
-                             : [h * 2 + (dir ^ 1)].concat(way);
-            const met = theirs.get(ck);
-            if (met) return out ? step.concat(met) : met.concat(step);
-            mine.set(ck, step);
+            if (ball.has(ck)) continue;
+            // the step found is the one that got here, so the way home is
+            // its undoing, in front of the way home from where it started
+            ball.set(ck, [h * 2 + (dir ^ 1)].concat(way));
             next.push({ cfg: c, key: ck });
-            if (++held >= WAY_CAP) return null;
+            if (ball.size >= BALL_CAP) break grow;
           }
         }
       }
-      if (out) front = next; else rear = next;
+      edge = next;
+    }
+  }
+
+  /* The way home from anywhere: on known ground it is read straight off, and
+     from further out a search runs only until it steps onto the ball. */
+  const wayHome = cfg => {
+    const key = cfgKey(cfg);
+    const known = ball.get(key);
+    if (known) return known.slice();
+    const ahead = new Map([[key, []]]);
+    let front = [{ cfg, key }];
+    while (front.length) {
+      const next = [];
+      for (const it of front) {
+        const way = ahead.get(it.key);
+        for (let h = 0; h < boardHexes.length; h++) {
+          if (!canTurn(it.cfg, h)) continue;
+          for (const dir of [0, 1]) {
+            const c = shove(it.cfg, h, dir), ck = cfgKey(c);
+            if (ahead.has(ck)) continue;
+            const step = way.concat(h * 2 + dir);
+            const met = ball.get(ck);
+            if (met) return step.concat(met);
+            ahead.set(ck, step);
+            next.push({ cfg: c, key: ck });
+            if (ahead.size >= WAY_CAP) return null;
+          }
+        }
+      }
+      front = next;
     }
     return null;
   };
@@ -1792,9 +1821,18 @@ async function buildBandKit(onStep, from) {
   const freeTiles = movable.filter(t => !blockTiles.has(t));
 
   /* A glued block can only sit where a bandage sits, so a keeper projects to a
-     permutation of the block places alone. That puzzle is small enough to
-     solve outright: one Dijkstra out from the seated colouring gives the
-     cheapest seating for every block colouring that can arise. */
+     permutation of the block places alone, and one Dijkstra out from the
+     seated colouring reaches every block colouring that can arise.
+
+     It is not run to the end, though. A bandaging of loose pairs has hundreds
+     of thousands of colourings, each tried against thousands of actions, and
+     writing the whole table down took over a minute — for a table only ever
+     asked about a dozen probes and the one colouring on the board. So the
+     search is kept where it stands and grown on demand: asked about a
+     colouring it holds, it answers at once; asked about one it has not
+     reached, it walks on until it reaches it or has walked everywhere. The
+     work of proving a colouring unreachable is the whole closure still, but
+     it is paid once, and the common asking pays only its share. */
   await breathe('working out how to seat the glued pieces');
   const bpAt = new Int16Array(n).fill(-1);
   blockParts.forEach((i, j) => { bpAt[i] = j; });
@@ -1805,7 +1843,7 @@ async function buildBandKit(onStep, from) {
     return o;
   };
 
-  const buildSeats = () => {
+  const seatSearch = () => {
     const actions = new Map();
     for (const m of keepers) {
       const bp = new Int16Array(blockParts.length);
@@ -1821,11 +1859,13 @@ async function buildBandKit(onStep, from) {
       const had = actions.get(key);
       if (!had || had.seq.length > m.seq.length) actions.set(key, { bp, p: m.p, seq: m.seq });
     }
-    const seated = new Map([[goalBlocks, { cost: 0, act: null }]]);
+    const found = new Map([[goalBlocks, { cost: 0, act: null }]]);
+    // through a buffer of codes, not a run of concatenations: this is the
+    // innermost loop of the whole build, run once per colouring per action
+    const buf = new Array(blockParts.length);
     const bApply = (str, bp) => {
-      let o = GAP;
-      for (let j = 0; j < bp.length; j++) o += str[bp[j]];
-      return o;
+      for (let j = 0; j < bp.length; j++) buf[j] = str.charCodeAt(bp[j]);
+      return String.fromCharCode.apply(null, buf);
     };
     const undo = [...actions.values()].map(a => {
       const r = new Int16Array(a.bp.length);
@@ -1860,18 +1900,29 @@ async function buildBandKit(onStep, from) {
       }
       return top;
     };
-    while (q.length) {
-      const { cost, key } = pop();
-      if (seated.get(key).cost !== cost) continue;
-      for (const { bp, a } of undo) {
-        const nk = bApply(key, bp), nc = cost + a.seq.length;
-        const had = seated.get(nk);
-        if (had && had.cost <= nc) continue;
-        seated.set(nk, { cost: nc, act: a });
-        push({ cost: nc, key: nk });
+    /* The seating for one colouring: what is already reached is answered from
+       the map, and the search walks further only for one it has not met. An
+       answer's chain of actions runs through colourings reached before it, so
+       everything a caller follows is already written down. */
+    const grow = target => {
+      const had = found.get(target);
+      if (had) return had;
+      while (q.length) {
+        const { cost, key } = pop();
+        if (found.get(key).cost !== cost) continue;
+        for (const { bp, a } of undo) {
+          const nk = bApply(key, bp), nc = cost + a.seq.length;
+          const prev = found.get(nk);
+          if (prev && prev.cost <= nc) continue;
+          found.set(nk, { cost: nc, act: a });
+          push({ cost: nc, key: nk });
+        }
+        const hit = found.get(target);
+        if (hit) return hit;
       }
-    }
-    return seated;
+      return null;
+    };
+    return { grow, found };
   };
 
   /* Whether that table can seat what play actually throws up.
@@ -1888,7 +1939,7 @@ async function buildBandKit(onStep, from) {
      blocks are looked up: a colouring that is not there is the failure, and
      the answer is to harvest wider. */
   const SEAT_PROBES = 12, SEAT_PLAY = 300;
-  const seatsHold = seated => {
+  const seatsHold = seats => {
     for (let probe = 0; probe < SEAT_PROBES; probe++) {
       let cfg = HOME, s = kit.home;
       for (let i = 0; i < SEAT_PLAY; i++) {
@@ -1903,19 +1954,19 @@ async function buildBandKit(onStep, from) {
       const way = wayHome(cfg);
       if (!way) return false;
       for (const g of way) s = walkOn(s, kit.gens[g]);
-      if (!seated.get(blockParts.map(i => s[i]).join(GAP))) return false;
+      if (!seats.grow(blockParts.map(i => s[i]).join(GAP))) return false;
     }
     return true;
   };
 
   await breathe('gathering the moves that put the bandages back');
-  let seated = null, seatGap = false, settled = start;
+  let seats = null, seatGap = false, settled = start;
   for (let depth = start; ; depth++) {
     settled = depth;
     harvest(depth);
     await breathe('working out how to seat the glued pieces');
-    seated = buildSeats();
-    if (seatsHold(seated)) break;
+    seats = seatSearch();
+    if (seatsHold(seats)) break;
     // going further out cannot help once the net is already being trimmed
     if (depth >= deepest || capped) { seatGap = true; break; }
     await breathe('the glued pieces need a wider net — looking one turn further');
@@ -2194,7 +2245,8 @@ async function buildBandKit(onStep, from) {
   for (const m of moves) if (m.t3) for (const t of m.t3) touched.add(t);
   const short = order.some(t => !touched.has(t));
 
-  return { HOME, cfgKey, canTurn, shove, playable, wayHome, keepers, seated,
+  return { HOME, cfgKey, canTurn, shove, playable, wayHome, keepers,
+           seatWay: seats.grow, seated: seats.found,
            blockParts, goalBlocks, order, rank, moves, tileParts, fixer,
            triParity, board, seatGap, short, capped, depth: settled };
 }
@@ -2255,9 +2307,11 @@ async function bandSolution(onStep) {
   let s = start, seq = way.slice();
   for (const g of way) s = walk(s, kit.gens[g]);
 
-  // seat the glued blocks, straight off the table
+  /* Seat the glued blocks. The first asking may set the seating search
+     walking further out; every colouring on the chain after that is ground
+     it has already covered. */
   for (;;) {
-    const node = bk.seated.get(bk.blockParts.map(i => s[i]).join(GAP));
+    const node = bk.seatWay(bk.blockParts.map(i => s[i]).join(GAP));
     if (!node) {
       whyNoAnswer = 'The glued pieces have ended up in an order the solver has ' +
         'no seating for. This bandaging is beyond it, not just this scramble.';
