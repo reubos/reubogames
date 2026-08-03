@@ -1600,28 +1600,57 @@ async function buildBandKit(onStep, from) {
     return c;
   };
 
-  // the shortest legal way home, from every arrangement there is
-  await breathe('finding the way home for the bandages');
-  const homeWay = new Map([[HOMEKEY, []]]);
-  {
-    let edge = [HOME];
-    while (edge.length) {
+  /* The way back to where the bandages started, looked for when it is wanted
+     rather than written down for every arrangement there is.
+
+     Writing them all down is what took the page out of memory. The shipped
+     bandagings have 153 and 72,259 arrangements between them, but that is a
+     fact about their shape and not a law: a lens of three tiles is held by one
+     collar and can barely move, while a glued pair roams, and four glued pairs
+     on the sixty-one tile board run into the millions. The table was built
+     before anything else, so a bandaging like that died on the first step.
+
+     Searching from both ends instead meets in the middle, holds only what it
+     has actually walked, and is thrown away afterwards. Both ends are wanted
+     because the graph is undirected — whatever turn is legal here can be
+     turned straight back — and growing whichever side is smaller keeps it
+     from fanning out on one side alone. */
+  const WAY_CAP = 150000;                   // arrangements one search may hold
+  const wayHome = cfg => {
+    const key = cfgKey(cfg);
+    if (key === HOMEKEY) return [];
+    // ahead: turns from the board to here. behind: turns from here to home.
+    const ahead = new Map([[key, []]]), behind = new Map([[HOMEKEY, []]]);
+    let front = [{ cfg, key }], rear = [{ cfg: HOME, key: HOMEKEY }], held = 2;
+    while (front.length && rear.length) {
+      const out = front.length <= rear.length;
+      const edge = out ? front : rear;
+      const mine = out ? ahead : behind, theirs = out ? behind : ahead;
       const next = [];
-      for (const cfg of edge) {
-        const from = homeWay.get(cfgKey(cfg));
+      for (const it of edge) {
+        const way = mine.get(it.key);
         for (let h = 0; h < boardHexes.length; h++) {
-          if (!canTurn(cfg, h)) continue;
+          if (!canTurn(it.cfg, h)) continue;
           for (const dir of [0, 1]) {
-            const c = shove(cfg, h, dir), key = cfgKey(c);
-            if (homeWay.has(key)) continue;
-            homeWay.set(key, [h * 2 + (dir ^ 1)].concat(from));
-            next.push(c);
+            const c = shove(it.cfg, h, dir), ck = cfgKey(c);
+            if (mine.has(ck)) continue;
+            /* Going out, the step is taken after the way so far. Coming back,
+               the step found is the one that got here, so what is wanted is
+               its undoing, in front of the way home from where it started. */
+            const step = out ? way.concat(h * 2 + dir)
+                             : [h * 2 + (dir ^ 1)].concat(way);
+            const met = theirs.get(ck);
+            if (met) return out ? step.concat(met) : met.concat(step);
+            mine.set(ck, step);
+            next.push({ cfg: c, key: ck });
+            if (++held >= WAY_CAP) return null;
           }
         }
       }
-      edge = next;
+      if (out) front = next; else rear = next;
     }
-  }
+    return null;
+  };
 
   /* Runs that put the bandages back are closed walks at home, and two ways out
      to the same arrangement make one. The routes kept must come in by
@@ -1635,6 +1664,18 @@ async function buildBandKit(onStep, from) {
      every arrangement the first time it reaches it, and there are only so
      many arrangements, so depth decides how much of that graph is seen and
      not how much work each part of it takes. */
+  /* Both of these are held to a size a page can afford. The arrangements the
+     walk goes out over, and the keepers made by pairing its routes, are only
+     small for the shipped bandagings because a lens of three tiles hardly
+     moves; loose groups fan out until the tab dies. Neither cap comes near
+     what the shipped puzzles ask for — they want 9,060 keepers at the most —
+     so the ceiling is only ever met by a bandaging that would not have
+     finished anyway, and meeting it yields a smaller library rather than no
+     library at all. */
+  const ROUTE_CAP = 120000;                 // arrangements the walk goes out over
+  const KEEP_CAP = 30000;                   // moves that put the bandages back
+  let capped = false;
+
   const keepers = [], seenK = new Set();
   const keep = (p, seq) => {
     const pk = p.join(',');
@@ -1663,20 +1704,26 @@ async function buildBandKit(onStep, from) {
           for (const dir of [0, 1]) {
             const c = shove(cfg, h, dir), ck = cfgKey(c);
             let list = routes.get(ck);
-            if (!list) { routes.set(ck, list = []); next.push({ cfg: c, key: ck }); }
+            if (!list) {
+              if (routes.size >= ROUTE_CAP) { capped = true; continue; }
+              routes.set(ck, list = []);
+              next.push({ cfg: c, key: ck });
+            }
             if (list.length < 8) list.push(way.concat(h * 2 + dir));
           }
         }
       }
       edge = next;
     }
-    for (const ways of routes.values())
+    for (const ways of routes.values()) {
+      if (keepers.length >= KEEP_CAP) { capped = true; break; }
       for (let j = 1; j < ways.length; j++) {
         const a = ways[0].concat(back(ways[j]));
         if (a.length) keep(permOf(a), a);
         const b = ways[j].concat(back(ways[0]));
         if (b.length) keep(permOf(b), b);
       }
+    }
   };
 
   // ---- the glued blocks ---------------------------------------------------
@@ -1798,7 +1845,7 @@ async function buildBandKit(onStep, from) {
         s = walkOn(s, kit.gens[h * 2 + dir]);
         cfg = shove(cfg, h, dir);
       }
-      const way = homeWay.get(cfgKey(cfg));
+      const way = wayHome(cfg);
       if (!way) return false;
       for (const g of way) s = walkOn(s, kit.gens[g]);
       if (!seated.get(blockParts.map(i => s[i]).join(GAP))) return false;
@@ -1814,7 +1861,8 @@ async function buildBandKit(onStep, from) {
     await breathe('working out how to seat the glued pieces');
     seated = buildSeats();
     if (seatsHold(seated)) break;
-    if (depth >= deepest) { seatGap = true; break; }
+    // going further out cannot help once the net is already being trimmed
+    if (depth >= deepest || capped) { seatGap = true; break; }
     await breathe('the glued pieces need a wider net — looking one turn further');
   }
 
@@ -1822,14 +1870,20 @@ async function buildBandKit(onStep, from) {
   await breathe('building the moves that aim at single tiles');
   const seeds = keepers.slice().sort((a, b) => a.sup - b.sup || a.seq.length - b.seq.length)
     .slice(0, 700);
+  /* Seven hundred seeds against each other is half a million commutators, and
+     on a loose bandaging a great many of them come out as three-cycles. Each
+     is a permutation and a word kept for good, so they are counted. The
+     shipped boards find far fewer than this and are untouched by it. */
+  const CYCLE_CAP = 60000;
   const cycles = [];
-  for (const X of seeds) {
+  outer: for (const X of seeds) {
     const Xi = kit.invert(X.p);
     for (const Y of seeds) {
       const p = kit.compose(kit.compose(kit.compose(X.p, Y.p), Xi), kit.invert(Y.p));
       if (kit.support(p) !== 3) continue;
       const m = keep(p, X.seq.concat(Y.seq, back(X.seq), back(Y.seq)));
       if (m) cycles.push(m);
+      if (cycles.length >= CYCLE_CAP) { capped = true; break outer; }
     }
   }
   const tripleOf = p => {
@@ -1860,7 +1914,14 @@ async function buildBandKit(onStep, from) {
     const had = conjMaps.get(mk);
     if (!had || had.m.seq.length > m.seq.length) conjMaps.set(mk, { tm, m });
   }
-  const conjs = [...conjMaps.values()].filter(c => c.tm.some((v, i) => v !== i));
+  /* The cheapest of these, and no more than that. Every one of them is tried
+     against every triple the orbit reaches, twice over — once for the cycles
+     and once for the twists — so their number multiplies the two searches
+     below rather than adding to them. Cheapest first is also the right few to
+     keep: a triple reached by a dear map is reached by a long answer. */
+  const CONJ_CAP = 6000;
+  const conjs = [...conjMaps.values()].filter(c => c.tm.some((v, i) => v !== i))
+    .sort((a, b) => a.m.seq.length - b.m.seq.length).slice(0, CONJ_CAP);
 
   /* Which triples an aimed cycle can be carried to is the orbit of the ones
      already had under those maps. Cheapest chain first, so a triple far from
@@ -1931,8 +1992,16 @@ async function buildBandKit(onStep, from) {
     built.set(key, out);
     return out;
   };
+  /* Every triple the orbit reaches, materialised — up to a point. The orbit
+     can span every triple of tiles on the board, which on sixty-one tiles is
+     tens of thousands, each carrying a dozen variants both ways about; left
+     alone that is millions of permutations kept at once. Nearest triples
+     first, so what is dropped at the ceiling is what cost the most to get to. */
+  const AIM_CAP = 150000;
   const aimed = [], seenAim = new Set();
-  for (const key of reach.keys()) {
+  const byCost = [...reach.keys()].sort((a, b) => reach.get(a).cost - reach.get(b).cost);
+  for (const key of byCost) {
+    if (aimed.length >= AIM_CAP) { capped = true; break; }
     const t3 = key.split(',').map(Number);
     for (const v of make(key))
       for (const [p, seq] of [[v.p, v.seq], [kit.invert(v.p), back(v.seq)]]) {
@@ -2070,9 +2139,9 @@ async function buildBandKit(onStep, from) {
   for (const m of moves) if (m.t3) for (const t of m.t3) touched.add(t);
   const short = order.some(t => !touched.has(t));
 
-  return { HOME, cfgKey, canTurn, shove, playable, homeWay, keepers, seated,
+  return { HOME, cfgKey, canTurn, shove, playable, wayHome, keepers, seated,
            blockParts, goalBlocks, order, rank, moves, tileParts, fixer,
-           triParity, board, seatGap, short, depth: settled };
+           triParity, board, seatGap, short, capped, depth: settled };
 }
 
 /* The tables, built again deeper if what came out cannot reach every tile.
@@ -2090,7 +2159,7 @@ async function bandKitFor(onStep) {
   let bk = null;
   for (let d = recipe.bandDepth; ; d = bk.depth + 1) {
     bk = await buildBandKit(onStep, d);
-    if (!bk.short || bk.depth >= deepest) return bk;
+    if (!bk.short || bk.depth >= deepest || bk.capped) return bk;
     if (onStep) onStep('the moves fall short of some tiles — looking further out');
     await new Promise(r => setTimeout(r, 0));
   }
@@ -2122,9 +2191,10 @@ async function bandSolution(onStep) {
     return n2;
   };
   const start = kit.read();
-  const way = bk.homeWay.get(bk.cfgKey(bandNow(bk)));
+  const way = bk.wayHome(bandNow(bk));
   if (!way) {
-    whyNoAnswer = 'The bandages cannot be walked back to where they started.';
+    whyNoAnswer = 'The bandages cannot be walked back to where they started, ' +
+      'or they roam too freely for the solver to find the way.';
     return null;
   }
   let s = start, seq = way.slice();
