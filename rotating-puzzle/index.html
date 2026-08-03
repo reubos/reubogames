@@ -140,6 +140,19 @@
   button:disabled { opacity: 0.4; cursor: not-allowed; }
   button:disabled:hover { background: var(--panel-2); border-color: var(--line); }
 
+  /* the bandaging written as a code, shown while it is being chosen */
+  #bandcode {
+    font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+    font-size: 0.85rem;
+    color: var(--muted);
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 8px 10px;
+    min-width: 15em;
+  }
+  #bandcode:focus { color: var(--text); outline: none; border-color: #6ea8fe; }
+
   .toggle { display: inline-flex; align-items: center; gap: 8px; }
   .toggle input { accent-color: #6ea8fe; cursor: pointer; margin: 0; }
 
@@ -198,6 +211,8 @@
     <button type="button" id="cuts">Choose bandages</button>
     <button type="button" id="allcuts" style="display:none">Cut them all open</button>
     <button type="button" id="shipcuts" style="display:none">Back to the standard ones</button>
+    <input type="text" id="bandcode" style="display:none" spellcheck="false"
+           title="This bandaging as a code — copy it to keep or share it, or paste one in and press Enter">
     <label class="toggle"><input type="checkbox" id="invert">Invert controls</label>
     <label class="toggle"><input type="checkbox" id="bandaged">Bandaged</label>
     <label class="toggle"><input type="checkbox" id="three">Three circles</label>
@@ -725,6 +740,46 @@ function cutBands() {
     groups.get(r).push(t);
   });
   return [...groups.values()].filter(g => g.length > 1);
+}
+
+/* A bandaging written down: the board's name and which of its seams have
+   gone, by their place in cutList — "three:4.17.30" — which is fixed, the
+   seams being found by one walk over one geometry. So a code names the same
+   bandaging on every visit, can be kept or handed to someone, and is how a
+   board that beats the solver gets reported. */
+function bandCode() {
+  const gone = cutsGone();
+  const idx = [];
+  cutList.forEach((c, i) => { if (gone.has(c.key)) idx.push(i); });
+  return (puzzle === PUZZLES.three ? 'three' : 'seven') + ':' +
+    (idx.length ? idx.join('.') : 'none');
+}
+
+// the code read back: the board it names, wearing exactly those cuts
+function applyBandCode(text) {
+  const m = /^\s*(three|seven)\s*:\s*(none|\d+(?:\.\d+)*)\s*$/.exec(text);
+  if (!m) return false;
+  const want = m[1] === 'three' ? PUZZLES.three : PUZZLES.seven;
+  // judged in full before anything is touched, so a bad code changes nothing
+  const list = m[2] === 'none' ? [] : m[2].split('.').map(Number);
+  const on = new Set();
+  for (const h of want.hexes)
+    for (const t of hexAt.get(key(h[0], h[1])).collar) on.add(t);
+  const seams = everyCut.filter(c => on.has(c.tiles[0]) && on.has(c.tiles[1])).length;
+  if (list.some(i => i >= seams)) return false;
+  if (puzzle !== want) {
+    document.getElementById('three').checked = want === PUZZLES.three;
+    setPuzzle(want);
+  }
+  bandaged = true;
+  document.getElementById('bandaged').checked = true;
+  puzzle.own = true;                        // the code is the player's choice entire
+  const gone = cutsGone();
+  gone.clear();
+  for (const i of list) gone.add(cutList[i].key);
+  bandKit = null;
+  redraw();
+  return true;
 }
 
 /* Opening the chooser starts from the bandaging the puzzle ships with rather
@@ -2606,6 +2661,10 @@ function showSolveButton() {
   document.getElementById('cuts').textContent = cutting ? 'Done' : 'Choose bandages';
   document.getElementById('allcuts').style.display = cutting ? '' : 'none';
   document.getElementById('shipcuts').style.display = cutting ? '' : 'none';
+  // the bandaging as a code, there to copy out or paste over while choosing
+  const code = document.getElementById('bandcode');
+  code.style.display = cutting ? '' : 'none';
+  if (cutting && document.activeElement !== code) code.value = bandCode();
 }
 
 // everything the board shows, after anything that changes what it should show
@@ -2642,7 +2701,19 @@ document.getElementById('solve').addEventListener('click', async () => {
     ? `Working out an answer — ${n} parts still out of place.`
     : `Working out an answer — ${done} of ${all} tiles placed, ${n} parts out.`));
   showSolveButton();
-  if (!raw) { say('No answer found. ' + whyNoAnswer); return; }
+  if (!raw) {
+    say('No answer found. ' + whyNoAnswer);
+    /* One line to the console with everything a report needs: the bandaging
+       as its code, what the tables came out as, and why it gave up. */
+    if (bandaged && bandKit)
+      console.log('solver: no answer | ' + bandCode() +
+        ' | depth ' + bandKit.depth + (bandKit.capped ? ' capped' : '') +
+        ' | keepers ' + bandKit.keepers.length +
+        ' | moves ' + bandKit.moves.length +
+        ' | short ' + bandKit.short + ' | seatGap ' + bandKit.seatGap +
+        ' | ' + whyNoAnswer);
+    return;
+  }
   const loose = simplifySolution(raw);
   /* Tightening swaps a stretch of the answer for a shorter run of turns out of
      a table that knows nothing about bandages, so on a glued board almost any
@@ -2706,6 +2777,12 @@ document.getElementById('allcuts').addEventListener('click', () => {
   cutsGone().clear();                     // the board stays the player's, bare
   bandKit = null;
   redraw();
+});
+/* A code pasted in and entered is worn at once; one that names nothing puts
+   the true code back rather than sitting there looking accepted. */
+document.getElementById('bandcode').addEventListener('change', e => {
+  if (!applyBandCode(e.target.value)) e.target.value = bandCode();
+  e.target.blur();
 });
 document.getElementById('shipcuts').addEventListener('click', () => {
   cutsGone().clear();
