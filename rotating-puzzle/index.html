@@ -2865,8 +2865,10 @@ function asPlan(seq) {
   return out;
 }
 
+// plus is clockwise, the way twisty-puzzle notation reads, though the model
+// counts anticlockwise positive — the sign here is presentation, not maths
 const tokenText = t =>
-  boardHexes[t.hex].parts[0].colour[0].toUpperCase() + (t.dir > 0 ? '+' : '-').repeat(t.n);
+  boardHexes[t.hex].parts[0].colour[0].toUpperCase() + (t.dir > 0 ? '-' : '+').repeat(t.n);
 
 function showPlan() {
   const box = document.getElementById('plan'), nav = document.getElementById('nav');
