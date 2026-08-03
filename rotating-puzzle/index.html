@@ -738,6 +738,12 @@ const settle = () => { if (spinning) spinning(); };
 function refresh() {
   const glued = new Set();
   for (const el of bandPool) el.style.display = 'none';
+  while (bandPool.length < bands.length) {
+    const el = svgEl('path', { class: 'band' });
+    el.style.display = 'none';
+    bandPool.push(el);
+    if (bandLayer) bandLayer.appendChild(el);
+  }
   bands.forEach((b, i) => {
     b.el = bandPool[i];
     b.el.setAttribute('d', pathOf(unionOutline(b.tiles)));
@@ -2021,8 +2027,10 @@ function frame() {
     `${onBoard.size} tiles — ${n(6)} hexagons, ${n(4)} squares, ${n(3)} triangles.`;
 }
 
-const MAX_BANDS = 6;
+/* One outline to a bandage. The pool grows to whatever a puzzle asks for
+   rather than assuming six, so a board with more of them draws them all. */
 const bandPool = [];
+let bandLayer = null;
 let root;                                   // the flipped, tilted frame it all sits in
 
 function render() {
@@ -2043,13 +2051,8 @@ function render() {
   }
 
   // outlines for the bandages, filled in by refresh() wherever they have got to
-  const bandLayer = svgEl('g', { 'stroke-width': '0.05' });
-  for (let i = 0; i < MAX_BANDS; i++) {
-    const el = svgEl('path', { class: 'band' });
-    el.style.display = 'none';
-    bandPool.push(el);
-    bandLayer.appendChild(el);
-  }
+  bandLayer = svgEl('g', { 'stroke-width': '0.05' });
+  bandPool.length = 0;
 
   /* The no-turn mark: a ring with a bar across it, standing at the centre of
      each hexagon and shown while a bandage locks its collar. It never has to
