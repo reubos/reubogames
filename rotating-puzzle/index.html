@@ -1671,7 +1671,15 @@ async function buildBandKit(onStep, from) {
      turned straight back — and growing whichever side is smaller keeps it
      from fanning out on one side alone. */
   const WAY_CAP = 150000;                   // arrangements one search may hold
-  const BALL_CAP = 80000;                   // the ground held around home
+  const BALL_CAP = 80000;                   // the ground first walked around home
+  const BALL_MAX = 320000;                  // the most it may grow to, asked or not
+  /* The seating map's rim, and how far a colouring may reach in from outside
+     it. The rim is set past the largest closure any solvable board has shown
+     — 276,480 — so every bandaging that fit in memory before is still
+     answered exactly, and one that would not fit is met at the rim instead
+     of run to the end. */
+  const SEAT_BALL = 300000;
+  const SEAT_REACH = 60000;
 
   /* The ground around home, walked once and kept: for every arrangement it
      holds, the turns that take the bandages home from there. The seating
@@ -1682,32 +1690,39 @@ async function buildBandKit(onStep, from) {
      graph, and asking the way home is not a search at all. */
   await breathe('walking the ground around home');
   const ball = new Map([[HOMEKEY, []]]);
-  {
-    let edge = [{ cfg: HOME, key: HOMEKEY }];
-    while (edge.length && ball.size < BALL_CAP) {
-      const next = [];
-      grow: for (const it of edge) {
-        const way = ball.get(it.key);
-        for (let h = 0; h < boardHexes.length; h++) {
-          if (!canTurn(it.cfg, h)) continue;
-          for (const dir of [0, 1]) {
-            const c = shove(it.cfg, h, dir), ck = cfgKey(c);
-            if (ball.has(ck)) continue;
-            // the step found is the one that got here, so the way home is
-            // its undoing, in front of the way home from where it started
-            ball.set(ck, [h * 2 + (dir ^ 1)].concat(way));
-            next.push({ cfg: c, key: ck });
-            if (ball.size >= BALL_CAP) break grow;
-          }
+  const ballQ = [{ cfg: HOME, key: HOMEKEY }];
+  let ballAt = 0;
+  /* Walked breadth-first off a queue rather than in layers, so the walking
+     can stop at any size and be taken up again exactly where it stood — an
+     arrangement the first search cannot reach may still be met by walking
+     the ground a stretch further. Ground walked over is let go of as the
+     queue passes it; the ways home themselves live in the ball. */
+  const growBall = to => {
+    while (ballAt < ballQ.length && ball.size < to) {
+      const it = ballQ[ballAt];
+      ballQ[ballAt++] = null;
+      const way = ball.get(it.key);
+      for (let h = 0; h < boardHexes.length; h++) {
+        if (!canTurn(it.cfg, h)) continue;
+        for (const dir of [0, 1]) {
+          const c = shove(it.cfg, h, dir), ck = cfgKey(c);
+          if (ball.has(ck)) continue;
+          // the step found is the one that got here, so the way home is
+          // its undoing, in front of the way home from where it started
+          ball.set(ck, [h * 2 + (dir ^ 1)].concat(way));
+          ballQ.push({ cfg: c, key: ck });
         }
       }
-      edge = next;
     }
-  }
+  };
+  growBall(BALL_CAP);
 
   /* The way home from anywhere: on known ground it is read straight off, and
-     from further out a search runs only until it steps onto the ball. */
-  const wayHome = cfg => {
+     from further out a search runs until it steps onto the ball. A search
+     that runs out of room without meeting it is not the end — the ball is
+     grown a stretch and the search tried over, until the two meet or there
+     is no more ground to give. */
+  const seek = cfg => {
     const key = cfgKey(cfg);
     const known = ball.get(key);
     if (known) return known.slice();
@@ -1734,6 +1749,14 @@ async function buildBandKit(onStep, from) {
       front = next;
     }
     return null;
+  };
+  const wayHome = cfg => {
+    for (;;) {
+      const way = seek(cfg);
+      if (way) return way;
+      if (ballAt >= ballQ.length || ball.size >= BALL_MAX) return null;
+      growBall(ball.size + BALL_CAP);
+    }
   };
 
   /* Runs that put the bandages back are closed walks at home, and two ways out
@@ -1903,11 +1926,23 @@ async function buildBandKit(onStep, from) {
     /* The seating for one colouring: what is already reached is answered from
        the map, and the search walks further only for one it has not met. An
        answer's chain of actions runs through colourings reached before it, so
-       everything a caller follows is already written down. */
+       everything a caller follows is already written down.
+
+       The walking stops at a rim. Eight glued lenses have millions of
+       colourings between them, and a closure left to run to the end was what
+       took the memory; within the rim the map is exact, and past it a
+       colouring is met from its own side — the actions played forwards from
+       it until it steps onto ground the map holds, the same meeting in the
+       middle that finds the bandages their way home. The steps of a path
+       found that way are kept, so the chain can still be walked one lookup
+       at a time. */
+    let complete = false;
+    const extra = new Map();                // steps of the paths met from outside
     const grow = target => {
-      const had = found.get(target);
+      const had = found.get(target) || extra.get(target);
       if (had) return had;
-      while (q.length) {
+      // on toward the asking, stopping at the rim or when it is reached
+      while (q.length && found.size < SEAT_BALL) {
         const { cost, key } = pop();
         if (found.get(key).cost !== cost) continue;
         for (const { bp, a } of undo) {
@@ -1919,6 +1954,35 @@ async function buildBandKit(onStep, from) {
         }
         const hit = found.get(target);
         if (hit) return hit;
+      }
+      if (!q.length) complete = true;
+      if (complete) return null;            // the map is everything there is
+      // out from the colouring itself, playing actions forwards, to the rim
+      const seen = new Map([[target, null]]);
+      let edge = [target];
+      for (let d = 0; d < 6 && edge.length; d++) {
+        const next = [];
+        for (const key of edge)
+          for (const a of undo) {
+            const nk = bApply(key, a.a.bp);
+            if (seen.has(nk)) continue;
+            seen.set(nk, { from: key, act: a.a });
+            if (found.get(nk)) {
+              // walked back from the meeting to the asking, writing down the
+              // action to play at each colouring along the way
+              let at = nk;
+              for (;;) {
+                const step = seen.get(at);
+                if (!step) break;
+                extra.set(step.from, { cost: 0, act: step.act });
+                at = step.from;
+              }
+              return extra.get(target);
+            }
+            next.push(nk);
+            if (seen.size >= SEAT_REACH) return null;
+          }
+        edge = next;
       }
       return null;
     };
