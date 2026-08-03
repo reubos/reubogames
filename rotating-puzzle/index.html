@@ -2349,6 +2349,128 @@ function bandNow(bk) {
    differently. */
 let whyNoAnswer = '';
 
+/* The last resort, and on a board glued nearly solid the best tool there is:
+   the position itself — colours and bandages together — searched from both
+   ends until the two meet. Heavy gluing is what starves the move library, a
+   board can be glued so far that the harvest comes back with almost nothing,
+   and then the machinery above has no material however long it looks. But
+   heavy gluing is also what makes this search small: with a turn or two
+   legal at a time, the positions reachable at all are few, and meeting in
+   the middle covers the distance twice as fast as walking it. The cap is
+   what keeps a rich board from drowning it — on one of those it fills up
+   and gives up in a few seconds, and the answer stays no. */
+const BRUTE_HOME = 500000;                  // positions held around home, once
+const BRUTE_SEEK = 600000;                  // positions one solve may walk out
+async function bandBrute() {
+  const bk = bandKit;
+  if (!bk) return null;
+  const n = kit.n;
+  /* A position's key is the board itself and a small number for where the
+     bandages sit, and it is built flat in one stroke, read straight off the
+     key before it. That is not fussiness: building these by appending a
+     character at a time, and reading them back by slicing, left every entry
+     dragging string machinery behind it — 2.2KB a position where a flat key
+     is a tenth of that, measured — and the difference is the whole search
+     seeing nine times further before the room runs out.
+
+     A position remembers only the turn that reached it and where from; the
+     way is read back along the chain when the two sides meet.
+
+     The homeward side is the same ground whatever the scramble, so it is
+     walked once and kept with the tables: the first direct solve pays for
+     it, and every one after only walks out from its own scramble. A turn is
+     playable at the position behind a homeward step exactly when it is
+     playable at the step itself — a bandage wholly in the collar is wholly
+     in it after the turn, and one outside is untouched — which is what lets
+     home's side be walked backwards at all. */
+  if (!bk.brute) {
+    const ids = new Map(), cfgs = [];
+    const idOf = cfg => {
+      const k = bk.cfgKey(cfg);
+      let i = ids.get(k);
+      if (i === undefined) {
+        ids.set(k, i = cfgs.length);
+        cfgs.push(cfg);
+      }
+      return i;
+    };
+    const buf = new Array(n + 8);
+    const keyOf = (k, p, cfg) => {
+      for (let i = 0; i < n; i++) buf[i] = k.charCodeAt(p[i]);
+      let m = n;
+      buf[m++] = 124;                       // '|'
+      const ds = '' + idOf(cfg);
+      for (let j = 0; j < ds.length; j++) buf[m++] = ds.charCodeAt(j);
+      return String.fromCharCode.apply(null, buf.slice(0, m));
+    };
+    const cfgAt = k => cfgs[+k.slice(n + 1)];
+    const ident = new Int16Array(n);
+    for (let i = 0; i < n; i++) ident[i] = i;
+    const kh = keyOf(kit.home, ident, bk.HOME);
+    const B = new Map([[kh, null]]);
+    let front = [kh], tick = 0;
+    while (front.length && B.size < BRUTE_HOME) {
+      const next = [];
+      grow: for (const k of front) {
+        const cfg = cfgAt(k);
+        for (let h = 0; h < boardHexes.length; h++) {
+          if (!bk.canTurn(cfg, h)) continue;
+          for (const dir of [0, 1]) {
+            const g = h * 2 + dir;
+            const k2 = keyOf(k, kit.gens[g ^ 1], bk.shove(cfg, h, dir ^ 1));
+            if (B.has(k2)) continue;
+            B.set(k2, { g, from: k });
+            next.push(k2);
+            if (B.size >= BRUTE_HOME) break grow;
+          }
+        }
+        if ((++tick & 1023) === 0) await new Promise(r => setTimeout(r, 0));
+      }
+      front = next;
+    }
+    bk.brute = { B, keyOf, cfgAt, ident, complete: !front.length };
+  }
+  const { B, keyOf, cfgAt, ident, complete } = bk.brute;
+  // the turns that take a position the homeward side holds on to home
+  const wayOn = k => {
+    const w = [];
+    for (let e = B.get(k); e; e = B.get(e.from)) w.push(e.g);
+    return w;
+  };
+  const k0 = keyOf(kit.read(), ident, bandNow(bk));
+  if (B.has(k0)) return wayOn(k0);
+  if (complete) return null;                // home's whole world, and not in it
+  const A = new Map([[k0, null]]);
+  const wayOut = k => {
+    const w = [];
+    for (let e = A.get(k); e; e = A.get(e.from)) w.unshift(e.g);
+    return w;
+  };
+  let front = [k0], tick = 0;
+  while (front.length) {
+    const next = [];
+    for (const k of front) {
+      const cfg = cfgAt(k);
+      for (let h = 0; h < boardHexes.length; h++) {
+        if (!bk.canTurn(cfg, h)) continue;
+        for (const dir of [0, 1]) {
+          const g = h * 2 + dir;
+          const k2 = keyOf(k, kit.gens[g], bk.shove(cfg, h, dir));
+          if (A.has(k2)) continue;
+          if (B.has(k2)) return wayOut(k).concat(g, wayOn(k2));
+          A.set(k2, { g, from: k });
+          next.push(k2);
+          if (A.size >= BRUTE_SEEK) return null;
+        }
+      }
+      // let the page breathe now and then; this can run some seconds
+      if ((++tick & 1023) === 0) await new Promise(r => setTimeout(r, 0));
+    }
+    front = next;
+  }
+  return null;
+}
+
 async function bandSolution(onStep) {
   const bk = bandKit, n = kit.n, goal = kit.home, tileOf = kit.tileOf;
   const walk = (s, p) => {
@@ -2478,7 +2600,17 @@ async function findSolution(onStep) {
   };
   whyNoAnswer = 'The search ran out of time before it closed. Scramble again ' +
     'and try once more.';
-  if (bandaged) return bandSolution(onStep);
+  if (bandaged) {
+    const got = await bandSolution(onStep);
+    if (got) return got;
+    /* Whatever stopped the machinery — a starved library, a seating beyond
+       its reach, a search that ran out — the direct search gets the last
+       word. It is exact where it fits and cheap where it does not. */
+    const direct = await bandBrute();
+    if (!direct) whyNoAnswer += ' A direct search of every position within ' +
+      'reach found no way through either.';
+    return direct;
+  }
   if (kit.reduce) return placeSolution(from, goal, walk, miss, onStep);
   for (let attempt = 0; attempt < kit.tries; attempt++) {
     const t0 = performance.now();
