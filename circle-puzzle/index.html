@@ -37,7 +37,7 @@
   /* a piece is filled by its parts; the hairline is the fill again so the two
      sides of a colour boundary meet without the background showing through */
   .part { stroke-width: 0.006; }
-  .cell { fill: none; stroke: #101114; stroke-linejoin: round; }
+  .cell { fill: none; stroke: #101114; stroke-linejoin: round; stroke-linecap: round; }
 
   /* transparent, not none: a disc has to be there to be clicked */
   .hit { fill: transparent; stroke: none; cursor: pointer; }
@@ -469,6 +469,20 @@ function pathOf(loop) {
   return d + 'Z';
 }
 
+/* Only what a circle cut: the straight sides a piece keeps from its own tile
+   are the shape's own outline and are left to the colours to show. */
+function arcsOf(loop) {
+  let d = '';
+  for (const e of loop) {
+    if (!e.centre) continue;
+    const { d: sweep } = arcSpan(e);
+    const big = Math.abs(sweep) > Math.PI ? 1 : 0;
+    d += 'M' + xy(e.from) +
+      `A${e.r.toFixed(4)},${e.r.toFixed(4)} 0 ${big} ${sweep > 0 ? 1 : 0} ${xy(e.to)}`;
+  }
+  return d;
+}
+
 let root, ringLayer;
 function render() {
   const svg = document.getElementById('board');
@@ -484,7 +498,7 @@ function render() {
   // the circles, drawn where they cut and only if wanted
   ringLayer = svgEl('g', { 'stroke-width': '0.02' });
   for (const p of board) {
-    p.el = svgEl('path', { class: 'cell', 'stroke-width': '0.02', d: p.parts.map(q => pathOf(q.loop)).join('') });
+    p.el = svgEl('path', { class: 'cell', 'stroke-width': '0.02', d: p.parts.map(q => arcsOf(q.loop)).join('') });
     ringLayer.appendChild(p.el);
   }
 
