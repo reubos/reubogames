@@ -3520,7 +3520,7 @@ document.getElementById('solve').addEventListener('click', async () => {
   planAt = 0;
   showPlan();
   const turns = plan.reduce((n, t) => n + t.n, 0);
-  say(`${turns} turns in ${plan.length} moves, down from ${raw.length}. ` +
+  say(`${turns} turns in ${plan.length} moves. ` +
       `Step through them with the arrows, or click a move to wind there.`);
 });
 document.getElementById('step').addEventListener('click', () => goTo(planAt + 1));
