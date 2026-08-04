@@ -76,6 +76,7 @@
     <button type="button" id="reset">Reset puzzle</button>
     <label class="toggle"><input type="checkbox" id="invert">Invert controls</label>
     <label class="toggle"><input type="checkbox" id="rings" checked>Show the circles</label>
+    <label class="toggle"><input type="checkbox" id="quarter">Squares turn by a quarter</label>
   </div>
 
   <p class="counts" id="counts"></p>
@@ -86,17 +87,24 @@
 /* =====================================================================
    A TURN ON EVERY TILE
 
-   The rhombitrihexagonal tiling, 3.4.6.4, coloured by shape — hexagons one
-   colour, squares another, triangles a third. Every tile carries the circle
-   through its own corners, and every one of those circles turns.
+   The rhombitrihexagonal tiling, 3.4.6.4. A hexagon and the collar it wears —
+   six squares across its edges, six triangles at its corners — thirteen tiles
+   each with a colour of its own, each carrying the circle through its own
+   corners, and each of those circles turns.
 
-   What a circle may turn by is not its tile's own symmetry but the tiling's
-   symmetry about that tile's centre, since a turn has to land the pieces on
-   ground cut the same way. About a hexagon the tiling repeats every sixth of
-   a turn and about a triangle every third, so those go by 60° and 120°. A
-   square, though, has hexagons on two opposite sides and triangles on the
-   other two: a quarter turn would put a hexagon where a triangle was, so a
-   square turns by a half turn and nothing less.
+   What a circle may turn by is not its tile's own symmetry but what the cuts
+   inside it will bear, since a turn has to land the pieces on ground cut the
+   same way. About a hexagon the tiling repeats every sixth of a turn and about
+   a triangle every third, so those go by 60° and 120°. A square has hexagons
+   on two opposite sides and triangles on the other two, so on the tiling alone
+   it can only go by a half.
+
+   Ask for a quarter and the cuts have to be earned: every cut crossing a
+   square's circle is copied round it a quarter at a time and kept inside. Each
+   copy lands in the neighbouring circles and has to be copied round those in
+   turn, and so on — but the asking stops. After five rounds nothing new is
+   added, at 364 arcs on 104 circles, and the board is 181 pieces instead of
+   91. That is what the last toggle does.
 
    The board is the ground those circles cover — the union of the discs. It
    cannot be the tiles themselves: a square's circle runs out to 2.073 from
@@ -141,6 +149,14 @@ const COLOURS = {
   grey: '#6b7079',
 };
 const NAME = { 6: 'hexagon', 4: 'square', 3: 'triangle' };
+/* A quarter turn on the squares is no symmetry of the tiling, so it asks for
+   extra cuts. It is read before anything is built, since the whole board
+   follows from it. */
+let quarter = false;
+try {
+  quarter = window.QUARTER !== undefined ? !!window.QUARTER
+    : localStorage.getItem('quarter') === '1';
+} catch (e) { quarter = false; }
 // what the tiling repeats by about each kind of centre, which is what may turn
 const STEP = { 6: Math.PI / 3, 4: Math.PI, 3: 2 * Math.PI / 3 };
 const CIRCUM = { 6: 1, 4: Math.SQRT1_2, 3: 1 / S3 };
@@ -393,13 +409,153 @@ const arcMids = loop => loop.filter(e => e.centre).map(e => {
   const { a, d } = arcSpan(e);
   return [e.centre[0] + e.r * Math.cos(a + d / 2), e.centre[1] + e.r * Math.sin(a + d / 2)];
 });
-const markOf = parts => midOf(parts.flatMap(p => [...corners(p.loop), ...arcMids(p.loop)]));
+/* A piece is marked at its middle of area. Its outline gets broken wherever a
+   whole circle crosses it, and those breaks are not carried along by a turn —
+   the middle of area is, because it does not care how the outline is cut up. */
+function markOf(loops) {
+  let area = 0, mx = 0, my = 0;
+  for (const loop of loops) {
+    let a = 0, px = 0, py = 0;
+    for (const e of loop) {
+      const cross = e.from[0] * e.to[1] - e.to[0] * e.from[1];
+      a += cross;
+      px += (e.from[0] + e.to[0]) * cross;
+      py += (e.from[1] + e.to[1]) * cross;
+    }
+    a /= 2;
+    if (Math.abs(a) > 1e-12) { area += a; mx += px / 6; my += py / 6; }
+    for (const e of loop) {
+      if (!e.centre) continue;
+      const { a: a0, d } = arcSpan(e);
+      const seg = e.r * e.r / 2 * (d - Math.sin(d));
+      if (Math.abs(seg) < 1e-12) continue;
+      const half = Math.abs(d) / 2;
+      const far = 4 * e.r * Math.pow(Math.sin(half), 3) / (3 * (Math.abs(d) - Math.sin(Math.abs(d))));
+      const th = a0 + d / 2;
+      area += seg;
+      mx += seg * (e.centre[0] + far * Math.cos(th));
+      my += seg * (e.centre[1] + far * Math.sin(th));
+    }
+  }
+  return [mx / area, my / area];
+}
 
-const pieces = [];
+/* ---- what is really cut ----------------------------------------------
+
+   A cut is an arc: a circle, and the run of it that is there. The tiling's own
+   circles are whole. A circle only turns if what is cut inside it comes back
+   onto itself, so every cut crossing a turning circle is copied round it and
+   kept inside. That asking closes after a few rounds rather than running away,
+   which is what lets a square turn by a quarter even though the tiling about
+   its middle only repeats by a half. */
+
+const TAU = 2 * Math.PI;
+const norm = a => { a %= TAU; return a < 0 ? a + TAU : a; };
+// a turned copy of a circle through the middle lands on -0, which is not 0 to a
+// string, so every circle is named through the same rounding
+const r5 = v => { const r = +v.toFixed(5); return r === 0 ? 0 : r; };
+const nameOf = (c, r) => r5(c[0]).toFixed(5) + ',' + r5(c[1]).toFixed(5) + ',' + r.toFixed(5);
+const STEP_OF = t => (quarter && t.sides === 4) ? Math.PI / 2 : STEP[t.sides];
+
+// the run of circle X lying inside disc D: null, 'all', or [start, length]
+function runInside(X, D) {
+  const dx = D.c[0] - X.c[0], dy = D.c[1] - X.c[1], d = Math.hypot(dx, dy);
+  if (d + X.r <= D.r + 1e-12) return 'all';
+  if (d >= X.r + D.r - 1e-12 || d + D.r <= X.r + 1e-12) return null;
+  const co = (X.r * X.r + d * d - D.r * D.r) / (2 * X.r * d);
+  if (co >= 1) return null;
+  if (co <= -1) return 'all';
+  return [norm(Math.atan2(dy, dx) - Math.acos(co)), 2 * Math.acos(co)];
+}
+function runMeet(a, b) {
+  const out = [];
+  for (const shift of [-TAU, 0, TAU]) {
+    const s = Math.max(a[0], b[0] + shift), e = Math.min(a[0] + a[1], b[0] + shift + b[1]);
+    if (e - s > 1e-7) out.push([s, e - s]);
+  }
+  return out;
+}
+function cutArcs() {
+  const tidy = q => (q.l >= TAU - 1e-9 ? { c: q.c, r: q.r, s: 0, l: TAU } : q);
+  const key = q => nameOf(q.c, q.r) + ':' + norm(q.s).toFixed(5) + '+' + q.l.toFixed(5);
+  const have = new Map();
+  const add = q => { q = tidy(q); const k = key(q); if (have.has(k)) return null; have.set(k, q); return q; };
+  for (const c of circles) {
+    const q = { c: c.c.slice(), r: c.r, s: 0, l: TAU };
+    if (turners.some(t => runInside(q, t))) add(q);
+  }
+  let front = [...have.values()];
+  for (let round = 0; round < 20 && front.length; round++) {
+    const born = [];
+    for (const t of turners) {
+      const step = STEP_OF(t);
+      for (const q of front) {
+        const span = runInside(q, t);
+        if (!span) continue;
+        const runs = span === 'all' ? [[q.s, q.l]]
+          : (q.l >= TAU - 1e-9 ? [span] : runMeet([q.s, q.l], span));
+        for (const [rs, rl] of runs) for (let k = 1; k * step < TAU - 1e-9; k++) {
+          const a = k * step, co = Math.cos(a), si = Math.sin(a);
+          const x = q.c[0] - t.c[0], y = q.c[1] - t.c[1];
+          const got = add({ c: [t.c[0] + x * co - y * si, t.c[1] + x * si + y * co],
+            r: q.r, s: norm(rs + a), l: rl });
+          if (got) born.push(got);
+        }
+      }
+    }
+    front = born;
+  }
+  return [...have.values()];
+}
+
+const arcs = cutArcs();
+const cutters = [];                       // the whole circles behind those arcs
+const realRuns = [];                      // and which runs of each are really cut
+{
+  const at = new Map();
+  for (const q of arcs) {
+    const k = nameOf(q.c, q.r);
+    let i = at.get(k);
+    if (i === undefined) {
+      i = cutters.length; at.set(k, i); cutters.push({ c: q.c, r: q.r }); realRuns.push([]);
+    }
+    realRuns[i].push([norm(q.s), q.l]);
+  }
+  for (const t of turners) t.at = at.get(nameOf(t.c, t.r));
+}
+/* Overlapping runs on one circle are the one stretch of cut. Merging them is
+   what makes a run's ends mean something: they are where the cut stops, and a
+   turn carries those onto each other just as it carries the cuts. */
+for (let i = 0; i < realRuns.length; i++) {
+  const runs = realRuns[i];
+  if (runs.some(([, l]) => l >= TAU - 1e-9)) { realRuns[i] = [[0, TAU]]; continue; }
+  const spans = runs.map(([s, l]) => [s, s + l]).sort((a, b) => a[0] - b[0]);
+  const out = [];
+  for (const [s, e] of spans) {
+    const last = out[out.length - 1];
+    if (last && s <= last[1] + 1e-7) last[1] = Math.max(last[1], e);
+    else out.push([s, e]);
+  }
+  // the first and last may join round the back of the circle
+  if (out.length > 1 && out[out.length - 1][1] - TAU >= out[0][0] - 1e-7) {
+    out[0][0] = out[out.length - 1][0] - TAU;
+    out.pop();
+  }
+  if (out.length === 1 && out[0][1] - out[0][0] >= TAU - 1e-9) realRuns[i] = [[0, TAU]];
+  else realRuns[i] = out.map(([s, e]) => [norm(s), e - s]);
+}
+const isTurner = cutters.map((_, i) => turners.some(t => t.at === i));
+const cutHere = (i, p) => realRuns[i].some(([s, l]) => {
+  let d = norm(Math.atan2(p[1] - cutters[i].c[1], p[0] - cutters[i].c[0]) - s);
+  if (d > TAU - 1e-7) d = 0;
+  return d <= l + 1e-7;
+});
+
+const faces = [];
 for (const t of tiles) {
   if (Math.hypot(t.centre[0], t.centre[1]) > 3.2) continue;   // past every disc
   let bits = [{ loop: facing(t.poly.map((p, i) => edge(p, t.poly[(i + 1) % t.poly.length]))), word: '' }];
-  for (const c of circles) {
+  for (const c of cutters) {
     const next = [];
     for (const b of bits) {
       const s = sliceLoop(b.loop, c.c, c.r);
@@ -411,44 +567,117 @@ for (const t of tiles) {
   for (const b of bits) {
     if (Math.abs(loopArea(b.loop)) < 1e-7) continue;
     // kept only where a turning circle covers it — that is the board
-    if (!circles.some((c, i) => c.turns && b.word[i] === '1')) continue;
+    if (!isTurner.some((yes, i) => yes && b.word[i] === '1')) continue;
     b.tile = t;
-    pieces.push(b);
+    faces.push(b);
   }
 }
-// bits of the same tile agreeing on every circle are the one piece
-const byWord = new Map();
-for (const b of pieces) {
-  const k = b.tile.sides + ':' + spot(b.tile.centre) + ':' + b.word;
-  if (!byWord.has(k)) byWord.set(k, []);
-  byWord.get(k).push(b);
+
+/* Faces were cut by whole circles, but only the runs really cut divide
+   anything. Where two faces meet along a stretch of circle no turn ever cut,
+   they are the one piece; the rest of a face's edge is its outline. */
+const wordAt = p => {
+  let w = '';
+  for (const c of cutters) w += (Math.hypot(p[0] - c.c[0], p[1] - c.c[1]) < c.r ? '1' : '0');
+  return w;
+};
+const onCutter = e => {
+  if (!e.centre) return -1;
+  for (let i = 0; i < cutters.length; i++)
+    if (Math.abs(e.r - cutters[i].r) < 1e-6 && Math.abs(e.centre[0] - cutters[i].c[0]) < 1e-6 &&
+        Math.abs(e.centre[1] - cutters[i].c[1]) < 1e-6) return i;
+  return -1;
+};
+let lostKin = 0;
+const facesAt = new Map();
+for (const f of faces) {
+  const k = f.tile.sides + ':' + spot(f.tile.centre) + ':' + f.word;
+  if (!facesAt.has(k)) facesAt.set(k, []);
+  facesAt.get(k).push(f);
+}
+/* A run of cuts can end partway along an edge, so an edge is broken at every
+   such end before being called cut or not. */
+function alongRuns(e, i) {
+  const runs = realRuns[i];
+  if (runs.length === 1 && runs[0][1] >= TAU - 1e-9)      // cut the whole way round
+    return [{ bit: e, mid: arcMids([e])[0] }];
+  const { a, d } = arcSpan(e);
+  const sgn = d < 0 ? -1 : 1, len = Math.abs(d);
+  const marks = [0, len];
+  for (const [rs, rl] of realRuns[i]) for (const end of [rs, rs + rl]) {
+    const t = norm(sgn * (end - a));
+    if (t > 1e-7 && t < len - 1e-7) marks.push(t);
+  }
+  marks.sort((x, y) => x - y);
+  const at = t => [e.centre[0] + e.r * Math.cos(a + sgn * t), e.centre[1] + e.r * Math.sin(a + sgn * t)];
+  const out = [];
+  for (let k = 0; k + 1 < marks.length; k++) {
+    if (marks[k + 1] - marks[k] < 1e-7) continue;
+    out.push({ bit: edge(at(marks[k]), at(marks[k + 1]), e.centre, e.r),
+      mid: at((marks[k] + marks[k + 1]) / 2) });
+  }
+  return out;
+}
+
+const boss = new Map(faces.map(f => [f, f]));
+const find = f => (boss.get(f) === f ? f : (boss.set(f, find(boss.get(f))), boss.get(f)));
+const join = (a, b) => { a = find(a); b = find(b); if (a !== b) boss.set(a, b); };
+for (const f of faces) {
+  f.show = [];
+  for (const e of f.loop) {
+    const i = onCutter(e);
+    if (i < 0) { f.show.push(e); continue; }            // a side of the tile, always a cut
+    for (const { bit, mid } of alongRuns(e, i)) {
+      if (cutHere(i, mid)) { f.show.push(bit); continue; }
+      // nothing cut here, so the face across the way is the same piece
+      const c = cutters[i], away = f.word[i] === '1' ? 1 : -1;
+      const n = [mid[0] + away * 1e-4 * (mid[0] - c.c[0]) / c.r,
+                 mid[1] + away * 1e-4 * (mid[1] - c.c[1]) / c.r];
+      const kin = facesAt.get(f.tile.sides + ':' + spot(f.tile.centre) + ':' + wordAt(n));
+      if (!kin) { lostKin++; continue; }
+      let best = kin[0], bd = Infinity;
+      for (const g of kin) for (const p of corners(g.loop)) {
+        const d = Math.hypot(p[0] - n[0], p[1] - n[1]);
+        if (d < bd) { bd = d; best = g; }
+      }
+      join(f, best);
+    }
+  }
+}
+if (lostKin) console.warn(lostKin + ' joins had no face to join to');
+const grouped = new Map();
+for (const f of faces) {
+  const r = find(f);
+  if (!grouped.has(r)) grouped.set(r, []);
+  grouped.get(r).push(f);
 }
 const board = [];
-for (const bits of byWord.values()) {
-  const parts = bits.map(b => ({ loop: b.loop, home: b.tile.colour, colour: b.tile.colour }));
+for (const bits of grouped.values()) {
   board.push({
     word: bits[0].word,
     sides: bits[0].tile.sides,
-    parts,
-    centre: markOf(parts),
+    parts: bits.map(b => ({ loop: b.loop, show: b.show })),
+    home: bits[0].tile.colour,
+    colour: bits[0].tile.colour,
+    centre: markOf(bits.map(b => b.loop)),
   });
 }
 
 /* Which pieces each circle holds, and where a turn sends them. Read off by
    position: a piece is carried onto the piece standing where it lands, and
    the cuts repeating about that centre is what promises there is one. */
-const where = (p, sides) => spot(p) + '/' + sides;
-const spotOf = new Map(board.map(p => [where(p.centre, p.sides), p]));
+const where = p => spot(p);   // the mark alone; a turn may carry one kind of tile onto another
+const spotOf = new Map(board.map(p => [where(p.centre), p]));
 if (spotOf.size !== board.length) throw new Error('two pieces marked at one place');
-for (const [i, c] of circles.entries()) {
+for (const c of circles) {
   if (!c.turns) continue;
-  c.holds = board.filter(p => p.word[i] === '1');
+  c.holds = board.filter(p => p.word[c.at] === '1');
   const map = (ang) => {
     const co = Math.cos(ang), si = Math.sin(ang);
     const m = new Map();
     for (const p of c.holds) {
       const x = p.centre[0] - c.c[0], y = p.centre[1] - c.c[1];
-      const to = spotOf.get(where([c.c[0] + x * co - y * si, c.c[1] + x * si + y * co], p.sides));
+      const to = spotOf.get(where([c.c[0] + x * co - y * si, c.c[1] + x * si + y * co]));
       if (!to) throw new Error('a circle that does not turn onto itself: ' + NAME[c.sides]);
       m.set(p, to);
     }
@@ -456,9 +685,9 @@ for (const [i, c] of circles.entries()) {
       throw new Error('a turn that is not a shuffle: ' + NAME[c.sides]);
     return m;
   };
-  c.acw = map(STEP[c.sides]);
-  c.cw = map(-STEP[c.sides]);
-  c.deg = STEP[c.sides] * 180 / Math.PI;
+  c.acw = map(STEP_OF(c));
+  c.cw = map(-STEP_OF(c));
+  c.deg = STEP_OF(c) * 180 / Math.PI;
 }
 
 /* ---- drawing ---------------------------------------------------------- */
@@ -511,7 +740,7 @@ function render() {
   // the circles, drawn where they cut and only if wanted
   ringLayer = svgEl('g', { 'stroke-width': '0.02' });
   for (const p of board) {
-    p.el = svgEl('path', { class: 'cell', 'stroke-width': '0.02', d: p.parts.map(q => arcsOf(q.loop)).join('') });
+    p.el = svgEl('path', { class: 'cell', 'stroke-width': '0.02', d: p.parts.map(q => arcsOf(q.show)).join('') });
     ringLayer.appendChild(p.el);
   }
 
@@ -541,8 +770,8 @@ function render() {
 const paint = () => {
   for (const p of board)
     for (const part of p.parts) {
-      part.el.setAttribute('fill', part.colour);
-      part.el.setAttribute('stroke', part.colour);
+      part.el.setAttribute('fill', p.colour);
+      part.el.setAttribute('stroke', p.colour);
     }
 };
 
@@ -553,9 +782,8 @@ const paint = () => {
 function move(c, dir) {
   const map = dir > 0 ? c.acw : c.cw;
   const taken = [];
-  for (const [from, to] of map) taken.push([to, from.parts.map(q => q.colour)]);
-  for (const [to, colours] of taken)
-    to.parts.forEach((q, i) => { q.colour = colours[i]; });
+  for (const [from, to] of map) taken.push([to, from.colour]);
+  for (const [to, colour] of taken) to.colour = colour;
 }
 
 const SPIN_MS = 190;
@@ -599,7 +827,7 @@ function turn(c, dir) {
 }
 
 function reset() {
-  for (const p of board) for (const q of p.parts) q.colour = q.home;
+  for (const p of board) p.colour = p.home;
   paint();
 }
 
@@ -641,6 +869,16 @@ document.getElementById('invert').addEventListener('change', e => {
 document.getElementById('rings').addEventListener('change', e => {
   ringLayer.style.display = e.target.checked ? '' : 'none';
 });
+/* The whole board is cut from this, so it is remembered and the page begun
+   again rather than pretended to change underfoot. */
+{
+  const box = document.getElementById('quarter');
+  box.checked = quarter;
+  box.addEventListener('change', e => {
+    try { localStorage.setItem('quarter', e.target.checked ? '1' : '0'); } catch (err) {}
+    location.reload();
+  });
+}
 </script>
 </body>
 </html>
