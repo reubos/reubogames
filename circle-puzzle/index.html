@@ -733,9 +733,9 @@ function render() {
     }
 
   // the circles, drawn where they cut and only if wanted
-  ringLayer = svgEl('g', { 'stroke-width': '0.02' });
+  ringLayer = svgEl('g', { 'stroke-width': '0.009' });
   for (const p of board) {
-    p.el = svgEl('path', { class: 'cell', 'stroke-width': '0.02', d: p.parts.map(q => arcsOf(q.show)).join('') });
+    p.el = svgEl('path', { class: 'cell', 'stroke-width': '0.009', d: p.parts.map(q => arcsOf(q.show)).join('') });
     ringLayer.appendChild(p.el);
   }
 
