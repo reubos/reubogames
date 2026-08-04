@@ -154,6 +154,17 @@
   #bandcode:focus { color: var(--text); outline: none; border-color: #6ea8fe; }
 
   .toggle { display: inline-flex; align-items: center; gap: 8px; }
+  /* the layout picker sits inside its label, so it wears no border of its own */
+  #layout {
+    font: inherit;
+    font-size: 0.95rem;
+    color: var(--text);
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 2px 4px;
+    cursor: pointer;
+  }
   .toggle input { accent-color: #6ea8fe; cursor: pointer; margin: 0; }
 
   .counts { color: var(--muted); font-size: 0.9rem; margin: 16px 0 0; }
@@ -215,7 +226,9 @@
            title="This bandaging as a code — copy it to keep or share it, or paste one in and press Enter">
     <label class="toggle"><input type="checkbox" id="invert">Invert controls</label>
     <label class="toggle"><input type="checkbox" id="bandaged">Bandaged</label>
-    <label class="toggle"><input type="checkbox" id="three">Three circles</label>
+    <label class="toggle">Layout
+      <select id="layout"></select>
+    </label>
   </div>
 
   <p class="counts" id="hint"></p>
@@ -269,7 +282,9 @@ const COLOURS = {
 /* The seven the geometry is built for. The smaller puzzle plays on three of
    them, so its board is a piece of this one — the same tiles on the same
    circles, fewer of them in play — and nothing has to be built twice. */
-const HEXES = [[0, 0], [0, 1], [1, 0], [1, -1], [0, -1], [-1, 0], [-1, 1]];
+const HEXES = [
+  [0, 0], [0, 1], [1, 0], [1, -1], [0, -1], [-1, 0], [-1, 1],   // the seven
+  [1, 1], [2, 0], [0, 2], [2, 1] ];                             // and the rest
 const hexSet = new Set(HEXES.map(h => key(...h)));
 const isHex = (a, b) => hexSet.has(key(a, b));
 
@@ -286,26 +301,92 @@ const isHex = (a, b) => hexSet.has(key(a, b));
    equal heights below it, so the line between the bottom pair lies flat.
    Clockwise from the top they read red, green, white. */
 const PUZZLES = {
-  seven: { hexes: [
+  /* Two circles side by side. Their line runs at 30° on the lattice, so the
+     board is stood back a sixth of a half-turn to lay it flat — as every
+     layout below is that wants a lattice direction level. */
+  dihex: { name: 'Dihex — 2 circles', recipe: 'three', tilt: -Math.PI / 6, hexes: [
+    [ 0,  0, 'red'],                        // left
+    [ 1,  0, 'green'] ] },                  // right
+
+  // three in a row, along one lattice direction
+  line: { name: 'Line — 3 circles', recipe: 'three', tilt: -Math.PI / 6, hexes: [
+    [-1,  0, 'red'],                        // left
+    [ 0,  0, 'white'],                      // middle
+    [ 1,  0, 'green'] ] },                  // right
+
+  /* The three sit on one lattice face, each of them next to both the others.
+     On the lattice they stand at 0°, 120° and 240° about their middle, and
+     the tilt carries those to 90°, 210° and 330°: one at the top and two at
+     equal heights below it, so the line between the bottom pair lies flat.
+     Clockwise from the top they read red, green, white. */
+  three: { name: 'Small triangle — 3 circles', recipe: 'three',
+    tilt: -Math.PI / 6, hexes: [
+    [ 0,  1, 'red'],                        // top, once tilted
+    [ 1,  0, 'green'],                      // bottom right
+    [ 0,  0, 'white'] ] },                  // bottom left
+
+  /* Two faces sharing an edge: a rhombus, whose long diagonal the tilt stands
+     upright, so it reads as a diamond on its point. */
+  diamond: { name: 'Diamond — 4 circles', recipe: 'four',
+    tilt: Math.PI / 6, hexes: [
+    [ 1,  1, 'red'],                        // top
+    [ 1,  0, 'white'],                      // right
+    [ 0,  0, 'green'],                      // bottom
+    [ 0,  1, 'blue'] ] },                   // left
+
+  /* A hub and three spokes, taken every other direction so no two spokes
+     touch. One spoke stands straight up already, so there is no tilt. */
+  spokes: { name: 'Spokes — 4 circles', recipe: 'four', hexes: [
+    [ 0,  0, 'white'],                      // the hub
+    [ 0,  1, 'red'],                        // 90°, straight up
+    [ 1, -1, 'green'],                      // -30°
+    [-1,  0, 'blue'] ] },                   // -150°
+
+  /* Three to a side: the corners and the middle of each edge, six in all and
+     every one of them on the rim. The tilt stands a corner at the top. */
+  bigtri: { name: 'Big triangle — 6 circles', recipe: 'seven',
+    tilt: -Math.PI / 6, hexes: [
+    [ 0,  2, 'red'],                        // top corner
+    [ 1,  1, 'orange'],                     // then clockwise round the rim
+    [ 2,  0, 'yellow'],                     // right corner
+    [ 1,  0, 'green'],
+    [ 0,  0, 'blue'],                       // left corner
+    [ 0,  1, 'white'] ] },
+
+  // three by two, the long side laid flat by the tilt
+  parallelogram: { name: 'Parallelogram — 6 circles', recipe: 'seven',
+    tilt: -Math.PI / 6, hexes: [
+    [ 0,  1, 'red'],                        // top left, then clockwise
+    [ 1,  1, 'orange'],
+    [ 2,  1, 'yellow'],                     // top right
+    [ 2,  0, 'green'],                      // bottom right
+    [ 1,  0, 'blue'],
+    [ 0,  0, 'white'] ] },                  // bottom left
+
+  /* The seven go clockwise from the top, which — the board being drawn with y
+     running up — is the neighbour directions in falling order of angle. */
+  seven: { name: 'Big circle — 7 circles', recipe: 'seven', hexes: [
     [ 0,  0, 'white'],                      // the middle
     [ 0,  1, 'red'],                        // 90°, straight up
     [ 1,  0, 'orange'],                     // 30°
     [ 1, -1, 'yellow'],                     // -30°
     [ 0, -1, 'green'],                      // -90°, straight down
     [-1,  0, 'blue'],                       // -150°
-    [-1,  1, 'purple'] ] },                 // 150°
-  three: { tilt: -Math.PI / 6, hexes: [
-    [ 0,  1, 'red'],                        // top, once tilted
-    [ 1,  0, 'green'],                      // bottom right
-    [ 0,  0, 'white'] ] }                   // bottom left
+    [-1,  1, 'purple'] ] }                  // 150°
 };
+
+// a puzzle by the name it goes under, and the name a puzzle goes under
+const puzzleName = p => Object.keys(PUZZLES).find(nm => PUZZLES[nm] === p);
 
 let hexColour = new Map();                  // filled in when a puzzle is picked
 // a lattice point with no hexagon of this puzzle on it has no colour to give,
 // so the halves and kites facing it go grey
 const colourAt = (a, b) => hexColour.get(key(a, b)) || 'grey';
 
-const RANGE = 2;                            // far enough to reach every collar
+/* Far enough to reach every collar of every layout. A hexagon out at (2,1)
+   wants edges coming in from (3,0), so the walk has to start one further out
+   than the furthest hexagon stands. */
+const RANGE = 3;
 
 /* Every lattice edge with a board hexagon at one end or the other. Taking the
    three directions of one half-plane visits each edge from one end only. */
@@ -640,11 +721,11 @@ const seat = ps => {
 
 // the lens on a lattice edge: the square astride it, and the triangles on the
 // two faces either side
-PUZZLES.seven.bands = () => PUZZLES.seven.hexes.slice(1).map(([a, b]) => {
-  const X = [a, b], Y = [2 * a, 2 * b];
-  return [seat([X, Y]),
-          ...FACES.filter(f => onSpot(f, X) && onSpot(f, Y)).map(seat)];
-});
+const lensOn = (X, Y) => [seat([X, Y]),
+  ...FACES.filter(f => onSpot(f, X) && onSpot(f, Y)).map(seat)];
+
+PUZZLES.seven.bands = () => PUZZLES.seven.hexes.slice(1)
+  .map(([a, b]) => lensOn([a, b], [2 * a, 2 * b]));
 
 // two squares and the triangle between them, on the face opposite the two
 // hexagons this one sits beside
@@ -655,6 +736,51 @@ PUZZLES.three.bands = () => PUZZLES.three.hexes.map(([a, b]) => {
     .map(h => [2 * a - h[0], 2 * b - h[1]]);      // the neighbour opposite each
   return [seat([X, away[0]]), seat([X, away[0], away[1]]), seat([X, away[1]])];
 });
+
+/* What the layouts that name no bandaging of their own ship with: one lens to
+   a circle, glued at the edge pointing furthest out of the board.
+
+   A circle in the middle of its board has no outermost edge — every direction
+   from it lands on another circle — so it goes unglued, which is what leaves
+   the seven-circle board its six and the spokes their three. The edge chosen
+   is the one leaning nearest to straight away from the middle of the board,
+   among those with nothing of the board beyond them. */
+const OUT = [[1, 0], [0, 1], [-1, 1], [-1, 0], [0, -1], [1, -1]];
+function outerLens(p) {
+  const on = new Set(p.hexes.map(h => key(h[0], h[1])));
+  let mx = 0, my = 0;
+  for (const h of p.hexes) {
+    const c = at(h[0], h[1]);
+    mx += c[0] / p.hexes.length;
+    my += c[1] / p.hexes.length;
+  }
+  const out = [];
+  for (const h of p.hexes) {
+    const c = at(h[0], h[1]);
+    const ax = c[0] - mx, ay = c[1] - my;
+    if (Math.hypot(ax, ay) < 1e-9) continue;  // a circle in the middle
+    let pick = null, far = -Infinity;
+    for (const d of OUT) {
+      const q = [h[0] + d[0], h[1] + d[1]];
+      if (on.has(key(q[0], q[1]))) continue;  // that way lies the board
+      /* And the lens must lie clear of every other circle. Its triangles sit
+         on the two faces along the edge, and a face with a third circle on it
+         puts those triangles in that circle's collar while the square stays
+         out of it — which is a bandage lying across a collar, and a board
+         with a circle already locked before a move is made. */
+      const clips = FACES.some(f =>
+        onSpot(f, [h[0], h[1]]) && onSpot(f, q) &&
+        f.some(r => on.has(key(r[0], r[1])) && key(r[0], r[1]) !== key(h[0], h[1])));
+      if (clips) continue;
+      const v = at(d[0], d[1]);
+      const lean = (v[0] * ax + v[1] * ay) / Math.hypot(v[0], v[1]);
+      if (lean > far) { far = lean; pick = q; }
+    }
+    if (pick) out.push(lensOn([h[0], h[1]], pick));
+  }
+  return out;
+}
+for (const p of Object.values(PUZZLES)) if (!p.bands) p.bands = () => outerLens(p);
 
 let bandaged = false;                       // whether the gluing is on
 let bands = [];                             // each { tiles, el }, where they are now
@@ -699,8 +825,17 @@ const everyCut = (() => {
       if (!e) bySeam.set(k, e = { key: k, a, b, Z, tiles: [] });
       e.tiles.push(t);
     }
-  // a seam with one tile on it is on the rim, with nothing across it to glue to
-  return [...bySeam.values()].filter(e => e.tiles.length === 2);
+  /* A seam with one tile on it is on the rim, with nothing across it to glue
+     to. The rest are put in reading order — down the board, then across —
+     rather than the order the tiles happened to be built in, so the number a
+     seam goes by in a bandage code depends on the board alone and not on how
+     much lattice the page was generated over. */
+  return [...bySeam.values()].filter(e => e.tiles.length === 2)
+    .sort((u, v) => {
+      const uy = (u.a[1] + u.b[1]) / 2, vy = (v.a[1] + v.b[1]) / 2;
+      if (Math.abs(uy - vy) > 1e-6) return vy - uy;
+      return (u.a[0] + u.b[0]) / 2 - (v.a[0] + v.b[0]) / 2;
+    });
 })();
 
 let cutList = [];                           // the seams of the board in play
@@ -751,15 +886,16 @@ function bandCode() {
   const gone = cutsGone();
   const idx = [];
   cutList.forEach((c, i) => { if (gone.has(c.key)) idx.push(i); });
-  return (puzzle === PUZZLES.three ? 'three' : 'seven') + ':' +
+  return puzzleName(puzzle) + ':' +
     (idx.length ? idx.join('.') : 'none');
 }
 
 // the code read back: the board it names, wearing exactly those cuts
 function applyBandCode(text) {
-  const m = /^\s*(three|seven)\s*:\s*(none|\d+(?:\.\d+)*)\s*$/.exec(text);
+  const m = /^\s*([a-z]+)\s*:\s*(none|\d+(?:\.\d+)*)\s*$/.exec(text);
   if (!m) return false;
-  const want = m[1] === 'three' ? PUZZLES.three : PUZZLES.seven;
+  const want = PUZZLES[m[1]];
+  if (!want) return false;
   // judged in full before anything is touched, so a bad code changes nothing
   const list = m[2] === 'none' ? [] : m[2].split('.').map(Number);
   const on = new Set();
@@ -768,7 +904,7 @@ function applyBandCode(text) {
   const seams = everyCut.filter(c => on.has(c.tiles[0]) && on.has(c.tiles[1])).length;
   if (list.some(i => i >= seams)) return false;
   if (puzzle !== want) {
-    document.getElementById('three').checked = want === PUZZLES.three;
+    document.getElementById('layout').value = m[1];
     setPuzzle(want);
   }
   bandaged = true;
@@ -1141,6 +1277,14 @@ function scramble() {
    thirty-one, so turns are more local and a four-turn table already holds
    pieces small enough to commutate. Its three-cycles come out at eight turns,
    half what they cost on the smaller board. */
+/* Which recipe a layout wants is a matter of how many tiles it has to place,
+   not how many circles it has. Counting wrong parts is a workable descent up
+   to about the thirty tiles of the three-circle board; past that it goes flat
+   — the four-circle boards, at thirty-nine and forty-three tiles, cannot be
+   solved by it at all — and placing tiles in order is what carries the rest.
+   So the small three count parts, the four-circle boards place tiles with a
+   looser sieve for the cycles, and the six and seven place them as they were
+   already tuned to. */
 const RECIPE = {
   three: { depth: 6, macro: 4, seedLen: 6, seedSupport: 8, commSupport: 4, aimDepth: 3,
            budget: 6000, tries: 4, bandDepth: 5 },
@@ -1149,7 +1293,20 @@ const RECIPE = {
      scrambles it wants 28 to 47 seconds, so it is given ninety and two goes at
      it rather than four short ones. */
   seven: { depth: 4, macro: 3, seedLen: 3, seedSupport: 12, commSupport: 3, aimDepth: 3,
-           reduce: true, budget: 90000, tries: 2, bandDepth: 6 }
+           reduce: true, budget: 90000, tries: 2, bandDepth: 6 },
+  /* The four-circle boards place their tiles like the seven, but they want a
+     looser sieve on the commutators to get them.
+
+     Spokes is what showed it. Its three arms touch nothing but the hub, so a
+     tile out on an arm is reached only through the middle, and the shortest
+     move that turns three such tiles over disturbs four parts rather than
+     three. Sieved at three, the cycles reached eighteen of the board's
+     thirty-nine free tiles and the placing search could never finish; at four
+     they reach all thirty-nine. Longer seeds pay for themselves too — at five
+     the library comes out smaller than at three and builds as quickly, the
+     seeds being fewer but each of them worth more. */
+  four: { depth: 5, macro: 3, seedLen: 5, seedSupport: 10, commSupport: 4, aimDepth: 3,
+          reduce: true, budget: 60000, tries: 3, bandDepth: 6 }
 };
 
 /* How much further than that the harvest may go when the seating will not
@@ -1212,7 +1369,7 @@ let kit = null;                             // the solver's tables, built once
 /* The board as the solver sees it: its parts in a fixed order, its turns as
    permutations of them, and the library of moves to descend with. */
 async function buildKit(onStep) {
-  const recipe = puzzle === PUZZLES.three ? RECIPE.three : RECIPE.seven;
+  const recipe = RECIPE[puzzle.recipe];
   const seat = tiles.filter(t => onBoard.has(t));
   const parts = seat.flatMap(t => t.parts);
   const n = parts.length;
@@ -1618,7 +1775,7 @@ let bandKit = null;                         // built on demand, one board's
 
 async function buildBandKit(onStep, from) {
   const breathe = async m => { if (onStep) onStep(m); await new Promise(r => setTimeout(r, 0)); };
-  const recipe = puzzle === PUZZLES.three ? RECIPE.three : RECIPE.seven;
+  const recipe = RECIPE[puzzle.recipe];
   const deepest = recipe.bandDepth + BAND_DEEPEN;
   const start = Math.min(from || recipe.bandDepth, deepest);
   const n = kit.n, tileOf = kit.tileOf, back = s => s.slice().reverse().map(g => g ^ 1);
@@ -2325,7 +2482,7 @@ async function buildBandKit(onStep, from) {
    what makes them quick — so the throwing away costs little, and a board that
    is not short is never built twice. */
 async function bandKitFor(onStep) {
-  const recipe = puzzle === PUZZLES.three ? RECIPE.three : RECIPE.seven;
+  const recipe = RECIPE[puzzle.recipe];
   const deepest = recipe.bandDepth + BAND_DEEPEN;
   let bk = null;
   for (let d = recipe.bandDepth; ; d = bk.depth + 1) {
@@ -2948,6 +3105,16 @@ function redraw() {
   showSolveButton();
 }
 
+{
+  const sel = document.getElementById('layout');
+  for (const nm of Object.keys(PUZZLES)) {
+    const opt = document.createElement('option');
+    opt.value = nm;
+    opt.textContent = PUZZLES[nm].name;
+    sel.appendChild(opt);
+  }
+  sel.value = 'seven';
+}
 setPuzzle(PUZZLES.seven);
 reset();
 render();
@@ -3028,8 +3195,8 @@ document.getElementById('bandaged').addEventListener('change', e => {
   if (!bandaged) cutting = false;
   redraw();
 });
-document.getElementById('three').addEventListener('change', e => {
-  setPuzzle(e.target.checked ? PUZZLES.three : PUZZLES.seven);
+document.getElementById('layout').addEventListener('change', e => {
+  setPuzzle(PUZZLES[e.target.value]);
   if (cutting) seedCuts();                // the other board keeps its own seams
   redraw();
 });
