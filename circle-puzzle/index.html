@@ -386,6 +386,14 @@ const midOf = pts => {
   return [x / pts.length, y / pts.length];
 };
 const corners = loop => loop.map(e => e.from);
+/* The middle of each arc as well as every corner, because the two pieces on
+   either side of a boundary share their corners and would otherwise be marked
+   at the same place; the arcs bulge opposite ways and tell them apart. */
+const arcMids = loop => loop.filter(e => e.centre).map(e => {
+  const { a, d } = arcSpan(e);
+  return [e.centre[0] + e.r * Math.cos(a + d / 2), e.centre[1] + e.r * Math.sin(a + d / 2)];
+});
+const markOf = parts => midOf(parts.flatMap(p => [...corners(p.loop), ...arcMids(p.loop)]));
 
 const pieces = [];
 for (const t of tiles) {
@@ -420,15 +428,18 @@ for (const bits of byWord.values()) {
   const parts = bits.map(b => ({ loop: b.loop, home: b.tile.colour, colour: b.tile.colour }));
   board.push({
     word: bits[0].word,
+    sides: bits[0].tile.sides,
     parts,
-    centre: midOf(parts.flatMap(p => corners(p.loop))),
+    centre: markOf(parts),
   });
 }
 
 /* Which pieces each circle holds, and where a turn sends them. Read off by
    position: a piece is carried onto the piece standing where it lands, and
    the cuts repeating about that centre is what promises there is one. */
-const spotOf = new Map(board.map(p => [spot(p.centre), p]));
+const where = (p, sides) => spot(p) + '/' + sides;
+const spotOf = new Map(board.map(p => [where(p.centre, p.sides), p]));
+if (spotOf.size !== board.length) throw new Error('two pieces marked at one place');
 for (const [i, c] of circles.entries()) {
   if (!c.turns) continue;
   c.holds = board.filter(p => p.word[i] === '1');
@@ -437,10 +448,12 @@ for (const [i, c] of circles.entries()) {
     const m = new Map();
     for (const p of c.holds) {
       const x = p.centre[0] - c.c[0], y = p.centre[1] - c.c[1];
-      const to = spotOf.get(spot([c.c[0] + x * co - y * si, c.c[1] + x * si + y * co]));
+      const to = spotOf.get(where([c.c[0] + x * co - y * si, c.c[1] + x * si + y * co], p.sides));
       if (!to) throw new Error('a circle that does not turn onto itself: ' + NAME[c.sides]);
       m.set(p, to);
     }
+    if (new Set(m.values()).size !== m.size)
+      throw new Error('a turn that is not a shuffle: ' + NAME[c.sides]);
     return m;
   };
   c.acw = map(STEP[c.sides]);
