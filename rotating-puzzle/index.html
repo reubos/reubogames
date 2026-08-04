@@ -220,12 +220,10 @@
       <button type="button" id="step" title="Forward one move">&#9654;</button>
     </span>
     <button type="button" id="cuts">Choose bandages</button>
-    <button type="button" id="allcuts" style="display:none">Cut them all open</button>
-    <button type="button" id="shipcuts" style="display:none">Back to the standard ones</button>
+    <button type="button" id="allcuts" style="display:none">Remove all bandaging</button>
     <input type="text" id="bandcode" style="display:none" spellcheck="false"
            title="This bandaging as a code — copy it to keep or share it, or paste one in and press Enter">
     <label class="toggle"><input type="checkbox" id="invert">Invert controls</label>
-    <label class="toggle"><input type="checkbox" id="bandaged">Bandaged</label>
     <label class="toggle">Layout
       <select id="layout"></select>
     </label>
@@ -325,14 +323,15 @@ const PUZZLES = {
     [ 1,  0, 'green'],                      // bottom right
     [ 0,  0, 'white'] ] },                  // bottom left
 
-  /* Two faces sharing an edge: a rhombus, whose long diagonal the tilt stands
-     upright, so it reads as a diamond on its point. */
+  /* Two faces sharing an edge: a rhombus. Its long diagonal lies at 60° on
+     the lattice and the tilt lays that flat, so the board comes out wider
+     than it is tall — a diamond on its side rather than on its point. */
   diamond: { name: 'Diamond — 4 circles', recipe: 'four',
-    tilt: Math.PI / 6, hexes: [
-    [ 1,  1, 'red'],                        // top
-    [ 1,  0, 'white'],                      // right
-    [ 0,  0, 'green'],                      // bottom
-    [ 0,  1, 'blue'] ] },                   // left
+    tilt: -Math.PI / 3, hexes: [
+    [ 0,  0, 'red'],                        // left, then clockwise
+    [ 0,  1, 'white'],                      // top
+    [ 1,  1, 'green'],                      // right
+    [ 1,  0, 'blue'] ] },                   // bottom
 
   /* A hub and three spokes, taken every other direction so no two spokes
      touch. One spoke stands straight up already, so there is no tilt. */
@@ -708,82 +707,16 @@ for (const h of hexTiles) {
    its tiles' outlines together and dropping the edges they share.
    ===================================================================== */
 
-const pairKey = ps => ps.map(p => key(...p)).sort().join('|');
-const onSpot = (f, r) => f.some(s => key(...s) === key(...r));
-
-const bySeat = new Map();                   // a square or triangle by where it sits
-for (const t of tiles) if (t.sides !== 6) bySeat.set(pairKey(t.on), t);
-const seat = ps => {
-  const t = bySeat.get(pairKey(ps));
-  if (!t) throw new Error('no tile on ' + pairKey(ps));
-  return t;
-};
-
-// the lens on a lattice edge: the square astride it, and the triangles on the
-// two faces either side
-const lensOn = (X, Y) => [seat([X, Y]),
-  ...FACES.filter(f => onSpot(f, X) && onSpot(f, Y)).map(seat)];
-
-PUZZLES.seven.bands = () => PUZZLES.seven.hexes.slice(1)
-  .map(([a, b]) => lensOn([a, b], [2 * a, 2 * b]));
-
-// two squares and the triangle between them, on the face opposite the two
-// hexagons this one sits beside
-PUZZLES.three.bands = () => PUZZLES.three.hexes.map(([a, b]) => {
-  const X = [a, b];
-  const away = PUZZLES.three.hexes
-    .filter(h => h[0] !== a || h[1] !== b)
-    .map(h => [2 * a - h[0], 2 * b - h[1]]);      // the neighbour opposite each
-  return [seat([X, away[0]]), seat([X, away[0], away[1]]), seat([X, away[1]])];
-});
-
-/* What the layouts that name no bandaging of their own ship with: one lens to
-   a circle, glued at the edge pointing furthest out of the board.
-
-   A circle in the middle of its board has no outermost edge — every direction
-   from it lands on another circle — so it goes unglued, which is what leaves
-   the seven-circle board its six and the spokes their three. The edge chosen
-   is the one leaning nearest to straight away from the middle of the board,
-   among those with nothing of the board beyond them. */
-const OUT = [[1, 0], [0, 1], [-1, 1], [-1, 0], [0, -1], [1, -1]];
-function outerLens(p) {
-  const on = new Set(p.hexes.map(h => key(h[0], h[1])));
-  let mx = 0, my = 0;
-  for (const h of p.hexes) {
-    const c = at(h[0], h[1]);
-    mx += c[0] / p.hexes.length;
-    my += c[1] / p.hexes.length;
-  }
-  const out = [];
-  for (const h of p.hexes) {
-    const c = at(h[0], h[1]);
-    const ax = c[0] - mx, ay = c[1] - my;
-    if (Math.hypot(ax, ay) < 1e-9) continue;  // a circle in the middle
-    let pick = null, far = -Infinity;
-    for (const d of OUT) {
-      const q = [h[0] + d[0], h[1] + d[1]];
-      if (on.has(key(q[0], q[1]))) continue;  // that way lies the board
-      /* And the lens must lie clear of every other circle. Its triangles sit
-         on the two faces along the edge, and a face with a third circle on it
-         puts those triangles in that circle's collar while the square stays
-         out of it — which is a bandage lying across a collar, and a board
-         with a circle already locked before a move is made. */
-      const clips = FACES.some(f =>
-        onSpot(f, [h[0], h[1]]) && onSpot(f, q) &&
-        f.some(r => on.has(key(r[0], r[1])) && key(r[0], r[1]) !== key(h[0], h[1])));
-      if (clips) continue;
-      const v = at(d[0], d[1]);
-      const lean = (v[0] * ax + v[1] * ay) / Math.hypot(v[0], v[1]);
-      if (lean > far) { far = lean; pick = q; }
-    }
-    if (pick) out.push(lensOn([h[0], h[1]], pick));
-  }
-  return out;
-}
-for (const p of Object.values(PUZZLES)) if (!p.bands) p.bands = () => outerLens(p);
-
-let bandaged = false;                       // whether the gluing is on
 let bands = [];                             // each { tiles, el }, where they are now
+/* Whether anything is glued, which is only ever whether the player has glued
+   it: a board opens bare and there is no bandaging but theirs. Kept beside
+   the bands rather than counted each time, the solver asking it often, and
+   set wherever the bands are. */
+/* Whether anything is glued, which is only ever whether the player glued it:
+   a board opens bare and there is no bandaging but theirs. Kept beside the
+   bands rather than counted afresh each time, the solver asking it often, and
+   set wherever the bands are set. */
+let bandaged = false;
 
 // a collar turns unless a bandage is only partly in it
 const stuck = hex => bands.some(b => {
@@ -843,17 +776,10 @@ let cutting = false;                        // whether the player is choosing th
 
 // the seams taken out, one set to a puzzle, so the two boards keep their own
 const cutsGone = () => puzzle.gone || (puzzle.gone = new Set());
-/* Whether the bandaging is the player's, which is not the same as their having
-   glued anything: opening the chooser hands the board over, and cutting every
-   seam open again is then a board with no bandages on it and not a board back
-   on the shipped ones. */
-const ownBands = () => bandaged && !!puzzle.own;
-
-/* The bandaging the board starts from, asked for in one place. Both the board
-   and the solver's tables have to be built on the same answer: tables built on
-   the shipped shapes while the board wore the player's would have no entry for
-   any arrangement the board could actually be in. */
-const homeBands = () => ownBands() ? cutBands() : bandaged ? puzzle.bands() : [];
+/* The bandaging the board starts from: whatever groups the player's own cuts
+   leave, and nothing besides. Both the board and the solver's tables ask this
+   one question, so they cannot disagree about what is glued. */
+const homeBands = () => cutBands();
 
 /* The groups the missing seams leave: tiles joined wherever the seam between
    them has gone, and every group of more than one is a bandage. */
@@ -907,33 +833,12 @@ function applyBandCode(text) {
     document.getElementById('layout').value = m[1];
     setPuzzle(want);
   }
-  bandaged = true;
-  document.getElementById('bandaged').checked = true;
-  puzzle.own = true;                        // the code is the player's choice entire
   const gone = cutsGone();
   gone.clear();
   for (const i of list) gone.add(cutList[i].key);
   bandKit = null;
   redraw();
   return true;
-}
-
-/* Opening the chooser starts from the bandaging the puzzle ships with rather
-   than from a bare board, so those shapes are there to be added to or taken
-   apart. Every seam inside a shipped group is one that has gone.
-
-   Only ever the once, though — after that the board is the player's and
-   whatever they have left it as stands, including nothing at all. Pressing
-   for the shipped ones again is what puts it back. */
-function seedCuts() {
-  if (puzzle.own) return;
-  puzzle.own = true;
-  const gone = cutsGone();
-  for (const group of puzzle.bands()) {
-    const has = new Set(group);
-    for (const c of cutList)
-      if (has.has(c.tiles[0]) && has.has(c.tiles[1])) gone.add(c.key);
-  }
 }
 
 /* The outline of a bandage: every edge of every tile under it, with the ones
@@ -1186,6 +1091,7 @@ function reset() {
   for (const t of tiles)
     t.parts.forEach((part, k) => { part.colour = colourAt(...t.on[k]); });
   bands = homeBands().map(tiles => ({ tiles }));
+  bandaged = bands.length > 0;
 }
 
 /* Choosing a puzzle is choosing which hexagons are in play. The board is then
@@ -2996,7 +2902,6 @@ function showHint() {
     `Click a hexagon to turn its collar ${way(clickDir())}, ` +
     `right-click to turn it ${way(-clickDir())}.` +
     (bandaged ? ' A collar a bandage lies across will not turn.' : '') +
-    (ownBands() ? ' These bandages are your own.' : '') +
     (bandaged && free === 0 ? ' Nothing on this board will turn as it stands.' : '');
 }
 
@@ -3092,7 +2997,6 @@ function showSolveButton() {
   document.getElementById('scramble').disabled = cutting || !free;
   document.getElementById('cuts').textContent = cutting ? 'Done' : 'Choose bandages';
   document.getElementById('allcuts').style.display = cutting ? '' : 'none';
-  document.getElementById('shipcuts').style.display = cutting ? '' : 'none';
   // the bandaging as a code, there to copy out or paste over while choosing
   const code = document.getElementById('bandcode');
   code.style.display = cutting ? '' : 'none';
@@ -3184,54 +3088,31 @@ document.getElementById('invert').addEventListener('change', e => {
   inverted = e.target.checked;
   showHint();
 });
-/* Changing the puzzle, or whether it is bandaged, puts the board back to the
-   start. Where the bandages would go on a board already scrambled has no
-   answer — they were never carried through those turns — and dropping them
-   onto it could leave colours that no run of bandaged moves can reach. */
-document.getElementById('bandaged').addEventListener('change', e => {
-  bandaged = e.target.checked;
-  // choosing bandages with the gluing switched off would say nothing, so
-  // switching it off closes the chooser rather than leaving it up saying it
-  if (!bandaged) cutting = false;
-  redraw();
-});
+/* Changing the puzzle puts the board back to the start. Where the bandages
+   would go on a board already scrambled has no answer — they were never
+   carried through those turns — and dropping them onto it could leave colours
+   that no run of bandaged moves can reach. */
 document.getElementById('layout').addEventListener('change', e => {
   setPuzzle(PUZZLES[e.target.value]);
-  if (cutting) seedCuts();                // the other board keeps its own seams
   redraw();
 });
 
 /* Choosing the bandaging. It is chosen at home — a bandage is named by the
    tiles under it and a scrambled board has them somewhere else — so opening
-   the chooser puts the board back, which redraw() does anyway. Bandaging with
-   the gluing switched off would say nothing, so it is switched on. */
+   the chooser puts the board back, which redraw() does anyway. */
 document.getElementById('cuts').addEventListener('click', () => {
   cutting = !cutting;
-  if (cutting) {
-    bandaged = true;
-    document.getElementById('bandaged').checked = true;
-    seedCuts();
-  }
   bandKit = null;
   redraw();
 });
 document.getElementById('allcuts').addEventListener('click', () => {
-  cutsGone().clear();                     // the board stays the player's, bare
+  cutsGone().clear();
   bandKit = null;
   redraw();
 });
-/* A code pasted in and entered is worn at once; one that names nothing puts
-   the true code back rather than sitting there looking accepted. */
 document.getElementById('bandcode').addEventListener('change', e => {
   if (!applyBandCode(e.target.value)) e.target.value = bandCode();
   e.target.blur();
-});
-document.getElementById('shipcuts').addEventListener('click', () => {
-  cutsGone().clear();
-  puzzle.own = false;                     // handed back, then taken again as new
-  seedCuts();
-  bandKit = null;
-  redraw();
 });
 </script>
 </body>
