@@ -219,6 +219,7 @@
       <span id="where"></span>
       <button type="button" id="step" title="Forward one move">&#9654;</button>
     </span>
+    <label class="toggle"><input type="checkbox" id="layered">Second layer</label>
     <button type="button" id="cuts">Choose bandages</button>
     <button type="button" id="allcuts" style="display:none">Remove all bandaging</button>
     <input type="text" id="bandcode" style="display:none" spellcheck="false"
@@ -604,17 +605,349 @@ for (const t of tiles)
     if (h) h.collar.push(t);              // no hexagon off the board to collar it
   }
 
+/* =====================================================================
+   THE SECOND LAYER
+
+   A circle can be cut in two by a smaller circle about the same centre, and
+   then each half turns on its own: an inner disc and an outer ring. The cut
+   is laid through the corners of the shape a colour makes — a colour owns its
+   hexagon, the near half of each square and the near kite of each triangle,
+   and that territory is a hexagon whose corners sit at the middle of each
+   triangle, PITCH/sqrt(3) from the centre.
+
+   The cut has to repeat every sixth of a turn or the layer would jam. A
+   neighbour's cut reaches into this collar, so the same cut must stand at all
+   six positions round it — including the positions where the board has no
+   neighbour at all. So a cutting circle sits on every lattice point beside a
+   played one, played or not. Nothing further out can reach in: a circle two
+   steps away comes no nearer than 3.88, against a collar ending at 1.93.
+
+   What that cuts is only squares and triangles. A hexagon lies wholly within
+   radius 1 of its own centre, and the nearest it comes to a neighbour's is
+   1.93 along the edge they share — outside the cut either way.
+   ===================================================================== */
+
+const LAYER_R = 1.70;
+const NEAR = [[1, 0], [0, 1], [-1, 1], [-1, 0], [0, -1], [1, -1]];
+
+// an outline as the cutter wants it: edges with the circle each runs along
+const asLoop = outline => outline.map((v, i) => ({
+  from: v[0], to: outline[(i + 1) % outline.length][0],
+  centre: v[1] || null, r: v[1] ? ARC_R : 0,
+}));
+const asOutline = loop => loop.map(e => [e.from, e.centre]);
+
+const vsub = (a, b) => [a[0] - b[0], a[1] - b[1]];
+const vlen = a => Math.hypot(a[0], a[1]);
+const apart = (a, b) => vlen(vsub(a, b));
+const alike = (a, b) => apart(a, b) < 1e-7;
+const angAt = (Z, p) => Math.atan2(p[1] - Z[1], p[0] - Z[0]);
+function arcSpan(e) {
+  const a = angAt(e.centre, e.from);
+  let d = angAt(e.centre, e.to) - a;
+  while (d > Math.PI) d -= 2 * Math.PI;
+  while (d < -Math.PI) d += 2 * Math.PI;
+  return { a, d };
+}
+function alongArc(e, p) {
+  const { a, d } = arcSpan(e);
+  let t = angAt(e.centre, p) - a;
+  while (t > Math.PI) t -= 2 * Math.PI;
+  while (t < -Math.PI) t += 2 * Math.PI;
+  const u = d === 0 ? 0 : t / d;
+  return u > 1e-6 && u < 1 - 1e-6;
+}
+function edgeMid(e) {
+  if (!e.centre) return [(e.from[0] + e.to[0]) / 2, (e.from[1] + e.to[1]) / 2];
+  const { a, d } = arcSpan(e);
+  return [e.centre[0] + e.r * Math.cos(a + d / 2), e.centre[1] + e.r * Math.sin(a + d / 2)];
+}
+
+// where an edge meets a circle: a quadratic along a line, the radical line of
+// two circles along an arc, kept only where it lands on the part drawn
+function edgeMeets(e, C, R) {
+  const out = [];
+  if (!e.centre) {
+    const d = vsub(e.to, e.from), f = vsub(e.from, C);
+    const a = d[0] * d[0] + d[1] * d[1];
+    const b = 2 * (f[0] * d[0] + f[1] * d[1]);
+    const c = f[0] * f[0] + f[1] * f[1] - R * R;
+    let disc = b * b - 4 * a * c;
+    if (disc <= 1e-9) return out;
+    disc = Math.sqrt(disc);
+    for (const t of [(-b - disc) / (2 * a), (-b + disc) / (2 * a)])
+      if (t > 1e-6 && t < 1 - 1e-6) out.push([e.from[0] + d[0] * t, e.from[1] + d[1] * t]);
+    return out;
+  }
+  const Z = e.centre, r = e.r, dv = vsub(C, Z), D = vlen(dv);
+  if (D < 1e-9 || D > r + R - 1e-9 || D < Math.abs(r - R) + 1e-9) return out;
+  const a = (r * r - R * R + D * D) / (2 * D);
+  const h2 = r * r - a * a;
+  if (h2 <= 0) return out;
+  const h = Math.sqrt(h2);
+  const mx = Z[0] + a * dv[0] / D, my = Z[1] + a * dv[1] / D;
+  for (const s of [1, -1]) {
+    const p = [mx + s * h * (-dv[1]) / D, my + s * h * dv[0] / D];
+    if (alongArc(e, p)) out.push(p);
+  }
+  return out;
+}
+
+// a loop's area: the shoelace over its corners, plus the bulge of each arc
+function loopArea(loop) {
+  let a = 0;
+  for (const e of loop) a += e.from[0] * e.to[1] - e.to[0] * e.from[1];
+  a /= 2;
+  for (const e of loop) {
+    if (!e.centre) continue;
+    const { d } = arcSpan(e);
+    a += e.r * e.r / 2 * (d - Math.sin(d));
+  }
+  return a;
+}
+const flipLoop = loop => loop.slice().reverse()
+  .map(e => ({ from: e.to, to: e.from, centre: e.centre, r: e.r }));
+const facingLoop = loop => (loopArea(loop) < 0 ? flipLoop(loop) : loop);
+
+/* A loop cut by a circle, into what falls inside it and what falls outside.
+
+   The loop is broken at its crossings into runs lying wholly on one side. A
+   run alone is not a piece: where a circle crosses a shape four times the
+   inside is one piece bounded by two runs joined by two arcs of the cutting
+   circle. So runs are stitched — leave the end of one, travel along the
+   cutting circle to the crossing where the next begins — which closes each
+   piece however many times the circle went in and out. */
+function sliceLoop(loop, C, R) {
+  loop = facingLoop(loop);
+  const edges = [];
+  for (const e of loop) {
+    const hits = edgeMeets(e, C, R);
+    if (!hits.length) { edges.push(e); continue; }
+    hits.sort((p, q) => apart(e.from, p) - apart(e.from, q));
+    let cur = e;
+    for (const p of hits) {
+      if (alike(cur.from, p) || alike(cur.to, p)) continue;
+      edges.push({ from: cur.from, to: p, centre: cur.centre, r: cur.r });
+      cur = { from: p, to: cur.to, centre: cur.centre, r: cur.r };
+    }
+    edges.push(cur);
+  }
+  const side = edges.map(e => apart(edgeMid(e), C) < R);
+  if (side.every(s => s)) return { in: [loop], out: [] };
+  if (side.every(s => !s)) return { in: [], out: [loop] };
+
+  let start = 0;
+  while (side[start] === side[(start + edges.length - 1) % edges.length]) start++;
+  const runs = [];
+  for (let n = 0; n < edges.length; ) {
+    const s = side[(start + n) % edges.length];
+    const run = [];
+    while (n < edges.length && side[(start + n) % edges.length] === s) {
+      run.push(edges[(start + n) % edges.length]);
+      n++;
+    }
+    runs.push({ side: s, edges: run, from: run[0].from, to: run[run.length - 1].to });
+  }
+  const turn = loopArea(loop) >= 0 ? 1 : -1;
+  const nextRun = (p, dir, want) => {
+    const a0 = angAt(C, p);
+    let best = null, bestd = Infinity;
+    for (const r of runs) {
+      if (r.side !== want) continue;
+      let d = (angAt(C, r.from) - a0) * dir;
+      while (d <= 1e-7) d += 2 * Math.PI;
+      if (d < bestd) { bestd = d; best = r; }
+    }
+    return best;
+  };
+  const got = { in: [], out: [] };
+  for (const want of [true, false]) {
+    const dir = want ? turn : -turn;
+    const done = new Set();
+    for (const r0 of runs) {
+      if (r0.side !== want || done.has(r0)) continue;
+      const out = [];
+      let r = r0;
+      for (let guard = 0; guard < runs.length + 2; guard++) {
+        done.add(r);
+        out.push(...r.edges);
+        const nxt = nextRun(r.to, dir, want);
+        if (!nxt) break;
+        if (!alike(r.to, nxt.from)) out.push({ from: r.to, to: nxt.from, centre: C, r: R });
+        if (nxt === r0) break;
+        r = nxt;
+      }
+      got[want ? 'in' : 'out'].push(out);
+    }
+  }
+  return got;
+}
+
 const centroid = poly => {
   let x = 0, y = 0;
   for (const p of poly) { x += p[0]; y += p[1]; }
   return [x / poly.length, y / poly.length];
 };
-for (const t of tiles) for (const part of t.parts) part.centre = centroid(part.poly);
 
 // Parts are far wider than the drift in the arithmetic that places them, so a
 // part is found by whichever centre is nearest and the tolerance is only there
 // to catch a lookup that has missed altogether.
-const allParts = tiles.flatMap(t => t.parts);
+/* The board as it is played: its pieces, and the rings that turn them.
+
+   Unlayered, a piece is a tile and a ring is a whole collar, exactly as
+   before. Layered, every part of every tile is cut by the layer circles, the
+   bits are gathered back into pieces by which side of each circle they fell,
+   and each collar becomes two rings — the disc inside its own layer circle
+   and the ring outside it.
+
+   Either way what follows works on pieces and rings and needs to know nothing
+   about which of the two it is looking at. */
+
+let pieces = [];                            // what the board is made of, in play
+let allParts = [];                          // every coloured part of those
+let turners = [];                           // what a click can turn
+
+// where the layer circles stand: on every played centre and every one beside it
+function layerCentres() {
+  const seen = new Set(), out = [];
+  for (const h of boardHexes)
+    for (const d of [[0, 0]].concat(NEAR)) {
+      const a = h.on[0][0] + d[0], b = h.on[0][1] + d[1], k = key(a, b);
+      if (seen.has(k)) continue;
+      seen.add(k);
+      out.push({ at: [a, b], centre: at(a, b) });
+    }
+  return out;
+}
+
+/* Every tile of the board cut into pieces. A part is cut by each circle in
+   turn, each bit remembering which side of each circle it fell; bits of one
+   tile sharing a side on every circle are one piece. */
+function cutBoard(cuts) {
+  const out = [];
+  for (const t of tiles) {
+    if (!onBoard.has(t)) continue;
+    const bits = new Map();                 // side-word -> parts of that piece
+    t.parts.forEach((part, pi) => {
+      let hold = [{ loop: facingLoop(asLoop(part.outline)), word: '' }];
+      for (const c of cuts) {
+        const next = [];
+        for (const b of hold) {
+          const s = sliceLoop(b.loop, c.centre, LAYER_R);
+          for (const l of s.in) next.push({ loop: l, word: b.word + '1' });
+          for (const l of s.out) next.push({ loop: l, word: b.word + '0' });
+        }
+        hold = next;
+      }
+      for (const b of hold) {
+        if (Math.abs(loopArea(b.loop)) < 1e-7) continue;   // a crossing grazed
+        if (!bits.has(b.word)) bits.set(b.word, []);
+        bits.get(b.word).push({ outline: asOutline(b.loop), on: t.on[pi] });
+      }
+    });
+    for (const [word, ps] of bits) {
+      const piece = {
+        sides: t.sides, src: t, word,
+        on: ps.map(p => p.on),
+        parts: ps.map(p => ({ outline: p.outline, poly: p.outline.map(v => v[0]) })),
+      };
+      piece.outline = ps.length === 1 ? ps[0].outline : null;   // filled in below
+      out.push(piece);
+    }
+  }
+  return out;
+}
+
+// the middle of a shape, by its outline's corners — enough to name where a
+// piece stands, since a turn carries centres onto centres exactly
+const midOf = pts => {
+  let x = 0, y = 0;
+  for (const p of pts) { x += p[0]; y += p[1]; }
+  return [x / pts.length, y / pts.length];
+};
+
+/* The board rebuilt for the puzzle in play. */
+function buildBoard() {
+  const layered = !!puzzle.layered;
+  if (!layered) {
+    pieces = tiles.filter(t => onBoard.has(t));
+    for (const p of pieces) { p.src = p; p.word = ''; }
+  } else {
+    pieces = cutBoard(layerCentres());
+  }
+  for (const p of pieces) {
+    for (const part of p.parts) {
+      part.poly = part.outline.map(v => v[0]);
+      part.centre = midOf(part.poly);
+    }
+    if (!p.outline) p.outline = unionEdges(p.parts.map(q => q.outline));
+    p.poly = p.outline.map(v => v[0]);
+    p.centre = midOf(p.parts.flatMap(q => q.poly));
+  }
+  allParts = pieces.flatMap(p => p.parts);
+
+  /* The rings. A collar unlayered is one ring; layered it is two, split by
+     the piece's own side of this circle's cut — which is the letter its word
+     carries for this centre. */
+  const cuts = layered ? layerCentres() : [];
+  const cutAt = new Map(cuts.map((c, i) => [key(...c.at), i]));
+  turners = [];
+  for (const h of boardHexes) {
+    const inCollar = pieces.filter(p => p.src.on.some(q => key(...q) === key(...h.on[0])));
+    if (!layered) {
+      turners.push({ hex: h, ring: 0, rings: 1, centre: h.centre, collar: inCollar });
+      continue;
+    }
+    const mine = cutAt.get(key(...h.on[0]));
+    const inner = inCollar.filter(p => p.word[mine] === '1');
+    const outer = inCollar.filter(p => p.word[mine] === '0');
+    turners.push({ hex: h, ring: 0, rings: 2, centre: h.centre, collar: inner });
+    turners.push({ hex: h, ring: 1, rings: 2, centre: h.centre, collar: outer });
+  }
+  for (const t of turners) {
+    t.holds = new Set(t.collar);
+    t.cw = turnMap(t, Math.PI / 3);
+    t.acw = turnMap(t, -Math.PI / 3);
+    t.goACW = goMap(t, Math.PI / 3);
+    t.goCW = goMap(t, -Math.PI / 3);
+    t.colour = t.hex.parts[0].colour;
+  }
+}
+
+/* One outline from several: every edge of every part, with the ones they
+   share dropped and the rest stitched end to end. */
+function unionEdges(outlines) {
+  const spot = p => p[0].toFixed(4) + ',' + p[1].toFixed(4);
+  const steps = [];
+  for (const o of outlines)
+    for (let i = 0; i < o.length; i++)
+      steps.push({ a: o[i][0], Z: o[i][1], b: o[(i + 1) % o.length][0] });
+  const seen = new Map();
+  const span = s => [spot(s.a), spot(s.b)].sort().join('|');
+  for (const s of steps) seen.set(span(s), (seen.get(span(s)) || 0) + 1);
+  const rim = steps.filter(s => seen.get(span(s)) === 1);
+  const leaving = new Map();
+  for (const s of rim) {
+    const k = spot(s.a);
+    if (!leaving.has(k)) leaving.set(k, []);
+    leaving.get(k).push(s);
+  }
+  const out = [];
+  let s = rim[0];
+  const guard = rim.length + 2;
+  for (let n = 0; s && n < guard; n++) {
+    const list = leaving.get(spot(s.a));
+    const i = list ? list.indexOf(s) : -1;
+    if (i < 0) break;
+    list.splice(i, 1);
+    out.push([s.a, s.Z]);
+    const on = leaving.get(spot(s.b));
+    s = on && on.length ? on[0] : null;
+  }
+  return out.length ? out : outlines[0];
+}
+
+// a part by where it stands, for asking a turn where each colour comes from
 function partAt(x, y) {
   let best = null, bd = Infinity;
   for (const p of allParts) {
@@ -623,56 +956,42 @@ function partAt(x, y) {
   }
   return bd < 1e-6 ? best : null;
 }
-
-/* Turning a collar moves whole tiles onto tiles of the same shape, so nothing
-   about the board changes but which colour is where. That is fixed by the
-   geometry, so it is worked out once: for every part of the collar, the part it
-   takes its colour from — which lies the other way round from the turn, so the
-   angle here is the turn reversed.
-
-   The board is drawn with y running up, so a turn that reads as clockwise is
-   a turn through a negative angle, and its parts come from +60°. */
-function turnMap(hex, ang) {
-  const C = hex.centre, co = Math.cos(ang), si = Math.sin(ang);
-  return hex.collar.flatMap(t => t.parts).map(part => {
-    const x = part.centre[0] - C[0], y = part.centre[1] - C[1];
-    const src = partAt(C[0] + x * co - y * si, C[1] + x * si + y * co);
-    if (!src) throw new Error('a collar that does not turn onto itself');
-    return [part, src];
-  });
-}
-// a tile by where it stands, for asking a turn where each one is going
-function tileAt(x, y) {
+// a piece by where it stands, for asking a turn where each one is going
+function pieceAt(x, y) {
   let best = null, bd = Infinity;
-  for (const t of tiles) {
-    const d = (t.centre[0] - x) ** 2 + (t.centre[1] - y) ** 2;
-    if (d < bd) { bd = d; best = t; }
+  for (const p of pieces) {
+    const d = (p.centre[0] - x) ** 2 + (p.centre[1] - y) ** 2;
+    if (d < bd) { bd = d; best = p; }
   }
   return bd < 1e-6 ? best : null;
 }
 
-/* Where each tile of a collar goes when the collar turns. The colours are
-   worked out the other way about — every part told where to take its colour
-   from — but a bandage is a thing being carried rather than a slot being
+/* Turning a ring moves whole pieces onto pieces of the same shape, so nothing
+   about the board changes but which colour is where. Read off by position:
+   every part is told where to take its colour from, which is where it came
+   from when the ring is turned back. */
+function turnMap(ring, ang) {
+  const C = ring.centre, co = Math.cos(ang), si = Math.sin(ang);
+  return ring.collar.flatMap(t => t.parts).map(part => {
+    const x = part.centre[0] - C[0], y = part.centre[1] - C[1];
+    const src = partAt(C[0] + x * co - y * si, C[1] + x * si + y * co);
+    if (!src) throw new Error('a ring that does not turn onto itself');
+    return [part, src];
+  });
+}
+/* Where each piece of a ring goes when it turns. The colours are worked out
+   the other way about, but a bandage is a thing carried rather than a slot
    filled, so it wants telling where it is going. */
-function goMap(hex, ang) {
-  const C = hex.centre, co = Math.cos(ang), si = Math.sin(ang);
+function goMap(ring, ang) {
+  const C = ring.centre, co = Math.cos(ang), si = Math.sin(ang);
   const m = new Map();
-  for (const t of hex.collar) {
+  for (const t of ring.collar) {
     const x = t.centre[0] - C[0], y = t.centre[1] - C[1];
-    const to = tileAt(C[0] + x * co - y * si, C[1] + x * si + y * co);
-    if (!to) throw new Error('a collar that does not turn onto itself');
+    const to = pieceAt(C[0] + x * co - y * si, C[1] + x * si + y * co);
+    if (!to) throw new Error('a ring that does not turn onto itself');
     m.set(t, to);
   }
   return m;
-}
-
-for (const h of hexTiles) {
-  h.cw = turnMap(h, Math.PI / 3);
-  h.acw = turnMap(h, -Math.PI / 3);
-  h.goACW = goMap(h, Math.PI / 3);
-  h.goCW = goMap(h, -Math.PI / 3);
-  h.holds = new Set(h.collar);
 }
 
 /* =====================================================================
@@ -719,8 +1038,9 @@ let bands = [];                             // each { tiles, el }, where they ar
 let bandaged = false;
 
 // a collar turns unless a bandage is only partly in it
-const stuck = hex => bands.some(b => {
-  const n = b.tiles.filter(t => hex.holds.has(t)).length;
+// a ring turns unless a bandage is only partly in it
+const stuck = ring => bands.some(b => {
+  const n = b.tiles.filter(t => ring.holds.has(t)).length;
   return n && n < b.tiles.length;
 });
 
@@ -747,29 +1067,33 @@ const stuck = hex => bands.some(b => {
    it asks the trios the puzzle ships with. */
 
 // the seams of the whole tiling, each with the two tiles it parts
-const everyCut = (() => {
+/* The seams of the board: where two pieces meet along an edge they share.
+   Taking one out glues them. These follow the pieces, so a layered board has
+   the seams its cuts left as well as the ones the tiling came with. */
+let everyCut = [];
+function boardSeams() {
   const spot = p => p[0].toFixed(4) + ',' + p[1].toFixed(4);
   const bySeam = new Map();
-  for (const t of tiles)
+  for (const t of pieces)
     for (let i = 0; i < t.outline.length; i++) {
-      const [a, Z] = t.outline[i], b = t.outline[(i + 1) % t.outline.length][0];
+      const a = t.outline[i][0], Z = t.outline[i][1];
+      const b = t.outline[(i + 1) % t.outline.length][0];
       const k = [spot(a), spot(b)].sort().join('|');
       let e = bySeam.get(k);
       if (!e) bySeam.set(k, e = { key: k, a, b, Z, tiles: [] });
-      e.tiles.push(t);
+      if (!e.tiles.includes(t)) e.tiles.push(t);
     }
-  /* A seam with one tile on it is on the rim, with nothing across it to glue
-     to. The rest are put in reading order — down the board, then across —
-     rather than the order the tiles happened to be built in, so the number a
-     seam goes by in a bandage code depends on the board alone and not on how
-     much lattice the page was generated over. */
-  return [...bySeam.values()].filter(e => e.tiles.length === 2)
-    .sort((u, v) => {
-      const uy = (u.a[1] + u.b[1]) / 2, vy = (v.a[1] + v.b[1]) / 2;
-      if (Math.abs(uy - vy) > 1e-6) return vy - uy;
-      return (u.a[0] + u.b[0]) / 2 - (v.a[0] + v.b[0]) / 2;
-    });
-})();
+  /* A seam with one piece on it is on the rim, with nothing across it to glue
+     to. The rest are put in reading order — down the board, then across — so
+     the number a seam goes by in a bandage code depends on the board alone. */
+  const out = [...bySeam.values()].filter(e => e.tiles.length === 2);
+  for (const e of out) {
+    e.mid = [(e.a[0] + e.b[0]) / 2, (e.a[1] + e.b[1]) / 2];
+    e.live = true;
+  }
+  out.sort((p, q) => (q.mid[1] - p.mid[1]) || (p.mid[0] - q.mid[0]));
+  return out;
+}
 
 let cutList = [];                           // the seams of the board in play
 let cutting = false;                        // whether the player is choosing them
@@ -784,7 +1108,7 @@ const homeBands = () => cutBands();
 /* The groups the missing seams leave: tiles joined wherever the seam between
    them has gone, and every group of more than one is a bandage. */
 function cutBands() {
-  const board = tiles.filter(t => onBoard.has(t));
+  const board = pieces;
   const idx = new Map(board.map((t, i) => [t, i]));
   const owner = board.map((_, i) => i);
   const find = i => { while (owner[i] !== i) i = owner[i] = owner[owner[i]]; return i; };
@@ -942,15 +1266,15 @@ const repaint = () => allParts.forEach(paint);
    clockwise, which — the frame having y up — are the signs of the angle too. */
 // the move itself, and nothing drawn: a scramble makes hundreds of these and
 // only the state it leaves behind is worth painting
-function move(hex, dir) {
-  const map = dir > 0 ? hex.acw : hex.cw;
+function move(ring, dir) {
+  const map = dir > 0 ? ring.acw : ring.cw;
   const taken = map.map(([part, src]) => [part, src.colour]);
   for (const [part, colour] of taken) part.colour = colour;
-  // a bandage the collar holds whole goes round with it
+  // a bandage the ring holds whole goes round with it
   if (bands.length) {
-    const go = dir > 0 ? hex.goACW : hex.goCW;
+    const go = dir > 0 ? ring.goACW : ring.goCW;
     for (const b of bands)
-      if (b.tiles.every(t => hex.holds.has(t))) b.tiles = b.tiles.map(t => go.get(t));
+      if (b.tiles.every(t => ring.holds.has(t))) b.tiles = b.tiles.map(t => go.get(t));
   }
 }
 
@@ -1012,28 +1336,25 @@ function refresh() {
     c.line.style.display = show ? '' : 'none';
     c.line.classList.toggle('gone', gone.has(c.key));
   }
-  // a tile off this puzzle's board is not drawn at all
-  for (const t of tiles) {
-    const playing = onBoard.has(t);
-    for (const p of t.parts) p.el.style.display = playing ? '' : 'none';
-    t.el.style.display = playing && !glued.has(t) ? '' : 'none';
-  }
-  for (const h of hexTiles) {
-    const playing = boardHexes.includes(h);
-    const locked = playing && stuck(h);
-    h.hit.style.display = playing ? '' : 'none';
-    h.hit.classList.toggle('stuck', locked);
-    h.mark.style.display = locked ? '' : 'none';
+  // a piece under a bandage keeps its colours but loses its own outline
+  for (const t of pieces) t.el.style.display = glued.has(t) ? 'none' : '';
+  /* A ring that will not turn says so before it is clicked, and the mark
+     stands at the middle of the ring it speaks for — on the hexagon for an
+     inner ring, out on the rim of the collar for an outer one. */
+  for (const r of turners) {
+    const locked = stuck(r);
+    r.hit.classList.toggle('stuck', locked);
+    r.mark.style.display = locked ? '' : 'none';
   }
 }
 
 // the bandages a collar carries round with it
-const bandsIn = hex => bands.filter(b => b.tiles.every(t => hex.holds.has(t))).map(b => b.el);
+const bandsIn = ring => bands.filter(b => b.tiles.every(t => ring.holds.has(t))).map(b => b.el);
 
-function spin(hex, from, ms = SPIN_MS) {
-  const els = [hex.hit, ...bandsIn(hex),
-               ...hex.collar.flatMap(t => [t.el, ...t.parts.map(p => p.el)])];
-  const [cx, cy] = hex.centre;
+function spin(ring, from, ms = SPIN_MS) {
+  const els = [ring.hit, ...bandsIn(ring),
+               ...ring.collar.flatMap(t => [t.el, ...t.parts.map(p => p.el)])];
+  const [cx, cy] = ring.centre;
   const place = a => {
     const tr = `rotate(${a.toFixed(3)} ${cx.toFixed(4)} ${cy.toFixed(4)})`;
     for (const el of els) el.setAttribute('transform', tr);
@@ -1072,15 +1393,15 @@ let inverted = false;
 const clickDir = () => (inverted ? -1 : 1);
 
 // a turn, shown: made at once, then wound back a sixth and played forward
-function turn(hex, dir) {
+function turn(ring, dir) {
   if (cutting) return;                    // the board is being cut, not played
-  if (stuck(hex)) return;                 // a bandage lies across the collar
+  if (stuck(ring)) return;                // a bandage lies across the ring
   clearPlan();                            // a turn by hand leaves the answer stale
   settle();
-  move(hex, dir);
+  move(ring, dir);
   repaint();
   refresh();
-  spin(hex, -dir * 60);
+  spin(ring, -dir * 60);
 }
 
 /* The colouring the board is solved in, and the one it starts from: every part
@@ -1088,8 +1409,8 @@ function turn(hex, dir) {
    board is set out by calling this, so solved is defined in one place and the
    button cannot drift from what the puzzle opens as. */
 function reset() {
-  for (const t of tiles)
-    t.parts.forEach((part, k) => { part.colour = colourAt(...t.on[k]); });
+  for (const p of pieces)
+    p.parts.forEach((part, k) => { part.colour = colourAt(...p.on[k]); });
   bands = homeBands().map(tiles => ({ tiles }));
   bandaged = bands.length > 0;
 }
@@ -1109,9 +1430,14 @@ function setPuzzle(p) {
   boardHexes = p.hexes.map(h => hexAt.get(key(h[0], h[1])));
   onBoard = new Set();
   for (const h of boardHexes) for (const t of h.collar) onBoard.add(t);
-  // a seam is only offered where both the tiles it parts are being played
-  for (const c of everyCut) c.live = onBoard.has(c.tiles[0]) && onBoard.has(c.tiles[1]);
-  cutList = everyCut.filter(c => c.live);
+  buildBoard();                             // the pieces, and the rings that turn them
+  everyCut = boardSeams();                  // the seams those pieces leave between them
+  cutList = everyCut;
+  if (puzzle.gone) {
+    // a bandaging is named by seams, and the seams change with the board
+    const many = everyCut.length;
+    for (const k of [...puzzle.gone]) if (!everyCut.some(c => c.key === k)) puzzle.gone.delete(k);
+  }
 }
 
 /* Turns taken at random, every one of them a legal move, so a scramble is
@@ -1137,7 +1463,7 @@ function scramble() {
   for (let i = 0; i < SCRAMBLE_TURNS; i++) {
     // only from the collars that will turn, so a scramble is a run of real
     // moves and can always be walked back the way it came
-    const free = boardHexes.filter(h => !stuck(h));
+    const free = turners.filter(r => !stuck(r));
     if (!free.length) break;
     move(free[Math.floor(Math.random() * free.length)], Math.random() < 0.5 ? 1 : -1);
   }
@@ -1263,7 +1589,16 @@ const SOLVE_STALL = 12;                     // rounds without progress before re
    again; the beam carries on from where it is. */
 const SOLVE_SEEN_CAP = 300000;
 
-const solvable = () => true;
+/* A layered board is not one the solver can take on yet. Its turns are far
+   bigger than a plain board's — an outer ring of the two-circle board moves
+   sixty-six parts where a whole plain collar moves twenty-four — and the
+   sieve that picks out useful moves has no setting that serves: tight, it
+   throws everything away and leaves a library reaching none of the tiles it
+   has to place; opened wide enough to catch anything, it runs past two
+   gigabytes before it has finished building. That wants a method of its own
+   rather than a wider sieve, so until there is one the button says so plainly
+   instead of hanging the page. */
+const solvable = () => !puzzle.layered;
 
 // one letter to a colour, so a whole colouring is a string of one char per part
 const TOKEN = { white: 'W', red: 'R', orange: 'O', yellow: 'Y',
@@ -1276,7 +1611,7 @@ let kit = null;                             // the solver's tables, built once
    permutations of them, and the library of moves to descend with. */
 async function buildKit(onStep) {
   const recipe = RECIPE[puzzle.recipe];
-  const seat = tiles.filter(t => onBoard.has(t));
+  const seat = pieces;
   const parts = seat.flatMap(t => t.parts);
   const n = parts.length;
   const at = new Map(parts.map((p, i) => [p, i]));
@@ -1286,7 +1621,7 @@ async function buildKit(onStep) {
   /* Turn g is hexagon g>>1 taken anticlockwise when g is even and clockwise
      when it is odd, so g^1 is the same turn the other way. */
   const gens = [];
-  for (const h of boardHexes) for (const map of [h.acw, h.cw]) {
+  for (const h of turners) for (const map of [h.acw, h.cw]) {
     const perm = new Int16Array(n);
     for (let i = 0; i < n; i++) perm[i] = i;
     for (const [part, src] of map) perm[at.get(part)] = at.get(src);
@@ -1685,12 +2020,12 @@ async function buildBandKit(onStep, from) {
   const deepest = recipe.bandDepth + BAND_DEEPEN;
   const start = Math.min(from || recipe.bandDepth, deepest);
   const n = kit.n, tileOf = kit.tileOf, back = s => s.slice().reverse().map(g => g ^ 1);
-  const board = tiles.filter(t => onBoard.has(t));
+  const board = pieces;
   const at = new Map(board.map((t, i) => [t, i]));
 
-  // the bandage model: what each collar holds, and where a turn takes it
-  const holds = boardHexes.map(h => new Set(h.collar.map(t => at.get(t))));
-  const goTile = boardHexes.map(h => [h.goACW, h.goCW].map(m => {
+  // the bandage model: what each ring holds, and where a turn takes it
+  const holds = turners.map(h => new Set(h.collar.map(t => at.get(t))));
+  const goTile = turners.map(h => [h.goACW, h.goCW].map(m => {
     const a = new Int16Array(board.length);
     for (let i = 0; i < board.length; i++) a[i] = i;
     for (const [from, to] of m) a[at.get(from)] = at.get(to);
@@ -1765,7 +2100,7 @@ async function buildBandKit(onStep, from) {
       const it = ballQ[ballAt];
       ballQ[ballAt++] = null;
       const way = ball.get(it.key);
-      for (let h = 0; h < boardHexes.length; h++) {
+      for (let h = 0; h < turners.length; h++) {
         if (!canTurn(it.cfg, h)) continue;
         for (const dir of [0, 1]) {
           const c = shove(it.cfg, h, dir), ck = cfgKey(c);
@@ -1795,7 +2130,7 @@ async function buildBandKit(onStep, from) {
       const next = [];
       for (const it of front) {
         const way = ahead.get(it.key);
-        for (let h = 0; h < boardHexes.length; h++) {
+        for (let h = 0; h < turners.length; h++) {
           if (!canTurn(it.cfg, h)) continue;
           for (const dir of [0, 1]) {
             const c = shove(it.cfg, h, dir), ck = cfgKey(c);
@@ -1869,7 +2204,7 @@ async function buildBandKit(onStep, from) {
       const next = [];
       for (const { cfg, key } of edge) {
         const way = routes.get(key)[0];
-        for (let h = 0; h < boardHexes.length; h++) {
+        for (let h = 0; h < turners.length; h++) {
           if (!canTurn(cfg, h)) continue;
           for (const dir of [0, 1]) {
             const c = shove(cfg, h, dir), ck = cfgKey(c);
@@ -2071,7 +2406,7 @@ async function buildBandKit(onStep, from) {
       let cfg = HOME, s = kit.home;
       for (let i = 0; i < SEAT_PLAY; i++) {
         const open = [];
-        for (let h = 0; h < boardHexes.length; h++) if (canTurn(cfg, h)) open.push(h);
+        for (let h = 0; h < turners.length; h++) if (canTurn(cfg, h)) open.push(h);
         if (!open.length) break;
         const h = open[Math.floor(Math.random() * open.length)];
         const dir = Math.random() < 0.5 ? 0 : 1;
@@ -2476,7 +2811,7 @@ async function bandBrute() {
       const next = [];
       grow: for (const k of front) {
         const cfg = cfgAt(k);
-        for (let h = 0; h < boardHexes.length; h++) {
+        for (let h = 0; h < turners.length; h++) {
           if (!bk.canTurn(cfg, h)) continue;
           for (const dir of [0, 1]) {
             const g = h * 2 + dir;
@@ -2528,7 +2863,7 @@ async function bandBrute() {
     const next = [];
     for (const k of front) {
       const cfg = cfgAt(k);
-      for (let h = 0; h < boardHexes.length; h++) {
+      for (let h = 0; h < turners.length; h++) {
         if (!bk.canTurn(cfg, h)) continue;
         for (const dir of [0, 1]) {
           const g = h * 2 + dir;
@@ -2759,9 +3094,12 @@ function frame() {
   const deg = th * 180 / Math.PI;
   root.setAttribute('transform', `scale(1,-1) rotate(${deg.toFixed(4)})`);
   // the mark reads as a mark the right way up, so it takes the tilt back out
-  for (const h of hexTiles)
-    h.mark.setAttribute('transform',
-      `rotate(${(-deg).toFixed(4)} ${h.centre[0].toFixed(4)} ${h.centre[1].toFixed(4)})`);
+  for (const r of turners) {
+    const m = r.mark.firstChild;            // the ring of it, wherever it stands
+    const cx = +m.getAttribute('cx'), cy = +m.getAttribute('cy');
+    r.mark.setAttribute('transform',
+      `rotate(${(-deg).toFixed(4)} ${cx.toFixed(4)} ${cy.toFixed(4)})`);
+  }
 
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
   const reach = ([px, py]) => {
@@ -2773,8 +3111,7 @@ function frame() {
   };
   // an arc on the rim of the board bulges past both its ends, so the middle of
   // every one of them has to be measured too
-  for (const t of tiles) {
-    if (!onBoard.has(t)) continue;
+  for (const t of pieces) {
     for (let i = 0; i < t.outline.length; i++) {
       const [a, Z] = t.outline[i], b = t.outline[(i + 1) % t.outline.length][0];
       reach(a);
@@ -2811,7 +3148,7 @@ function render() {
   }
 
   const edges = svgEl('g', { 'stroke-width': '0.05' });
-  for (const t of tiles) {
+  for (const t of pieces) {
     t.el = svgEl('path', { class: 'cell', d: pathOf(t.outline) });
     edges.appendChild(t.el);
   }
@@ -2826,28 +3163,48 @@ function render() {
      turn does not move — so it sits in a layer of its own that nothing spins. */
   const MARK_R = 0.17, bar = MARK_R / Math.SQRT2;
   const marks = svgEl('g');
-  for (const h of hexTiles) {
-    const [cx, cy] = h.centre;
-    h.mark = svgEl('g', { class: 'mark' });
-    h.mark.append(
+  for (const r of turners) {
+    /* An inner ring is spoken for at the middle; an outer one out on the rim,
+       where the ring itself is, at the top of the collar. */
+    const cx = r.centre[0];
+    const cy = r.centre[1] + (r.rings > 1 && r.ring === 1 ? (LAYER_R + ARC_R) / 2 : 0);
+    r.mark = svgEl('g', { class: 'mark' });
+    r.mark.append(
       svgEl('circle', { cx, cy, r: MARK_R }),
       // upper left to lower right on screen, so drawn the other way up here
       svgEl('line', { x1: cx - bar, y1: cy + bar, x2: cx + bar, y2: cy - bar }));
-    h.mark.style.display = 'none';
-    marks.appendChild(h.mark);
+    r.mark.style.display = 'none';
+    marks.appendChild(r.mark);
   }
 
-  /* What is clicked is the hexagon, so the hexagons get a layer of their own
-     over the top: the parts underneath would do for a target, but a hexagon is
-     one part today and need not stay that way. */
+  /* What is clicked, in a layer of its own over the top. Unlayered a collar
+     is clicked on its hexagon, as it always was. Layered, the hexagon turns
+     the inner ring and the band round the rim turns the outer one — drawn as
+     the collar with the inner disc taken out of it, which the even-odd rule
+     does from two circles in one path.
+
+     The outer bands of neighbouring circles overlap a little near the middle
+     of each triangle, so they are laid under the hexagons and the hover
+     outline says which ring a click would take. */
   const hits = svgEl('g', { 'stroke-width': '0.06' });
-  for (const h of hexTiles) {
-    h.hit = svgEl('path', { class: 'hit', d: pathOf(h.outline) });
+  const ring = (cx, cy, a, b) =>
+    `M${(cx - a).toFixed(4)},${cy.toFixed(4)}a${a},${a} 0 1 0 ${(2 * a).toFixed(4)},0` +
+    `a${a},${a} 0 1 0 ${(-2 * a).toFixed(4)},0` +
+    `M${(cx - b).toFixed(4)},${cy.toFixed(4)}a${b},${b} 0 1 0 ${(2 * b).toFixed(4)},0` +
+    `a${b},${b} 0 1 0 ${(-2 * b).toFixed(4)},0`;
+  const outers = [], inners = [];
+  for (const r of turners) {
+    const d = r.rings === 1 ? pathOf(r.hex.outline)
+      : r.ring === 0 ? pathOf(r.hex.outline)
+      : ring(r.centre[0], r.centre[1], ARC_R, LAYER_R);
+    r.hit = svgEl('path', { class: 'hit', d, 'fill-rule': 'evenodd' });
     // read when the click happens, so the toggle takes effect at once
-    h.hit.addEventListener('click', () => turn(h, clickDir()));
-    h.hit.addEventListener('contextmenu', e => { e.preventDefault(); turn(h, -clickDir()); });
-    hits.appendChild(h.hit);
+    r.hit.addEventListener('click', () => turn(r, clickDir()));
+    r.hit.addEventListener('contextmenu', e => { e.preventDefault(); turn(r, -clickDir()); });
+    (r.rings > 1 && r.ring === 1 ? outers : inners).push(r.hit);
   }
+  for (const el of outers) hits.appendChild(el);
+  for (const el of inners) hits.appendChild(el);
 
   /* The seams, over everything, since while they are being chosen they are
      what the board is for. Each is drawn twice: a fat transparent path to
@@ -2883,7 +3240,7 @@ function toggleCut(c) {
 
 // said in the one place the toggles can change it, so they cannot disagree
 function showHint() {
-  const free = boardHexes.filter(h => !stuck(h)).length;
+  const free = turners.filter(r => !stuck(r)).length;
   const el = document.getElementById('hint');
   if (cutting) {
     const n = bands.length;
@@ -2894,13 +3251,17 @@ function showHint() {
         : `${n} bandage${n === 1 ? '' : 's'} — ` +
           (free === 0
             ? 'and nothing on the board will turn. This one is welded solid.'
-            : `${free} of ${boardHexes.length} collars still free to turn.`));
+            : `${free} of ${turners.length} rings still free to turn.`));
     return;
   }
   const way = d => d > 0 ? 'anticlockwise' : 'clockwise';
-  el.textContent =
-    `Click a hexagon to turn its collar ${way(clickDir())}, ` +
-    `right-click to turn it ${way(-clickDir())}.` +
+  const two = turners.length > boardHexes.length;
+  el.textContent = two
+    ? `Click a hexagon to turn its inner layer ${way(clickDir())}, or the ring ` +
+      `round the outside of a circle to turn its outer layer; right-click for ` +
+      `${way(-clickDir())}.`
+    : `Click a hexagon to turn its collar ${way(clickDir())}, ` +
+      `right-click to turn it ${way(-clickDir())}.` +
     (bandaged ? ' A collar a bandage lies across will not turn.' : '') +
     (bandaged && free === 0 ? ' Nothing on this board will turn as it stands.' : '');
 }
@@ -2929,8 +3290,15 @@ function asPlan(seq) {
 
 // plus is clockwise, the way twisty-puzzle notation reads, though the model
 // counts anticlockwise positive — the sign here is presentation, not maths
-const tokenText = t =>
-  boardHexes[t.hex].parts[0].colour[0].toUpperCase() + (t.dir > 0 ? '-' : '+').repeat(t.n);
+/* A move reads as the colour it turns and a sign for each sixth. Where a
+   circle has two rings the inner one is written in lower case and the outer
+   in capitals, so W+ and w+ are the two layers of white. */
+const tokenText = t => {
+  const r = turners[t.hex];
+  const c = r.colour[0];
+  return (r.rings > 1 && r.ring === 0 ? c.toLowerCase() : c.toUpperCase()) +
+    (t.dir > 0 ? '-' : '+').repeat(t.n);
+};
 
 function showPlan() {
   const box = document.getElementById('plan'), nav = document.getElementById('nav');
@@ -2969,28 +3337,29 @@ function goTo(target) {
   while (planAt < target) {
     last = plan[planAt];
     way = 1;
-    for (let k = 0; k < last.n; k++) move(boardHexes[last.hex], last.dir);
+    for (let k = 0; k < last.n; k++) move(turners[last.hex], last.dir);
     planAt++;
   }
   while (planAt > target) {
     planAt--;
     last = plan[planAt];
     way = -1;
-    for (let k = 0; k < last.n; k++) move(boardHexes[last.hex], -last.dir);
+    for (let k = 0; k < last.n; k++) move(turners[last.hex], -last.dir);
   }
   repaint(); refresh();
   if (single && last) {
     const turn = last.dir * way;           // undoing a move runs it the other way
-    spin(boardHexes[last.hex], -turn * 60 * last.n, SPIN_MS + 70 * (last.n - 1));
+    spin(turners[last.hex], -turn * 60 * last.n, SPIN_MS + 70 * (last.n - 1));
   }
   showPlan();
 }
 
 function showSolveButton() {
   const b = document.getElementById('solve');
-  const free = boardHexes.filter(h => !stuck(h)).length;
+  const free = turners.filter(r => !stuck(r)).length;
   b.disabled = cutting || !free || !solvable();
   b.title = cutting ? 'Finish choosing the bandaging first'
+    : puzzle.layered ? 'The solver does not know the layered boards yet'
     : !free ? 'Nothing on this board will turn, so there is nothing to solve'
     : 'Work out an answer for this board';
   // a board with nothing to turn cannot be scrambled either
@@ -3005,7 +3374,7 @@ function showSolveButton() {
 
 // everything the board shows, after anything that changes what it should show
 function redraw() {
-  settle(); clearPlan(); reset(); repaint(); refresh(); frame(); showHint();
+  settle(); clearPlan(); reset(); render(); repaint(); refresh(); frame(); showHint();
   showSolveButton();
 }
 
@@ -3020,8 +3389,6 @@ function redraw() {
   sel.value = 'seven';
 }
 setPuzzle(PUZZLES.seven);
-reset();
-render();
 redraw();
 
 document.getElementById('scramble').addEventListener('click', () => {
@@ -3092,8 +3459,21 @@ document.getElementById('invert').addEventListener('change', e => {
    would go on a board already scrambled has no answer — they were never
    carried through those turns — and dropping them onto it could leave colours
    that no run of bandaged moves can reach. */
+/* A second layer is a different board — more pieces, and two rings to a
+   circle — so it is rebuilt from the ground up, and the bandaging goes with
+   the old one since its seams are gone. */
+document.getElementById('layered').addEventListener('change', e => {
+  puzzle.layered = e.target.checked;
+  if (puzzle.gone) puzzle.gone.clear();
+  cutting = false;
+  kit = null;
+  bandKit = null;
+  setPuzzle(puzzle);
+  redraw();
+});
 document.getElementById('layout').addEventListener('change', e => {
   setPuzzle(PUZZLES[e.target.value]);
+  document.getElementById('layered').checked = !!puzzle.layered;
   redraw();
 });
 
