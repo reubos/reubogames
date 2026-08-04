@@ -58,7 +58,6 @@
   button:hover, .toggle:hover { background: #2a2d32; border-color: #4b4f57; }
   .toggle { display: inline-flex; align-items: center; gap: 8px; }
   .toggle input { accent-color: #6ea8fe; cursor: pointer; margin: 0; }
-  .counts { color: var(--muted); font-size: 0.9rem; margin: 16px 0 0; }
 </style>
 </head>
 <body>
@@ -77,8 +76,6 @@
     <label class="toggle"><input type="checkbox" id="invert">Invert controls</label>
   </div>
 
-  <p class="counts" id="counts"></p>
-  <p class="counts" id="hint"></p>
 </div>
 
 <script>
@@ -839,31 +836,12 @@ function scramble() {
 
 /* ---- the page --------------------------------------------------------- */
 
-function showHint() {
-  const way = d => d > 0 ? 'anticlockwise' : 'clockwise';
-  document.getElementById('hint').textContent =
-    `Click a circle to turn it ${way(clickDir())}, right-click to turn it ` +
-    `${way(-clickDir())}. A hexagon goes round by a sixth, a triangle by a ` +
-    `third and a square by a half — what each one may turn by is what leaves ` +
-    `the tiling looking the same about its middle.`;
-}
-
 render();
 reset();
-document.getElementById('counts').textContent =
-  `${board.length} pieces on ${turners.length} circles — ` +
-  `${turners.filter(c => c.sides === 6).length} hexagon, ` +
-  `${turners.filter(c => c.sides === 4).length} squares and ` +
-  `${turners.filter(c => c.sides === 3).length} triangles, ` +
-  `turning by ${[...new Set(turners.map(c => Math.round(c.deg)))].sort((a, b) => a - b).join('°, ')}°.`;
-showHint();
 
 document.getElementById('scramble').addEventListener('click', scramble);
 document.getElementById('reset').addEventListener('click', () => { settle(); reset(); });
-document.getElementById('invert').addEventListener('change', e => {
-  inverted = e.target.checked;
-  showHint();
-});
+document.getElementById('invert').addEventListener('change', e => { inverted = e.target.checked; });
 
 </script>
 </body>
