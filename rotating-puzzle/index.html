@@ -103,6 +103,9 @@
     pointer-events: none;                 /* the grab beneath it is the target */
   }
   .cut.gone { opacity: 0; }
+  /* While a glue press is down every seam the pointer meets is on its way
+     out, so none of them is lit as though it were still there to be cut. */
+  #board.gluing .grab:hover + .cut { opacity: 0; stroke-width: 0.05; }
   /* a hairline arc is far too fine a thing to aim at, so the target is fat */
   .grab { fill: none; stroke: transparent; stroke-width: 0.24; cursor: pointer; }
   .grab:hover + .cut { opacity: 1; stroke-width: 0.09; }
@@ -3267,6 +3270,7 @@ function render() {
     c.grab.addEventListener('mousedown', e => {
       e.preventDefault();
       cutPaint = e.button === 2 ? 'glue' : 'open';
+      document.getElementById('board').classList.toggle('gluing', cutPaint === 'glue');
       applyCut(c, cutPaint);
     });
     c.grab.addEventListener('mouseenter', () => { if (cutPaint) applyCut(c, cutPaint); });
@@ -3276,7 +3280,10 @@ function render() {
   }
 
   // a press ends wherever it is let go, on the board or off it
-  document.addEventListener('mouseup', () => { cutPaint = null; });
+  document.addEventListener('mouseup', () => {
+    cutPaint = null;
+    document.getElementById('board').classList.remove('gluing');
+  });
 
   root.append(fills, edges, bandLayer, marks, hits, seams);
   svg.replaceChildren(root);
