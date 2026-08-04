@@ -3264,11 +3264,19 @@ function render() {
     const d = c.segs.map(g => arcPath(g.a, g.b, g.Z)).join('');
     c.grab = svgEl('path', { class: 'grab', d });
     c.line = svgEl('path', { class: 'cut', d });
-    c.grab.addEventListener('click', () => toggleCut(c));
+    c.grab.addEventListener('mousedown', e => {
+      e.preventDefault();
+      cutPaint = e.button === 2 ? 'glue' : 'open';
+      applyCut(c, cutPaint);
+    });
+    c.grab.addEventListener('mouseenter', () => { if (cutPaint) applyCut(c, cutPaint); });
     c.grab.style.display = 'none';
     c.line.style.display = 'none';
     seams.append(c.grab, c.line);
   }
+
+  // a press ends wherever it is let go, on the board or off it
+  document.addEventListener('mouseup', () => { cutPaint = null; });
 
   root.append(fills, edges, bandLayer, marks, hits, seams);
   svg.replaceChildren(root);
@@ -3276,15 +3284,28 @@ function render() {
   svg.addEventListener('contextmenu', e => e.preventDefault());
 }
 
-/* Taking a seam out, or putting it back. The tables are one bandaging's, so
-   they go; the board is at home while this is going on, so there is nothing
-   to put straight beyond drawing it again. */
-function toggleCut(c) {
+/* Taking a seam out, or putting it back.
+
+   The two are separate presses rather than one that flips: the left button
+   cuts a seam open, the right glues it shut. Each says what it wants rather
+   than what it changes, so running over the same seam twice does it no harm
+   — which is what lets a press be dragged across a stretch of the board and
+   leave every seam it touched the same way.
+
+   Only the bandages are redrawn, not the board: the pieces are settled by
+   the layout and the layer, and gluing only says which of them travel
+   together. Redrawing the board would build every element afresh and the
+   drag would lose the seams out from under the pointer. */
+let cutPaint = null;                        // which way, while a button is down
+function applyCut(c, how) {
   if (!cutting || !c.live) return;
   const gone = cutsGone();
-  if (gone.has(c.key)) gone.delete(c.key); else gone.add(c.key);
+  const was = gone.has(c.key);
+  if (how === 'glue') gone.add(c.key); else gone.delete(c.key);
+  if (gone.has(c.key) === was) return;      // already that way, nothing to draw
   bandKit = null;
-  redraw();
+  clearPlan();
+  reset(); repaint(); refresh(); showHint(); showSolveButton();
 }
 
 // said in the one place the toggles can change it, so they cannot disagree
@@ -3294,8 +3315,8 @@ function showHint() {
   if (cutting) {
     const n = bands.length;
     el.textContent =
-      'Click a seam to glue the two tiles it parts, or a glued seam to cut it ' +
-      'open again. ' +
+      'Right-click a seam to glue the two pieces it parts, left-click to cut it ' +
+      'open again; hold the button down and drag to do a stretch of them at once. ' +
       (n === 0 ? 'Nothing is glued yet.'
         : `${n} bandage${n === 1 ? '' : 's'} — ` +
           (free === 0
