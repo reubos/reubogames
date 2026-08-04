@@ -1,0 +1,609 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Circle Puzzle — a turn on every tile</title>
+<style>
+  :root {
+    --bg: #121316;
+    --panel: #191b1f;
+    --panel-2: #22252a;
+    --line: #34383f;
+    --text: #e8eaed;
+    --muted: #9aa0a8;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 28px 20px 60px;
+    background: var(--bg);
+    color: var(--text);
+    font: 16px/1.6 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  }
+  .wrap { max-width: 820px; margin: 0 auto; }
+  .backlink { color: var(--muted); text-decoration: none; font-size: 0.9rem; }
+  .backlink:hover { color: var(--text); }
+  h1 { font-size: 1.7rem; margin: 10px 0 16px; font-weight: 600; }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 16px;
+  }
+  #board { width: 100%; height: auto; display: block; user-select: none; }
+
+  /* a piece is filled by its parts; the hairline is the fill again so the two
+     sides of a colour boundary meet without the background showing through */
+  .part { stroke-width: 0.006; }
+  .cell { fill: none; stroke: #101114; stroke-linejoin: round; }
+
+  /* transparent, not none: a disc has to be there to be clicked */
+  .hit { fill: transparent; stroke: none; cursor: pointer; }
+  .hit:hover { stroke: rgba(255, 255, 255, 0.8); }
+
+  .controls { display: flex; flex-wrap: wrap; gap: 10px; margin: 16px 0 0; }
+  button, .toggle {
+    font: inherit;
+    font-size: 0.95rem;
+    color: var(--text);
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 8px 16px;
+    cursor: pointer;
+    user-select: none; -webkit-user-select: none;
+  }
+  button:hover, .toggle:hover { background: #2a2d32; border-color: #4b4f57; }
+  .toggle { display: inline-flex; align-items: center; gap: 8px; }
+  .toggle input { accent-color: #6ea8fe; cursor: pointer; margin: 0; }
+  .counts { color: var(--muted); font-size: 0.9rem; margin: 16px 0 0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <a class="backlink" href="../index.html">&#8592; Back to reubogames</a>
+
+  <h1>Circle Puzzle</h1>
+
+  <div class="panel">
+    <svg id="board" xmlns="http://www.w3.org/2000/svg"></svg>
+  </div>
+
+  <div class="controls">
+    <button type="button" id="scramble">Scramble</button>
+    <button type="button" id="reset">Reset puzzle</button>
+    <label class="toggle"><input type="checkbox" id="invert">Invert controls</label>
+    <label class="toggle"><input type="checkbox" id="rings" checked>Show the circles</label>
+  </div>
+
+  <p class="counts" id="counts"></p>
+  <p class="counts" id="hint"></p>
+</div>
+
+<script>
+/* =====================================================================
+   A TURN ON EVERY TILE
+
+   The rhombitrihexagonal tiling, 3.4.6.4, coloured by shape — hexagons one
+   colour, squares another, triangles a third. Every tile carries the circle
+   through its own corners, and every one of those circles turns.
+
+   What a circle may turn by is not its tile's own symmetry but the tiling's
+   symmetry about that tile's centre, since a turn has to land the pieces on
+   ground cut the same way. About a hexagon the tiling repeats every sixth of
+   a turn and about a triangle every third, so those go by 60° and 120°. A
+   square, though, has hexagons on two opposite sides and triangles on the
+   other two: a quarter turn would put a hexagon where a triangle was, so a
+   square turns by a half turn and nothing less.
+
+   The board is the ground those circles cover — the union of the discs. It
+   cannot be the tiles themselves: a square's circle runs out to 2.073 from
+   the middle where the tiles round the hexagon stop at 1.932, so it bulges
+   into the hexagon beyond and would turn ground that was not there.
+   ===================================================================== */
+
+const S3 = Math.sqrt(3);
+const PITCH = 1 + S3;                       // between hexagon centres
+
+// lattice basis, 60° apart, as the tiling wants
+const AX = PITCH * S3 / 2, AY = PITCH / 2;
+const BX = 0, BY = PITCH;
+const at = (a, b) => [a * AX + b * BX, a * AY + b * BY];
+const key = (a, b) => a + ',' + b;
+
+/* The board is seven shapes about one middle: the hexagon, three of its six
+   squares taken every other one, and three of its six triangles likewise, each
+   triangle set against a square that is in. Each of the seven owns a colour
+   and turns on its own circle; anything else a circle reaches is grey. */
+const PLAY = [
+  { sides: 6, deg: null, colour: 'white' },
+  { sides: 4, deg: 90, colour: 'red' },
+  { sides: 3, deg: 60, colour: 'orange' },
+  { sides: 4, deg: 330, colour: 'yellow' },
+  { sides: 3, deg: 300, colour: 'green' },
+  { sides: 4, deg: 210, colour: 'blue' },
+  { sides: 3, deg: 180, colour: 'purple' },
+];
+const COLOURS = {
+  white: '#f5f5f7', red: '#e8483f', orange: '#f08c28', yellow: '#f2d024',
+  green: '#3fb95c', blue: '#3b82f6', purple: '#9b59f6', grey: '#6b7079',
+};
+const NAME = { 6: 'hexagon', 4: 'square', 3: 'triangle' };
+// what the tiling repeats by about each kind of centre, which is what may turn
+const STEP = { 6: Math.PI / 3, 4: Math.PI, 3: 2 * Math.PI / 3 };
+const CIRCUM = { 6: 1, 4: Math.SQRT1_2, 3: 1 / S3 };
+
+/* ---- the tiling ------------------------------------------------------
+
+   A hexagon of side one on every lattice point, a square astride every
+   lattice edge and a triangle on every lattice face. Straight edges: the
+   circles are what cut here, so the tiles are the plain tiling. */
+
+const HEXES = [];
+for (let a = -2; a <= 2; a++)
+  for (let b = -2; b <= 2; b++)
+    if (Math.abs(a + b) <= 2) HEXES.push([a, b]);
+
+const tiles = [];
+const seen = new Set();
+/* A point as a name, for asking what stands where. Rounded, and with zero
+   made plain: a coordinate that lands a hair below nothing prints as -0.0000
+   and would miss the very piece sitting on it. */
+const round4 = v => { const r = +v.toFixed(4); return r === 0 ? 0 : r; };
+const spot = p => round4(p[0]).toFixed(4) + ',' + round4(p[1]).toFixed(4);
+const add = (sides, centre, poly) => {
+  const k = sides + ':' + spot(centre);
+  if (seen.has(k)) return;
+  seen.add(k);
+  tiles.push({ sides, centre, poly, colour: COLOURS.grey, plays: false });
+};
+
+for (const [a, b] of HEXES) {
+  const c = at(a, b);
+  const corner = k => [c[0] + Math.cos(k * Math.PI / 3), c[1] + Math.sin(k * Math.PI / 3)];
+  add(6, c, [0, 1, 2, 3, 4, 5].map(corner));
+  // a square outward from each edge, standing on the two corners of it
+  for (let k = 0; k < 6; k++) {
+    const p = corner(k), q = corner(k + 1);
+    const mx = (p[0] + q[0]) / 2 - c[0], my = (p[1] + q[1]) / 2 - c[1];
+    const d = Math.hypot(mx, my);
+    const ux = mx / d, uy = my / d;
+    const out = w => [w[0] + ux, w[1] + uy];
+    add(4, [(p[0] + q[0]) / 2 + ux / 2, (p[1] + q[1]) / 2 + uy / 2],
+        [p, q, out(q), out(p)]);
+  }
+  /* a triangle on each corner, standing on that corner and the far corners of
+     the two squares beside it — which is the gap they leave between them */
+  for (let k = 0; k < 6; k++) {
+    const v = corner(k);
+    const arm = j => {
+      const p = corner(j), q = corner(j + 1);
+      const mx = (p[0] + q[0]) / 2 - c[0], my = (p[1] + q[1]) / 2 - c[1];
+      const d = Math.hypot(mx, my);
+      return [v[0] + mx / d, v[1] + my / d];
+    };
+    const w1 = arm(k), w2 = arm(k - 1);
+    add(3, [(v[0] + w1[0] + w2[0]) / 3, (v[1] + w1[1] + w2[1]) / 3], [v, w1, w2]);
+  }
+}
+
+/* ---- the circles -----------------------------------------------------
+
+   One on every tile, through its corners. Those on the board turn; the rest
+   are there to cut, and they must be, or a turn would carry its pieces onto
+   ground that had been divided differently. */
+
+/* The seven that play, found by the direction they stand in from the middle.
+   Everything else in the tiling is there to cut and to be turned about, but
+   has no circle of its own and keeps the grey it was made with. */
+for (const p of PLAY) {
+  const want = p.deg === null ? null : p.deg * Math.PI / 180;
+  let best = null, bd = Infinity;
+  for (const t of tiles) {
+    if (t.sides !== p.sides) continue;
+    const d = Math.hypot(t.centre[0], t.centre[1]);
+    if (want === null) { if (d < bd) { bd = d; best = t; } continue; }
+    if (d > 2.2) continue;                  // only the ring about the middle
+    let off = Math.atan2(t.centre[1], t.centre[0]) - want;
+    while (off > Math.PI) off -= 2 * Math.PI;
+    while (off < -Math.PI) off += 2 * Math.PI;
+    if (Math.abs(off) < 1e-6 && d < bd) { bd = d; best = t; }
+  }
+  if (!best) throw new Error('no ' + NAME[p.sides] + ' standing at ' + p.deg);
+  best.colour = COLOURS[p.colour];
+  best.name = p.colour;
+  best.plays = true;
+}
+
+const circles = tiles.map(t => ({
+  tile: t, c: t.centre, r: CIRCUM[t.sides], sides: t.sides, turns: t.plays,
+}));
+const turners = circles.filter(c => c.turns);
+
+/* ---- cutting ---------------------------------------------------------
+
+   A region is a closed loop of edges, each a straight line or an arc of a
+   known circle. Cutting one by a circle breaks it at the crossings into runs
+   that lie on one side, then stitches the runs back together along the
+   cutting circle — which matters, since a circle crossing a shape four times
+   leaves one piece inside bounded by two separate runs. */
+
+const vsub = (a, b) => [a[0] - b[0], a[1] - b[1]];
+const vlen = a => Math.hypot(a[0], a[1]);
+const apart = (a, b) => vlen(vsub(a, b));
+const alike = (a, b) => apart(a, b) < 1e-7;
+const angAt = (Z, p) => Math.atan2(p[1] - Z[1], p[0] - Z[0]);
+const edge = (from, to, centre, r) => ({ from, to, centre: centre || null, r: r || 0 });
+
+function arcSpan(e) {
+  const a = angAt(e.centre, e.from);
+  let d = angAt(e.centre, e.to) - a;
+  while (d > Math.PI) d -= 2 * Math.PI;
+  while (d < -Math.PI) d += 2 * Math.PI;
+  return { a, d };
+}
+function alongArc(e, p) {
+  const { a, d } = arcSpan(e);
+  let t = angAt(e.centre, p) - a;
+  while (t > Math.PI) t -= 2 * Math.PI;
+  while (t < -Math.PI) t += 2 * Math.PI;
+  const u = d === 0 ? 0 : t / d;
+  return u > 1e-6 && u < 1 - 1e-6;
+}
+function edgeMid(e) {
+  if (!e.centre) return [(e.from[0] + e.to[0]) / 2, (e.from[1] + e.to[1]) / 2];
+  const { a, d } = arcSpan(e);
+  return [e.centre[0] + e.r * Math.cos(a + d / 2), e.centre[1] + e.r * Math.sin(a + d / 2)];
+}
+function edgeMeets(e, C, R) {
+  const out = [];
+  if (!e.centre) {
+    const d = vsub(e.to, e.from), f = vsub(e.from, C);
+    const a = d[0] * d[0] + d[1] * d[1];
+    const b = 2 * (f[0] * d[0] + f[1] * d[1]);
+    const c = f[0] * f[0] + f[1] * f[1] - R * R;
+    let disc = b * b - 4 * a * c;
+    if (disc <= 1e-9) return out;
+    disc = Math.sqrt(disc);
+    for (const t of [(-b - disc) / (2 * a), (-b + disc) / (2 * a)])
+      if (t > 1e-6 && t < 1 - 1e-6) out.push([e.from[0] + d[0] * t, e.from[1] + d[1] * t]);
+    return out;
+  }
+  const Z = e.centre, r = e.r, dv = vsub(C, Z), D = vlen(dv);
+  if (D < 1e-9 || D > r + R - 1e-9 || D < Math.abs(r - R) + 1e-9) return out;
+  const a = (r * r - R * R + D * D) / (2 * D);
+  const h2 = r * r - a * a;
+  if (h2 <= 0) return out;
+  const h = Math.sqrt(h2);
+  const mx = Z[0] + a * dv[0] / D, my = Z[1] + a * dv[1] / D;
+  for (const s of [1, -1]) {
+    const p = [mx + s * h * (-dv[1]) / D, my + s * h * dv[0] / D];
+    if (alongArc(e, p)) out.push(p);
+  }
+  return out;
+}
+function loopArea(loop) {
+  let a = 0;
+  for (const e of loop) a += e.from[0] * e.to[1] - e.to[0] * e.from[1];
+  a /= 2;
+  for (const e of loop) {
+    if (!e.centre) continue;
+    const { d } = arcSpan(e);
+    a += e.r * e.r / 2 * (d - Math.sin(d));
+  }
+  return a;
+}
+const flipLoop = l => l.slice().reverse().map(e => edge(e.to, e.from, e.centre, e.r));
+const facing = l => (loopArea(l) < 0 ? flipLoop(l) : l);
+
+function sliceLoop(loop, C, R) {
+  loop = facing(loop);
+  const edges = [];
+  for (const e of loop) {
+    const hits = edgeMeets(e, C, R);
+    if (!hits.length) { edges.push(e); continue; }
+    hits.sort((p, q) => apart(e.from, p) - apart(e.from, q));
+    let cur = e;
+    for (const p of hits) {
+      if (alike(cur.from, p) || alike(cur.to, p)) continue;
+      edges.push(edge(cur.from, p, cur.centre, cur.r));
+      cur = edge(p, cur.to, cur.centre, cur.r);
+    }
+    edges.push(cur);
+  }
+  const side = edges.map(e => apart(edgeMid(e), C) < R);
+  if (side.every(s => s)) return { in: [loop], out: [] };
+  if (side.every(s => !s)) return { in: [], out: [loop] };
+  let start = 0;
+  while (side[start] === side[(start + edges.length - 1) % edges.length]) start++;
+  const runs = [];
+  for (let n = 0; n < edges.length; ) {
+    const s = side[(start + n) % edges.length];
+    const run = [];
+    while (n < edges.length && side[(start + n) % edges.length] === s) {
+      run.push(edges[(start + n) % edges.length]);
+      n++;
+    }
+    runs.push({ side: s, edges: run, from: run[0].from, to: run[run.length - 1].to });
+  }
+  const turn = loopArea(loop) >= 0 ? 1 : -1;
+  const nextRun = (p, dir, want) => {
+    const a0 = angAt(C, p);
+    let best = null, bestd = Infinity;
+    for (const r of runs) {
+      if (r.side !== want) continue;
+      let d = (angAt(C, r.from) - a0) * dir;
+      while (d <= 1e-7) d += 2 * Math.PI;
+      if (d < bestd) { bestd = d; best = r; }
+    }
+    return best;
+  };
+  const got = { in: [], out: [] };
+  for (const want of [true, false]) {
+    const dir = want ? turn : -turn;
+    const done = new Set();
+    for (const r0 of runs) {
+      if (r0.side !== want || done.has(r0)) continue;
+      const out = [];
+      let r = r0;
+      for (let guard = 0; guard < runs.length + 2; guard++) {
+        done.add(r);
+        out.push(...r.edges);
+        const nxt = nextRun(r.to, dir, want);
+        if (!nxt) break;
+        if (!alike(r.to, nxt.from)) out.push(edge(r.to, nxt.from, C, R));
+        if (nxt === r0) break;
+        r = nxt;
+      }
+      got[want ? 'in' : 'out'].push(out);
+    }
+  }
+  return got;
+}
+
+/* ---- the pieces ------------------------------------------------------
+
+   Every tile cut by every circle. A bit is kept when some turning circle
+   holds it, which is what makes the board the ground the turns cover; bits
+   of one tile agreeing on every circle are one piece, and a piece spanning
+   two tiles wears both their colours. */
+
+const midOf = pts => {
+  let x = 0, y = 0;
+  for (const p of pts) { x += p[0]; y += p[1]; }
+  return [x / pts.length, y / pts.length];
+};
+const corners = loop => loop.map(e => e.from);
+
+const pieces = [];
+for (const t of tiles) {
+  if (Math.hypot(t.centre[0], t.centre[1]) > 3.2) continue;   // past every disc
+  let bits = [{ loop: facing(t.poly.map((p, i) => edge(p, t.poly[(i + 1) % t.poly.length]))), word: '' }];
+  for (const c of circles) {
+    const next = [];
+    for (const b of bits) {
+      const s = sliceLoop(b.loop, c.c, c.r);
+      for (const l of s.in) next.push({ loop: l, word: b.word + '1' });
+      for (const l of s.out) next.push({ loop: l, word: b.word + '0' });
+    }
+    bits = next;
+  }
+  for (const b of bits) {
+    if (Math.abs(loopArea(b.loop)) < 1e-7) continue;
+    // kept only where a turning circle covers it — that is the board
+    if (!circles.some((c, i) => c.turns && b.word[i] === '1')) continue;
+    b.tile = t;
+    pieces.push(b);
+  }
+}
+// bits of the same tile agreeing on every circle are the one piece
+const byWord = new Map();
+for (const b of pieces) {
+  const k = b.tile.sides + ':' + spot(b.tile.centre) + ':' + b.word;
+  if (!byWord.has(k)) byWord.set(k, []);
+  byWord.get(k).push(b);
+}
+const board = [];
+for (const bits of byWord.values()) {
+  const parts = bits.map(b => ({ loop: b.loop, home: b.tile.colour, colour: b.tile.colour }));
+  board.push({
+    word: bits[0].word,
+    parts,
+    centre: midOf(parts.flatMap(p => corners(p.loop))),
+  });
+}
+
+/* Which pieces each circle holds, and where a turn sends them. Read off by
+   position: a piece is carried onto the piece standing where it lands, and
+   the cuts repeating about that centre is what promises there is one. */
+const spotOf = new Map(board.map(p => [spot(p.centre), p]));
+for (const [i, c] of circles.entries()) {
+  if (!c.turns) continue;
+  c.holds = board.filter(p => p.word[i] === '1');
+  const map = (ang) => {
+    const co = Math.cos(ang), si = Math.sin(ang);
+    const m = new Map();
+    for (const p of c.holds) {
+      const x = p.centre[0] - c.c[0], y = p.centre[1] - c.c[1];
+      const to = spotOf.get(spot([c.c[0] + x * co - y * si, c.c[1] + x * si + y * co]));
+      if (!to) throw new Error('a circle that does not turn onto itself: ' + NAME[c.sides]);
+      m.set(p, to);
+    }
+    return m;
+  };
+  c.acw = map(STEP[c.sides]);
+  c.cw = map(-STEP[c.sides]);
+  c.deg = STEP[c.sides] * 180 / Math.PI;
+}
+
+/* ---- drawing ---------------------------------------------------------- */
+
+const NS = 'http://www.w3.org/2000/svg';
+const PAD = 0.12;
+const svgEl = (name, attrs) => {
+  const el = document.createElementNS(NS, name);
+  for (const k in attrs) el.setAttribute(k, attrs[k]);
+  return el;
+};
+const xy = p => p[0].toFixed(4) + ',' + p[1].toFixed(4);
+function pathOf(loop) {
+  let d = 'M' + xy(loop[0].from);
+  for (const e of loop) {
+    if (!e.centre) { d += 'L' + xy(e.to); continue; }
+    const { d: sweep } = arcSpan(e);
+    const big = Math.abs(sweep) > Math.PI ? 1 : 0;
+    d += `A${e.r.toFixed(4)},${e.r.toFixed(4)} 0 ${big} ${sweep > 0 ? 1 : 0} ${xy(e.to)}`;
+  }
+  return d + 'Z';
+}
+
+let root, ringLayer;
+function render() {
+  const svg = document.getElementById('board');
+  root = svgEl('g', { transform: 'scale(1,-1)' });
+
+  const fills = svgEl('g');
+  for (const p of board)
+    for (const part of p.parts) {
+      part.el = svgEl('path', { class: 'part', d: pathOf(part.loop) });
+      fills.appendChild(part.el);
+    }
+
+  // the circles, drawn where they cut and only if wanted
+  ringLayer = svgEl('g', { 'stroke-width': '0.02' });
+  for (const p of board) {
+    p.el = svgEl('path', { class: 'cell', 'stroke-width': '0.02', d: p.parts.map(q => pathOf(q.loop)).join('') });
+    ringLayer.appendChild(p.el);
+  }
+
+  /* What is clicked is the disc, smallest first so a triangle or a square
+     sitting inside a hexagon's reach can still be taken. */
+  const hits = svgEl('g', { 'stroke-width': '0.03' });
+  for (const c of [...turners].sort((a, b) => b.r - a.r)) {
+    c.hit = svgEl('circle', { class: 'hit', cx: c.c[0], cy: c.c[1], r: c.r });
+    c.hit.addEventListener('click', () => turn(c, clickDir()));
+    c.hit.addEventListener('contextmenu', e => { e.preventDefault(); turn(c, -clickDir()); });
+    hits.appendChild(c.hit);
+  }
+
+  root.append(fills, ringLayer, hits);
+  svg.replaceChildren(root);
+  svg.addEventListener('contextmenu', e => e.preventDefault());
+
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const c of turners) {
+    x0 = Math.min(x0, c.c[0] - c.r); x1 = Math.max(x1, c.c[0] + c.r);
+    y0 = Math.min(y0, c.c[1] - c.r); y1 = Math.max(y1, c.c[1] + c.r);
+  }
+  svg.setAttribute('viewBox',
+    [x0 - PAD, -y1 - PAD, x1 - x0 + 2 * PAD, y1 - y0 + 2 * PAD].join(' '));
+}
+
+const paint = () => {
+  for (const p of board)
+    for (const part of p.parts) {
+      part.el.setAttribute('fill', part.colour);
+      part.el.setAttribute('stroke', part.colour);
+    }
+};
+
+/* ---- turning ---------------------------------------------------------- */
+
+/* A turn is read off before any of it is written back: every piece takes the
+   colours the piece it came from was wearing. */
+function move(c, dir) {
+  const map = dir > 0 ? c.acw : c.cw;
+  const taken = [];
+  for (const [from, to] of map) taken.push([to, from.parts.map(q => q.colour)]);
+  for (const [to, colours] of taken)
+    to.parts.forEach((q, i) => { q.colour = colours[i]; });
+}
+
+const SPIN_MS = 190;
+const ease = u => 1 - (1 - u) ** 3;
+let spinning = null;
+const settle = () => { if (spinning) spinning(); };
+
+function spin(c, from, ms = SPIN_MS) {
+  const els = c.holds.flatMap(p => [p.el, ...p.parts.map(q => q.el)]).concat(c.hit);
+  const place = a => {
+    const tr = `rotate(${a.toFixed(3)} ${c.c[0].toFixed(4)} ${c.c[1].toFixed(4)})`;
+    for (const el of els) el.setAttribute('transform', tr);
+  };
+  let raf = 0, backstop = 0;
+  const stop = () => {
+    cancelAnimationFrame(raf);
+    clearTimeout(backstop);
+    for (const el of els) el.removeAttribute('transform');
+    spinning = null;
+  };
+  const t0 = performance.now();
+  const step = now => {
+    const u = Math.min(1, Math.max(0, (now - t0) / ms));
+    if (u < 1) { place(from * (1 - ease(u))); raf = requestAnimationFrame(step); }
+    else stop();
+  };
+  place(from);
+  spinning = stop;
+  raf = requestAnimationFrame(step);
+  backstop = setTimeout(stop, ms + 300);
+}
+
+let inverted = false;
+const clickDir = () => (inverted ? -1 : 1);
+
+function turn(c, dir) {
+  settle();
+  move(c, dir);
+  paint();
+  spin(c, -dir * c.deg);
+}
+
+function reset() {
+  for (const p of board) for (const q of p.parts) q.colour = q.home;
+  paint();
+}
+
+const SCRAMBLE = 400;
+function scramble() {
+  settle();
+  for (let i = 0; i < SCRAMBLE; i++)
+    move(turners[Math.floor(Math.random() * turners.length)], Math.random() < 0.5 ? 1 : -1);
+  paint();
+}
+
+/* ---- the page --------------------------------------------------------- */
+
+function showHint() {
+  const way = d => d > 0 ? 'anticlockwise' : 'clockwise';
+  document.getElementById('hint').textContent =
+    `Click a circle to turn it ${way(clickDir())}, right-click to turn it ` +
+    `${way(-clickDir())}. A hexagon goes round by a sixth, a triangle by a ` +
+    `third and a square by a half — what each one may turn by is what leaves ` +
+    `the tiling looking the same about its middle.`;
+}
+
+render();
+reset();
+document.getElementById('counts').textContent =
+  `${board.length} pieces on ${turners.length} circles — ` +
+  `${turners.filter(c => c.sides === 6).length} hexagon, ` +
+  `${turners.filter(c => c.sides === 4).length} squares and ` +
+  `${turners.filter(c => c.sides === 3).length} triangles, ` +
+  `turning by ${[...new Set(turners.map(c => Math.round(c.deg)))].sort((a, b) => a - b).join('°, ')}°.`;
+showHint();
+
+document.getElementById('scramble').addEventListener('click', scramble);
+document.getElementById('reset').addEventListener('click', () => { settle(); reset(); });
+document.getElementById('invert').addEventListener('change', e => {
+  inverted = e.target.checked;
+  showHint();
+});
+document.getElementById('rings').addEventListener('change', e => {
+  ringLayer.style.display = e.target.checked ? '' : 'none';
+});
+</script>
+</body>
+</html>
