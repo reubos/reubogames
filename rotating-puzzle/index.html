@@ -1353,13 +1353,15 @@ function refresh() {
   }
   // a piece under a bandage keeps its colours but loses its own outline
   for (const t of pieces) t.el.style.display = glued.has(t) ? 'none' : '';
-  /* A ring that will not turn says so before it is clicked, and the mark
-     stands at the middle of the ring it speaks for — on the hexagon for an
-     inner ring, out on the rim of the collar for an outer one. */
+  /* A ring that will not turn says so before it is clicked. Only on a board
+     of one layer, though: with two, a bandage across the cut stops the inner
+     disc while the whole circle still turns, and a mark standing over that
+     would say the circle was locked when it is not. The cursor still tells
+     the truth on whichever ring is under it. */
   for (const r of turners) {
     const locked = stuck(r);
     r.hit.classList.toggle('stuck', locked);
-    r.mark.style.display = locked ? '' : 'none';
+    r.mark.style.display = locked && r.rings === 1 ? '' : 'none';
   }
 }
 
