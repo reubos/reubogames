@@ -75,8 +75,6 @@
     <button type="button" id="scramble">Scramble</button>
     <button type="button" id="reset">Reset puzzle</button>
     <label class="toggle"><input type="checkbox" id="invert">Invert controls</label>
-    <label class="toggle"><input type="checkbox" id="rings" checked>Show the circles</label>
-    <label class="toggle"><input type="checkbox" id="quarter">Squares turn by a quarter</label>
   </div>
 
   <p class="counts" id="counts"></p>
@@ -104,7 +102,7 @@
    copy lands in the neighbouring circles and has to be copied round those in
    turn, and so on — but the asking stops. After five rounds nothing new is
    added, at 364 arcs on 104 circles, and the board is 181 pieces instead of
-   91. That is what the last toggle does.
+   the 91 a half turn would leave.
 
    The board is the ground those circles cover — the union of the discs. It
    cannot be the tiles themselves: a square's circle runs out to 2.073 from
@@ -124,39 +122,39 @@ const key = (a, b) => a + ',' + b;
 /* The board is a hexagon with the whole collar it wears: the six squares
    across its edges and the six triangles at its corners. Each of the thirteen
    owns a colour and turns on its own circle; anything else a circle reaches is
-   grey. Squares take the six full hues in turn round the ring and triangles
-   take the same six pale, set three apart, so no two neighbours are near. */
+   grey.
+
+   Twelve colours round the ring, a hue every thirtieth of the wheel, deep and
+   pale by turns. The squares take the deep six and the triangles the pale six
+   sitting between them, so a triangle differs from the square beside it by
+   weight even where the hue is near, and from the next triangle round by a
+   sixth of the wheel. */
 const PLAY = [
   { sides: 6, deg: null, colour: 'white' },
   { sides: 4, deg: 30, colour: 'red' },
-  { sides: 4, deg: 90, colour: 'orange' },
-  { sides: 4, deg: 150, colour: 'yellow' },
-  { sides: 4, deg: 210, colour: 'green' },
+  { sides: 4, deg: 90, colour: 'yellow' },
+  { sides: 4, deg: 150, colour: 'green' },
+  { sides: 4, deg: 210, colour: 'cyan' },
   { sides: 4, deg: 270, colour: 'blue' },
-  { sides: 4, deg: 330, colour: 'purple' },
-  { sides: 3, deg: 0, colour: 'paleGreen' },
-  { sides: 3, deg: 60, colour: 'paleBlue' },
-  { sides: 3, deg: 120, colour: 'palePurple' },
-  { sides: 3, deg: 180, colour: 'paleRed' },
-  { sides: 3, deg: 240, colour: 'paleOrange' },
-  { sides: 3, deg: 300, colour: 'paleYellow' },
+  { sides: 4, deg: 330, colour: 'magenta' },
+  { sides: 3, deg: 0, colour: 'peach' },
+  { sides: 3, deg: 60, colour: 'lime' },
+  { sides: 3, deg: 120, colour: 'mint' },
+  { sides: 3, deg: 180, colour: 'sky' },
+  { sides: 3, deg: 240, colour: 'lilac' },
+  { sides: 3, deg: 300, colour: 'rose' },
 ];
 const COLOURS = {
-  white: '#f5f5f7', red: '#e8483f', orange: '#f08c28', yellow: '#f2d024',
-  green: '#3fb95c', blue: '#3b82f6', purple: '#9b59f6',
-  paleRed: '#ffb0a8', paleOrange: '#ffd49b', paleYellow: '#fbf0a2',
-  paleGreen: '#a6e7b9', paleBlue: '#a9c9f9', palePurple: '#d8bcfb',
+  white: '#f4f4f6',
+  red: '#e0413d', yellow: '#dcc41e', green: '#37b257',
+  cyan: '#1fb0bd', blue: '#3d5ce0', magenta: '#c744cb',
+  peach: '#ffc094', lime: '#d2ee8c', mint: '#8eeec2',
+  sky: '#93d2f7', lilac: '#bda6f7', rose: '#f89ec6',
   grey: '#6b7079',
 };
 const NAME = { 6: 'hexagon', 4: 'square', 3: 'triangle' };
-/* A quarter turn on the squares is no symmetry of the tiling, so it asks for
-   extra cuts. It is read before anything is built, since the whole board
-   follows from it. */
-let quarter = false;
-try {
-  quarter = window.QUARTER !== undefined ? !!window.QUARTER
-    : localStorage.getItem('quarter') === '1';
-} catch (e) { quarter = false; }
+// a quarter turn on the squares, which is what asks for the extra cuts below
+const quarter = true;
 // what the tiling repeats by about each kind of centre, which is what may turn
 const STEP = { 6: Math.PI / 3, 4: Math.PI, 3: 2 * Math.PI / 3 };
 const CIRCUM = { 6: 1, 4: Math.SQRT1_2, 3: 1 / S3 };
@@ -866,19 +864,7 @@ document.getElementById('invert').addEventListener('change', e => {
   inverted = e.target.checked;
   showHint();
 });
-document.getElementById('rings').addEventListener('change', e => {
-  ringLayer.style.display = e.target.checked ? '' : 'none';
-});
-/* The whole board is cut from this, so it is remembered and the page begun
-   again rather than pretended to change underfoot. */
-{
-  const box = document.getElementById('quarter');
-  box.checked = quarter;
-  box.addEventListener('change', e => {
-    try { localStorage.setItem('quarter', e.target.checked ? '1' : '0'); } catch (err) {}
-    location.reload();
-  });
-}
+
 </script>
 </body>
 </html>
