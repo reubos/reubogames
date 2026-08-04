@@ -898,11 +898,17 @@ function buildBoard() {
       turners.push({ hex: h, ring: 0, rings: 1, centre: h.centre, collar: inCollar });
       continue;
     }
+    /* Two turns, not two layers turned separately: the inner disc on its own,
+       and the whole circle with both layers together. The outer ring alone is
+       still reachable — turn the whole circle, then the inner disc back — so
+       nothing is lost, but a bandage glued across the cut now reads the way it
+       should. It blocks the inner turn, since it is only partly in that disc,
+       and leaves the whole-circle turn alone, since the whole circle holds all
+       of it. */
     const mine = cutAt.get(key(...h.on[0]));
     const inner = inCollar.filter(p => p.word[mine] === '1');
-    const outer = inCollar.filter(p => p.word[mine] === '0');
     turners.push({ hex: h, ring: 0, rings: 2, centre: h.centre, collar: inner });
-    turners.push({ hex: h, ring: 1, rings: 2, centre: h.centre, collar: outer });
+    turners.push({ hex: h, ring: 1, rings: 2, centre: h.centre, collar: inCollar });
   }
   for (const t of turners) {
     t.holds = new Set(t.collar);
@@ -1146,16 +1152,25 @@ function applyBandCode(text) {
   if (!m) return false;
   const want = PUZZLES[m[1]];
   if (!want) return false;
-  // judged in full before anything is touched, so a bad code changes nothing
   const list = m[2] === 'none' ? [] : m[2].split('.').map(Number);
-  const on = new Set();
-  for (const h of want.hexes)
-    for (const t of hexAt.get(key(h[0], h[1])).collar) on.add(t);
-  const seams = everyCut.filter(c => on.has(c.tiles[0]) && on.has(c.tiles[1])).length;
-  if (list.some(i => i >= seams)) return false;
+  /* Which seams a number names depends on the board it is read against, and a
+     layered board has its cuts' seams as well as the tiling's. So the board is
+     set first and the numbers judged against it — and put back as they were if
+     they name nothing, so a code that does not fit changes nothing. */
+  const was = puzzle, wasGone = new Set(cutsGone());
   if (puzzle !== want) {
     document.getElementById('layout').value = m[1];
+    document.getElementById('layered').checked = !!want.layered;
     setPuzzle(want);
+  }
+  if (list.some(i => i >= cutList.length)) {
+    if (puzzle !== was) {
+      document.getElementById('layout').value = puzzleName(was);
+      document.getElementById('layered').checked = !!was.layered;
+      setPuzzle(was);
+      puzzle.gone = wasGone;
+    }
+    return false;
   }
   const gone = cutsGone();
   gone.clear();
@@ -3258,8 +3273,8 @@ function showHint() {
   const two = turners.length > boardHexes.length;
   el.textContent = two
     ? `Click a hexagon to turn its inner layer ${way(clickDir())}, or the ring ` +
-      `round the outside of a circle to turn its outer layer; right-click for ` +
-      `${way(-clickDir())}.`
+      `round the outside of a circle to turn both layers together; right-click ` +
+      `for ${way(-clickDir())}.`
     : `Click a hexagon to turn its collar ${way(clickDir())}, ` +
       `right-click to turn it ${way(-clickDir())}.` +
     (bandaged ? ' A collar a bandage lies across will not turn.' : '') +
