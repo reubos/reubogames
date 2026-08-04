@@ -205,10 +205,6 @@
   <a class="backlink" href="../index.html">&#8592; Back to reubogames</a>
 
   <h1>Rotating Puzzle</h1>
-  <p class="sub">The rhombitrihexagonal tiling, 3.4.6.4, bowed onto circles — one
-    about each hexagon, through the twelve corners of the collar it turns. Every
-    tile is divided between the hexagons around it.</p>
-
   <div class="panel">
     <svg id="board" xmlns="http://www.w3.org/2000/svg"></svg>
   </div>
@@ -237,7 +233,6 @@
 
   <div class="plan" id="plan" style="display:none"></div>
 
-  <p class="counts" id="counts"></p>
 </div>
 
 <script>
@@ -3176,9 +3171,6 @@ function frame() {
   document.getElementById('board').setAttribute('viewBox',
     [x0 - PAD, -y1 - PAD, x1 - x0 + 2 * PAD, y1 - y0 + 2 * PAD].join(' '));
 
-  const n = s => [...onBoard].filter(t => t.sides === s).length;
-  document.getElementById('counts').textContent =
-    `${onBoard.size} tiles — ${n(6)} hexagons, ${n(4)} squares, ${n(3)} triangles.`;
 }
 
 /* One outline to a bandage. The pool grows to whatever a puzzle asks for
@@ -3465,8 +3457,12 @@ function redraw() {
   }
   sel.value = 'seven';
 }
+/* What the page opens on: the seven circles, wearing the bandaging below.
+   It is written as a code so it says exactly which seams are glued, and reads
+   the same way the box in the chooser does. */
+const OPENING = 'seven:0.1.13.16.26.29.33.34.46.47.70.71.72.75.85.88.100.101';
 setPuzzle(PUZZLES.seven);
-redraw();
+if (!applyBandCode(OPENING)) redraw();      // redraw anyway if it names nothing
 
 document.getElementById('scramble').addEventListener('click', () => {
   clearPlan(); scramble(); showSolveButton();
