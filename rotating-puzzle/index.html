@@ -1099,13 +1099,33 @@ function boardSeams() {
       if (!e) bySeam.set(k, e = { key: k, a, b, Z, tiles: [] });
       if (!e.tiles.includes(t)) e.tiles.push(t);
     }
-  /* A seam with one piece on it is on the rim, with nothing across it to glue
-     to. The rest are put in reading order — down the board, then across — so
-     the number a seam goes by in a bandage code depends on the board alone. */
-  const out = [...bySeam.values()].filter(e => e.tiles.length === 2);
-  for (const e of out) {
-    e.mid = [(e.a[0] + e.b[0]) / 2, (e.a[1] + e.b[1]) / 2];
-    e.live = true;
+  /* An edge with one piece on it is on the rim, with nothing across it to
+     glue to. The rest are the seams.
+
+     Two pieces can meet along a boundary that arrives here in more than one
+     edge: where a colour's line runs into a layer's cut, the shared boundary
+     is broken at that point and each side of it comes through separately.
+     They are one seam for all that — the two pieces are either glued or they
+     are not — so edges between the same pair are gathered into one, which
+     lights and glues as a whole rather than in halves.
+
+     Seams go in reading order, down the board and then across, so the number
+     one goes by in a bandage code depends on the board alone. */
+  const edges = [...bySeam.values()].filter(e => e.tiles.length === 2);
+  const byPair = new Map();
+  for (const e of edges) {
+    const i = pieces.indexOf(e.tiles[0]), j = pieces.indexOf(e.tiles[1]);
+    const pk = (i < j ? i + '-' + j : j + '-' + i);
+    let s = byPair.get(pk);
+    if (!s) byPair.set(pk, s = { key: e.key, tiles: e.tiles, segs: [], live: true });
+    s.segs.push({ a: e.a, b: e.b, Z: e.Z });
+    if (e.key < s.key) s.key = e.key;       // named by its first edge, whichever
+  }
+  const out = [...byPair.values()];
+  for (const s of out) {
+    let x = 0, y = 0;
+    for (const g of s.segs) { x += (g.a[0] + g.b[0]) / 2; y += (g.a[1] + g.b[1]) / 2; }
+    s.mid = [x / s.segs.length, y / s.segs.length];
   }
   out.sort((p, q) => (q.mid[1] - p.mid[1]) || (p.mid[0] - q.mid[0]));
   return out;
@@ -3240,7 +3260,8 @@ function render() {
      first of the pair so the seam can be lit from its hover. */
   const seams = svgEl('g');
   for (const c of everyCut) {
-    const d = arcPath(c.a, c.b, c.Z);
+    // a seam of several edges is drawn as several strokes in the one path
+    const d = c.segs.map(g => arcPath(g.a, g.b, g.Z)).join('');
     c.grab = svgEl('path', { class: 'grab', d });
     c.line = svgEl('path', { class: 'cut', d });
     c.grab.addEventListener('click', () => toggleCut(c));
