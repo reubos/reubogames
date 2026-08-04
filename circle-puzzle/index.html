@@ -113,22 +113,32 @@ const BX = 0, BY = PITCH;
 const at = (a, b) => [a * AX + b * BX, a * AY + b * BY];
 const key = (a, b) => a + ',' + b;
 
-/* The board is seven shapes about one middle: the hexagon, three of its six
-   squares taken every other one, and three of its six triangles likewise, each
-   triangle set against a square that is in. Each of the seven owns a colour
-   and turns on its own circle; anything else a circle reaches is grey. */
+/* The board is a hexagon with the whole collar it wears: the six squares
+   across its edges and the six triangles at its corners. Each of the thirteen
+   owns a colour and turns on its own circle; anything else a circle reaches is
+   grey. Squares take the six full hues in turn round the ring and triangles
+   take the same six pale, set three apart, so no two neighbours are near. */
 const PLAY = [
   { sides: 6, deg: null, colour: 'white' },
-  { sides: 4, deg: 90, colour: 'red' },
-  { sides: 3, deg: 60, colour: 'orange' },
-  { sides: 4, deg: 330, colour: 'yellow' },
-  { sides: 3, deg: 300, colour: 'green' },
-  { sides: 4, deg: 210, colour: 'blue' },
-  { sides: 3, deg: 180, colour: 'purple' },
+  { sides: 4, deg: 30, colour: 'red' },
+  { sides: 4, deg: 90, colour: 'orange' },
+  { sides: 4, deg: 150, colour: 'yellow' },
+  { sides: 4, deg: 210, colour: 'green' },
+  { sides: 4, deg: 270, colour: 'blue' },
+  { sides: 4, deg: 330, colour: 'purple' },
+  { sides: 3, deg: 0, colour: 'paleGreen' },
+  { sides: 3, deg: 60, colour: 'paleBlue' },
+  { sides: 3, deg: 120, colour: 'palePurple' },
+  { sides: 3, deg: 180, colour: 'paleRed' },
+  { sides: 3, deg: 240, colour: 'paleOrange' },
+  { sides: 3, deg: 300, colour: 'paleYellow' },
 ];
 const COLOURS = {
   white: '#f5f5f7', red: '#e8483f', orange: '#f08c28', yellow: '#f2d024',
-  green: '#3fb95c', blue: '#3b82f6', purple: '#9b59f6', grey: '#6b7079',
+  green: '#3fb95c', blue: '#3b82f6', purple: '#9b59f6',
+  paleRed: '#ffb0a8', paleOrange: '#ffd49b', paleYellow: '#fbf0a2',
+  paleGreen: '#a6e7b9', paleBlue: '#a9c9f9', palePurple: '#d8bcfb',
+  grey: '#6b7079',
 };
 const NAME = { 6: 'hexagon', 4: 'square', 3: 'triangle' };
 // what the tiling repeats by about each kind of centre, which is what may turn
