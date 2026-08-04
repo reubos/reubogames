@@ -907,8 +907,10 @@ function buildBoard() {
        of it. */
     const mine = cutAt.get(key(...h.on[0]));
     const inner = inCollar.filter(p => p.word[mine] === '1');
-    turners.push({ hex: h, ring: 0, rings: 2, centre: h.centre, collar: inner });
-    turners.push({ hex: h, ring: 1, rings: 2, centre: h.centre, collar: inCollar });
+    const a = { hex: h, ring: 0, rings: 2, centre: h.centre, collar: inner };
+    const b = { hex: h, ring: 1, rings: 2, centre: h.centre, collar: inCollar };
+    a.whole = b;                            // what a click falls back to
+    turners.push(a, b);
   }
   for (const t of turners) {
     t.holds = new Set(t.collar);
@@ -1049,6 +1051,14 @@ const stuck = ring => bands.some(b => {
   const n = b.tiles.filter(t => ring.holds.has(t)).length;
   return n && n < b.tiles.length;
 });
+
+/* What a click on a ring's target really turns. A bandage across the cut
+   stops the inner disc but not the circle it sits in, and in that case
+   clicking the middle plainly means the circle — so the click falls through
+   to it rather than doing nothing. Nothing falls the other way: the outer
+   ring on its own is not a turn this puzzle offers. */
+const clicked = ring =>
+  (ring.whole && stuck(ring) && !stuck(ring.whole)) ? ring.whole : ring;
 
 /* ---- bandaging to taste ---------------------------------------------
 
@@ -1359,7 +1369,7 @@ function refresh() {
      would say the circle was locked when it is not. The cursor still tells
      the truth on whichever ring is under it. */
   for (const r of turners) {
-    const locked = stuck(r);
+    const locked = stuck(clicked(r));     // what the click would really turn
     r.hit.classList.toggle('stuck', locked);
     r.mark.style.display = locked && r.rings === 1 ? '' : 'none';
   }
@@ -1410,8 +1420,9 @@ let inverted = false;
 const clickDir = () => (inverted ? -1 : 1);
 
 // a turn, shown: made at once, then wound back a sixth and played forward
-function turn(ring, dir) {
+function turn(target, dir) {
   if (cutting) return;                    // the board is being cut, not played
+  const ring = clicked(target);
   if (stuck(ring)) return;                // a bandage lies across the ring
   clearPlan();                            // a turn by hand leaves the answer stale
   settle();
