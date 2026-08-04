@@ -221,8 +221,8 @@
     <label class="toggle"><input type="checkbox" id="layered">Second layer</label>
     <button type="button" id="cuts">Choose bandages</button>
     <button type="button" id="allcuts" style="display:none">Remove all bandaging</button>
-    <input type="text" id="bandcode" style="display:none" spellcheck="false"
-           title="This bandaging as a code — copy it to keep or share it, or paste one in and press Enter">
+    <input type="text" id="bandcode" spellcheck="false" placeholder="board code"
+           title="This board as a code — copy it to keep or share it, or paste one in and press Enter">
     <label class="toggle"><input type="checkbox" id="invert">Invert controls</label>
     <label class="toggle">Layout
       <select id="layout"></select>
@@ -916,7 +916,10 @@ function buildBoard() {
     t.acw = turnMap(t, -Math.PI / 3);
     t.goACW = goMap(t, Math.PI / 3);
     t.goCW = goMap(t, -Math.PI / 3);
-    t.colour = t.hex.parts[0].colour;
+    /* The colour a ring goes by is the one its circle owns, not the one
+       sitting on it: the board has none painted on yet when the rings are
+       built, and after a scramble the colour there is somebody else's. */
+    t.colour = colourAt(...t.hex.on[0]);
   }
 }
 
@@ -1166,38 +1169,49 @@ function cutBands() {
    seams being found by one walk over one geometry. So a code names the same
    bandaging on every visit, can be kept or handed to someone, and is how a
    board that beats the solver gets reported. */
+/* A board written down: its layout, a plus if it carries the second layer,
+   and which of its seams are glued — "seven+:4.17.30". The layer belongs in
+   it because a layered board has its cuts' seams as well as the tiling's, so
+   the same number means a different seam on each; without it a code copied
+   from one would quietly name the wrong seams on the other. A code with no
+   plus is a board of one layer, which is what every code written before this
+   was. */
 function bandCode() {
   const gone = cutsGone();
   const idx = [];
   cutList.forEach((c, i) => { if (gone.has(c.key)) idx.push(i); });
-  return puzzleName(puzzle) + ':' +
+  return puzzleName(puzzle) + (puzzle.layered ? '+' : '') + ':' +
     (idx.length ? idx.join('.') : 'none');
 }
 
 // the code read back: the board it names, wearing exactly those cuts
 function applyBandCode(text) {
-  const m = /^\s*([a-z]+)\s*:\s*(none|\d+(?:\.\d+)*)\s*$/.exec(text);
+  const m = /^\s*([a-z]+)\s*(\+?)\s*:\s*(none|\d+(?:\.\d+)*)\s*$/.exec(text);
   if (!m) return false;
   const want = PUZZLES[m[1]];
   if (!want) return false;
-  const list = m[2] === 'none' ? [] : m[2].split('.').map(Number);
+  const layers = m[2] === '+';
+  const list = m[3] === 'none' ? [] : m[3].split('.').map(Number);
   /* Which seams a number names depends on the board it is read against, and a
      layered board has its cuts' seams as well as the tiling's. So the board is
      set first and the numbers judged against it — and put back as they were if
      they name nothing, so a code that does not fit changes nothing. */
-  const was = puzzle, wasGone = new Set(cutsGone());
-  if (puzzle !== want) {
+  const was = puzzle, wasGone = new Set(cutsGone()), wasLayers = !!want.layered;
+  if (puzzle !== want || !!want.layered !== layers) {
+    want.layered = layers;
     document.getElementById('layout').value = m[1];
-    document.getElementById('layered').checked = !!want.layered;
+    document.getElementById('layered').checked = layers;
+    kit = null;
     setPuzzle(want);
   }
   if (list.some(i => i >= cutList.length)) {
-    if (puzzle !== was) {
-      document.getElementById('layout').value = puzzleName(was);
-      document.getElementById('layered').checked = !!was.layered;
-      setPuzzle(was);
-      puzzle.gone = wasGone;
-    }
+    want.layered = wasLayers;               // put back what the code disturbed
+    document.getElementById('layout').value = puzzleName(was);
+    document.getElementById('layered').checked = !!was.layered;
+    kit = null;
+    setPuzzle(was);
+    puzzle.gone = wasGone;
+    redraw();
     return false;
   }
   const gone = cutsGone();
@@ -3435,10 +3449,9 @@ function showSolveButton() {
   document.getElementById('scramble').disabled = cutting || !free;
   document.getElementById('cuts').textContent = cutting ? 'Done' : 'Choose bandages';
   document.getElementById('allcuts').style.display = cutting ? '' : 'none';
-  // the bandaging as a code, there to copy out or paste over while choosing
+  // the board as a code, there to copy out or paste over at any time
   const code = document.getElementById('bandcode');
-  code.style.display = cutting ? '' : 'none';
-  if (cutting && document.activeElement !== code) code.value = bandCode();
+  if (document.activeElement !== code) code.value = bandCode();
 }
 
 // everything the board shows, after anything that changes what it should show
