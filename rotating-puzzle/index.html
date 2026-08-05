@@ -112,20 +112,17 @@
   /* while the seams are being chosen the collars are not for turning */
   #board.cutting .hit { pointer-events: none; }
 
-  /* these only show which ring is under the pointer; which ring that is comes
-     from where the pointer stands, not from what shape it happens to be over */
+  /* transparent, not none: a hexagon has to be there to be clicked */
   .hit {
-    fill: none;
+    fill: transparent;
     stroke: none;
     stroke-linejoin: round;
-    pointer-events: none;
+    cursor: pointer;
   }
-  .hit.on { stroke: rgba(255, 255, 255, 0.75); }
+  .hit:hover { stroke: rgba(255, 255, 255, 0.75); }
   /* a collar a bandage lies across says so before it is clicked */
-  .hit.stuck.on { stroke: rgba(255, 110, 110, 0.9); }
-  #board { cursor: pointer; }
-  #board.locked { cursor: not-allowed; }
-  #board.cutting { cursor: default; }
+  .hit.stuck { cursor: not-allowed; }
+  .hit.stuck:hover { stroke: rgba(255, 110, 110, 0.9); }
 
   .controls { display: flex; flex-wrap: wrap; gap: 10px; margin: 16px 0 0; }
 
@@ -1063,43 +1060,6 @@ const stuck = ring => bands.some(b => {
    ring on its own is not a turn this puzzle offers. */
 const clicked = ring =>
   (ring.whole && stuck(ring) && !stuck(ring.whole)) ? ring.whole : ring;
-
-/* Which ring the pointer stands in, asked in three goes.
-
-   A hexagon always turns its own inner ring, as it always did. Failing that,
-   the band round a rim turns the whole circle, and where two bands lie over
-   each other the nearer middle takes it. Failing both — the ground between a
-   hexagon and its layer cut, which belonged to nobody before — it is whichever
-   collar's middle is nearest, so long as the pointer is inside that collar.
-
-   That last is what the collars needed: they overlap heavily, PITCH being
-   2.732 against a reach of 1.932, and laying their shapes one over another
-   handed a whole collar to whichever happened to sit on top. It cannot decide
-   the band as well, though. Nearest-middle leaves a collar only its own share
-   of the plane, which runs to 1.577 at the corners, so a band drawn at 1.70
-   would never be reached at all. */
-const HEX_R = 1;                            // the hexagon's own circumradius
-let litRing = null;
-function ringAt(p) {
-  const far = r => Math.hypot(p[0] - r.centre[0], p[1] - r.centre[1]);
-  const nearestOf = (want, keep) => {
-    let best = null, near = Infinity;
-    for (const r of turners) {
-      if (!want(r)) continue;
-      const d = far(r);
-      if (keep(r, d) && d < near) { near = d; best = r; }
-    }
-    return best;
-  };
-  const owns = r => !(r.rings > 1 && r.ring === 1);   // reached through its inner
-  const hex = nearestOf(owns, (r, d) => d < HEX_R);
-  if (hex) return clicked(hex);
-  const band = nearestOf(r => r.ring === 1 && r.rings > 1,
-    (r, d) => d >= LAYER_R && d < ARC_R);
-  if (band) return band;
-  const collar = nearestOf(owns, (r, d) => d < ARC_R);
-  return collar ? clicked(collar) : null;
-}
 
 /* ---- bandaging to taste ---------------------------------------------
 
@@ -3333,44 +3293,8 @@ function render() {
 
   root.append(fills, edges, bandLayer, marks, hits, seams);
   svg.replaceChildren(root);
-  litRing = null;                           // its target is gone with the old board
-  wirePointer(svg);
-}
-
-/* Read once, since the board is drawn again whenever the puzzle changes and
-   the listeners would otherwise pile up. They look the rings up as they fire,
-   so they always speak of the board that is there now. */
-let wired = false;
-function wirePointer(svg) {
-  if (wired) return;
-  wired = true;
-  const pointAt = ev => {
-    const box = svg.getBoundingClientRect();
-    const vb = svg.viewBox.baseVal;
-    return [vb.x + (ev.clientX - box.left) / box.width * vb.width,
-            -(vb.y + (ev.clientY - box.top) / box.height * vb.height)];
-  };
-  const light = r => {
-    if (litRing === r) return;
-    if (litRing) litRing.hit.classList.remove('on');
-    litRing = r;
-    if (litRing) litRing.hit.classList.add('on');
-    svg.classList.toggle('locked', !!r && stuck(r));
-  };
-  // while the seams are being chosen the collars are not for turning
-  const aimed = ev => (cutting ? null : ringAt(pointAt(ev)));
-  svg.addEventListener('mousemove', ev => light(aimed(ev)));
-  svg.addEventListener('mouseleave', () => light(null));
-  svg.addEventListener('click', ev => {
-    const r = aimed(ev);
-    if (r) turn(r, clickDir());
-  });
   // right-clicking is a move, so the menu never wants to come up over the board
-  svg.addEventListener('contextmenu', ev => {
-    ev.preventDefault();
-    const r = aimed(ev);
-    if (r) turn(r, -clickDir());
-  });
+  svg.addEventListener('contextmenu', e => e.preventDefault());
 }
 
 /* Taking a seam out, or putting it back.
