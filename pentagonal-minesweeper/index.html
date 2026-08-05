@@ -1,0 +1,819 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pentagonal Minesweeper</title>
+<style>
+  :root {
+    --bg: #1a3a1a;
+    --panel: #204324;
+    --panel-2: #1c3a20;
+    --line: #2f5c38;
+    --text: #d4e8d4;
+    --muted: #86a886;
+    --accent: #4ade80;
+    --gold: #facc15;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    background-color: var(--bg);
+    color: var(--text);
+    font-family: 'Segoe UI', sans-serif;
+    margin: 0;
+    padding: 24px 20px 60px;
+    min-height: 100vh;
+  }
+
+  .wrap { max-width: 1040px; margin: 0 auto; }
+
+  .backlink { display: inline-block; margin: 0 0 10px; color: var(--muted); font-size: 0.85rem; }
+  h1 { font-size: 2rem; color: #fff; margin: 0 0 6px; }
+  .sub { color: var(--muted); font-size: 0.95rem; margin: 0 0 24px; max-width: 70ch; line-height: 1.5; }
+
+  .layout { display: grid; grid-template-columns: 1fr 280px; gap: 24px; align-items: start; }
+  @media (max-width: 820px) { .layout { grid-template-columns: 1fr; } }
+
+  .panel {
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 16px;
+  }
+
+  .board-panel { padding: 10px; }
+  /* right-click flags, so the browser's own menu has to stay out of the way */
+  #board { width: 100%; display: block; touch-action: manipulation; cursor: pointer; border-radius: 6px; }
+
+  .side { display: flex; flex-direction: column; gap: 16px; }
+
+  .label {
+    font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.09em;
+    color: var(--muted); margin: 0 0 8px;
+  }
+
+  button {
+    font-family: inherit; font-size: 0.9rem;
+    background: var(--panel); color: var(--text);
+    border: 1px solid var(--line); border-radius: 7px;
+    padding: 9px 12px; cursor: pointer;
+    transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+  }
+  button:hover:not(:disabled) { background: #2a5530; border-color: var(--accent); color: #fff; }
+  button.primary { background: #2c6b3c; border-color: #3d8a51; color: #fff; font-weight: 600; font-size: 1rem; }
+  button.primary:hover { background: #35804a; }
+
+  .btn-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .btn-row .full { grid-column: 1 / -1; }
+
+  .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .stat { background: var(--panel); border: 1px solid var(--line); border-radius: 7px; padding: 8px 10px; }
+  .stat .v { font-size: 1.25rem; color: #fff; font-weight: 600; line-height: 1.2; font-variant-numeric: tabular-nums; }
+  .stat .k { font-size: 0.7rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+
+  .verdict {
+    margin-top: 12px; text-align: center; font-size: 0.9rem; font-weight: 600;
+    min-height: 1.2em; color: var(--muted);
+  }
+  .verdict.won { color: var(--accent); }
+  .verdict.lost { color: #f87171; }
+
+  input[type=range] { width: 100%; margin: 0; accent-color: var(--accent); }
+  .rowlab { display: flex; justify-content: space-between; align-items: baseline; }
+  .rowlab .val { font-size: 0.8rem; color: var(--text); font-variant-numeric: tabular-nums; }
+  .field + .field { margin-top: 14px; }
+
+  .check { display: flex; align-items: center; gap: 9px; font-size: 0.85rem; cursor: pointer; }
+  .check + .check { margin-top: 10px; }
+  .check input { accent-color: var(--accent); width: 15px; height: 15px; cursor: pointer; }
+
+  .note { font-size: 0.78rem; color: var(--muted); line-height: 1.55; margin: 10px 0 0; }
+  .note b { color: var(--text); font-weight: 600; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <a class="backlink" href="../index.html">&larr; back to reubo's website</a>
+  <h1>Pentagonal Minesweeper</h1>
+  <p class="sub">Minesweeper on the Cairo pentagonal tiling. Every cell is the same pentagon and every
+    cell has the same seven neighbours &mdash; five across an edge and two more that only meet it at a
+    corner &mdash; so the numbers run as high as seven.</p>
+
+  <div class="layout">
+
+    <div class="panel board-panel">
+      <canvas id="board"></canvas>
+    </div>
+
+    <div class="side">
+
+      <div class="panel">
+        <div class="stat-grid">
+          <div class="stat"><div class="v" id="statMines">10</div><div class="k">Mines left</div></div>
+          <div class="stat"><div class="v" id="statTime">0:00</div><div class="k">Time</div></div>
+        </div>
+        <div class="verdict" id="verdict"></div>
+      </div>
+
+      <div class="panel">
+        <div class="btn-row">
+          <button class="primary full" id="btnNew">New game</button>
+        </div>
+        <p class="note">Click to uncover. Right-click to plant a flag. Clicking a number that already
+          has its full quota of flags beside it uncovers everything else it touches.</p>
+        <p class="note">The first click is always safe, and always opens out.</p>
+      </div>
+
+      <div class="panel">
+        <p class="label">Board</p>
+        <div class="btn-row">
+          <button data-preset="8|8|10">8 &times; 8 &middot; 10</button>
+          <button data-preset="16|16|40">16 &times; 16 &middot; 40</button>
+          <button class="full" data-preset="30|16|99">30 &times; 16 &middot; 99</button>
+        </div>
+        <div class="field">
+          <div class="rowlab"><p class="label">Cells across</p><span class="val" id="valAcross"></span></div>
+          <input type="range" id="rngAcross" min="6" max="40" step="2" value="8">
+        </div>
+        <div class="field">
+          <div class="rowlab"><p class="label">Cells down</p><span class="val" id="valDown"></span></div>
+          <input type="range" id="rngDown" min="6" max="30" step="2" value="8">
+        </div>
+        <div class="field">
+          <div class="rowlab"><p class="label">Mines</p><span class="val" id="valMines"></span></div>
+          <input type="range" id="rngMines" min="1" max="55" value="10">
+        </div>
+      </div>
+
+      <div class="panel">
+        <p class="label">Display</p>
+        <label class="check"><input type="checkbox" id="cbCorners" checked> Corners count as touching</label>
+        <label class="check"><input type="checkbox" id="cbBlocks"> Outline the blocks of four</label>
+        <p class="note">Turn corners off and a cell keeps only its five edge neighbours, which is a
+          gentler game and a different one: numbers then run 1 to 5. Either way it starts afresh.</p>
+      </div>
+
+      <div class="panel">
+        <p class="label">The neighbourhood</p>
+        <p class="note">The Cairo pentagon has two right angles and three of 120&deg;. Four right
+          angles make a full turn, so four pentagons pinwheel about each right-angled corner &mdash;
+          that is the <b>block of four</b>, and blocks sit on a plain square grid.</p>
+        <p class="note">A cell has five edges and so five neighbours by edge. Each of its two
+          right-angled corners is shared with three others, and one of those three is reached only at
+          that point. Five and two: <b>seven</b>.</p>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+
+/* =====================================================================
+   1. THE TILING
+
+   The Cairo pentagonal tiling is the dual of the snub square tiling, so
+   its pentagon is what you get by joining the centres of the five faces
+   round a 3.3.4.3.4 vertex: two squares and three triangles. The two
+   square centres become right angles and the three triangle centres
+   120 degree ones, which fixes the shape exactly. With the four long
+   sides at length 1 the fifth is sqrt(3) - 1, and the corners can be
+   written down.
+
+   Four right angles make a full turn, so four pentagons meet at each
+   right-angled corner and no gap is left. Those four are a block, and
+   the blocks sit on a square lattice of pitch sqrt(6).
+   ===================================================================== */
+
+const S3 = Math.sqrt(3), S6 = Math.sqrt(6);
+const rot = (p, a) => [p[0] * Math.cos(a) - p[1] * Math.sin(a),
+                       p[0] * Math.sin(a) + p[1] * Math.cos(a)];
+
+/* One pentagon, written with its two right angles at A and B a distance
+   sqrt(3) apart along the x axis, then turned by 45 degrees so that B
+   lands on the diagonal of the block lattice rather than beside it.
+   Corner order: A, T3, T2, B, T1 — T3 and T2 are the ends of the short
+   side, T1 the far tip. */
+const BASE = [[0, 0], [0.5, -S3 / 2], [S3 - 0.5, -S3 / 2], [S3, 0], [S3 / 2, 0.5]];
+
+// CELL[k] is that pentagon turned by k quarter turns: cell k of a block.
+// k = 0 points to the block's up-right corner, and k counts round from there.
+const CELL = [];
+for (let k = 0; k < 4; k++) CELL.push(BASE.map(p => rot(p, Math.PI / 4 + k * Math.PI / 2)));
+
+/* The block's own outline, for drawing it. Corner A and the tip T1 are
+   interior to the block — T1 of cell k is T3 of cell k+1 — so the
+   boundary is the other three corners of each cell in turn: a 12-gon. */
+const BLOCK = [];
+for (let k = 0; k < 4; k++) BLOCK.push(CELL[k][1], CELL[k][2], CELL[k][3]);
+
+// Area centroid of a polygon, used to hang the numbers on.
+function centroid(pts) {
+  let a = 0, cx = 0, cy = 0;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    const cross = pts[j][0] * pts[i][1] - pts[i][0] * pts[j][1];
+    a += cross;
+    cx += (pts[j][0] + pts[i][0]) * cross;
+    cy += (pts[j][1] + pts[i][1]) * cross;
+  }
+  return [cx / (3 * a), cy / (3 * a)];
+}
+
+// How big a circle fits inside, centred there: the room a glyph has.
+function inradius(pts, c) {
+  let best = Infinity;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    const ex = pts[i][0] - pts[j][0], ey = pts[i][1] - pts[j][1];
+    const len = Math.hypot(ex, ey);
+    best = Math.min(best, Math.abs((c[0] - pts[j][0]) * ey - (c[1] - pts[j][1]) * ex) / len);
+  }
+  return best;
+}
+
+const MID = CELL.map(p => centroid(p));
+const INR = inradius(CELL[0], MID[0]);
+
+/* =====================================================================
+   2. THE BOARD
+
+   A cell is a block and a quarter. Blocks are held in plain rows and
+   columns, block (c, r) centred at (c, r) * sqrt(6), and a block is two
+   cells wide and two cells deep — so a board of W by H blocks is 2W
+   cells across and 2H down. Nothing wraps: the rim is a real rim, and
+   the pentagons that stick out past it are simply the edge of the board.
+   ===================================================================== */
+
+let W = 0, H = 0, n = 0;      // blocks across, blocks down, cells
+let deg = 7;                  // neighbours per cell: 7 with corners, 5 without
+let nb;                       // neighbour table, 7 wide, edge neighbours first
+
+const idx = (c, r, k) => (r * W + c) * 4 + k;
+const resolve = (c, r, k) => (c < 0 || c >= W || r < 0 || r >= H) ? -1 : idx(c, r, k);
+
+// A block offset turned by k quarter turns, to match the cell being turned.
+function rotOff(d, k) {
+  let x = d[0], y = d[1];
+  for (let t = 0; t < k; t++) { const nx = -y; y = x; x = nx; }
+  return [x, y];
+}
+
+/* The seven neighbours of cell k of a block, listed with the five edge
+   neighbours first. Two share the edges at corner A, which is the block's
+   own hub; two share the edges at corner B, the hub of the block diagonally
+   up-right; one lies across the short side, in the block directly right.
+   The last two touch at a corner only — the cell opposite across each hub.
+   Turning the picture by a quarter carries this to cell k+1, which is why
+   one list serves all four. */
+const NB_SPEC = [
+  [[0, 0], 1],   // edge at hub A
+  [[0, 0], 3],   // edge at hub A
+  [[1, 0], 1],   // edge at hub B
+  [[0, 1], 3],   // edge at hub B
+  [[1, 0], 2],   // edge, across the short side
+  [[0, 0], 2],   // corner only, opposite across hub A
+  [[1, 1], 2]    // corner only, opposite across hub B
+];
+
+function neighboursOf(c, r, k) {
+  return NB_SPEC.map(([d, dk]) => {
+    const o = rotOff(d, k);
+    return resolve(c + o[0], r + o[1], (dk + k) & 3);
+  });
+}
+
+function wire() {
+  nb = new Int32Array(n * 7);
+  for (let r = 0; r < H; r++)
+    for (let c = 0; c < W; c++)
+      for (let k = 0; k < 4; k++) {
+        const list = neighboursOf(c, r, k), o = idx(c, r, k) * 7;
+        for (let t = 0; t < 7; t++) nb[o + t] = list[t];
+      }
+}
+
+/* =====================================================================
+   3. THE GAME
+   ===================================================================== */
+
+const COVERED = 0, OPEN = 1, FLAG = 2;
+
+let mine, state, count;
+let mines = 10, opened = 0, flags = 0;
+let seeded = false, over = false, won = false, exploded = -1;
+let startTime = 0, endTime = 0;
+
+function newGame(cols, rows, m) {
+  W = cols; H = rows; n = W * H * 4;
+  mines = Math.max(1, Math.min(m, n - 1));
+  deg = document.getElementById('cbCorners').checked ? 7 : 5;
+
+  mine = new Uint8Array(n);
+  state = new Uint8Array(n);
+  count = new Uint8Array(n);
+  wire();
+
+  opened = 0; flags = 0;
+  seeded = false; over = false; won = false; exploded = -1;
+  startTime = 0; endTime = 0; hover = -1;
+
+  buildPaths();
+  paintStatus();
+}
+
+/* Mines are laid only once the first cell is asked for, and never on that
+   cell or anything touching it — so the first click always opens out into
+   a region rather than onto a bare number. If the board is so crowded that
+   there is no room for that, only the clicked cell itself is spared. */
+function seed(first) {
+  const banned = new Set([first]);
+  for (let t = 0; t < deg; t++) { const j = nb[first * 7 + t]; if (j >= 0) banned.add(j); }
+  let pool = [];
+  for (let j = 0; j < n; j++) if (!banned.has(j)) pool.push(j);
+  if (pool.length < mines) {
+    pool = [];
+    for (let j = 0; j < n; j++) if (j !== first) pool.push(j);
+  }
+  for (let m = 0; m < mines; m++) {
+    const p = m + Math.floor(Math.random() * (pool.length - m));
+    const tmp = pool[m]; pool[m] = pool[p]; pool[p] = tmp;
+    mine[pool[m]] = 1;
+  }
+  for (let j = 0; j < n; j++) {
+    let c = 0;
+    for (let t = 0; t < deg; t++) { const i = nb[j * 7 + t]; if (i >= 0 && mine[i]) c++; }
+    count[j] = c;
+  }
+  seeded = true;
+  startTime = performance.now();
+}
+
+function reveal(i) {
+  if (over || state[i] !== COVERED) return;
+  if (!seeded) seed(i);
+  if (mine[i]) { lose(i); return; }
+
+  const stack = [i];
+  while (stack.length) {
+    const j = stack.pop();
+    if (state[j] !== COVERED) continue;
+    state[j] = OPEN; opened++;
+    if (count[j] === 0)
+      for (let t = 0; t < deg; t++) {
+        const m = nb[j * 7 + t];
+        if (m >= 0 && state[m] === COVERED) stack.push(m);
+      }
+  }
+  if (opened === n - mines) win();
+}
+
+/* Clicking an open number with exactly its own number of flags round it
+   opens everything else it touches — the usual shortcut, and the usual
+   punishment if the flags are in the wrong places. */
+function chord(i) {
+  if (over || state[i] !== OPEN || count[i] === 0) return;
+  let f = 0;
+  for (let t = 0; t < deg; t++) { const j = nb[i * 7 + t]; if (j >= 0 && state[j] === FLAG) f++; }
+  if (f !== count[i]) return;
+  for (let t = 0; t < deg; t++) {
+    const j = nb[i * 7 + t];
+    if (j >= 0 && state[j] === COVERED) reveal(j);
+    if (over) return;
+  }
+}
+
+function flag(i) {
+  if (over || state[i] === OPEN) return;
+  if (state[i] === FLAG) { state[i] = COVERED; flags--; }
+  else { state[i] = FLAG; flags++; }
+}
+
+function lose(i) {
+  over = true; won = false; exploded = i;
+  endTime = performance.now();
+  for (let j = 0; j < n; j++) if (mine[j] && state[j] === COVERED) state[j] = OPEN;
+}
+
+function win() {
+  over = true; won = true;
+  endTime = performance.now();
+  for (let j = 0; j < n; j++) if (mine[j] && state[j] !== FLAG) { state[j] = FLAG; flags++; }
+}
+
+/* =====================================================================
+   4. DRAWING
+   ===================================================================== */
+
+const canvas = document.getElementById('board');
+const ctx = canvas.getContext('2d');
+
+let cellPath = [];        // one Path2D per cell, in board units
+let blockPath = null;     // every block outline in one path
+let mids = [];            // cell centroids, board units
+let bounds = null;
+let view = { s: 1, ox: 0, oy: 0 };
+let hover = -1;
+
+const COVER = '#35603d', COVER_HI = '#427a4c', DUG = '#1b3620';
+const LINE = '#16301b', RIM = '#4a7d55';
+const BOOM = '#b91c1c', MINED = '#7f1d1d';
+const NUMS = ['', '#60a5fa', '#4ade80', '#f87171', '#c084fc', '#fbbf24', '#22d3ee', '#f9a8d4'];
+
+const MAX_SCALE = 34;     // board units to CSS pixels, so a small board stays sane
+
+function buildPaths() {
+  cellPath = new Array(n);
+  blockPath = new Path2D();
+  mids = new Array(n);
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+
+  for (let r = 0; r < H; r++)
+    for (let c = 0; c < W; c++) {
+      const bx = c * S6, by = r * S6;
+
+      for (let k = 0; k < 4; k++) {
+        const p = new Path2D(), s = CELL[k];
+        p.moveTo(bx + s[0][0], by + s[0][1]);
+        for (let m = 1; m < 5; m++) p.lineTo(bx + s[m][0], by + s[m][1]);
+        p.closePath();
+        const i = idx(c, r, k);
+        cellPath[i] = p;
+        mids[i] = [bx + MID[k][0], by + MID[k][1]];
+      }
+
+      blockPath.moveTo(bx + BLOCK[0][0], by + BLOCK[0][1]);
+      for (let m = 1; m < BLOCK.length; m++) blockPath.lineTo(bx + BLOCK[m][0], by + BLOCK[m][1]);
+      blockPath.closePath();
+
+      for (const q of BLOCK) {
+        x0 = Math.min(x0, bx + q[0]); x1 = Math.max(x1, bx + q[0]);
+        y0 = Math.min(y0, by + q[1]); y1 = Math.max(y1, by + q[1]);
+      }
+    }
+
+  bounds = { x0, y0, w: x1 - x0, h: y1 - y0 };
+  layout();
+}
+
+// The canvas takes the panel's width and whatever height the board needs.
+function layout() {
+  if (!bounds) return;
+  const cssW = canvas.parentElement.clientWidth - 20;
+  const pad = 4;
+  const s = Math.min((cssW - pad * 2) / bounds.w, MAX_SCALE);
+  const cssH = bounds.h * s + pad * 2;
+
+  const dpr = window.devicePixelRatio || 1;
+  canvas.style.width = cssW + 'px';
+  canvas.style.height = cssH + 'px';
+  canvas.width = Math.round(cssW * dpr);
+  canvas.height = Math.round(cssH * dpr);
+
+  view = {
+    s: s * dpr,
+    ox: ((cssW - bounds.w * s) / 2 - bounds.x0 * s) * dpr,
+    oy: (pad - bounds.y0 * s) * dpr
+  };
+  draw();
+}
+
+// A mine: a disc with four spikes, drawn in screen pixels.
+function drawMine(x, y, rad) {
+  ctx.fillStyle = '#0d1a0f';
+  ctx.strokeStyle = '#0d1a0f';
+  ctx.lineWidth = Math.max(1, rad * 0.26);
+  ctx.beginPath();
+  for (let t = 0; t < 4; t++) {
+    const a = t * Math.PI / 4;
+    ctx.moveTo(x - Math.cos(a) * rad * 1.5, y - Math.sin(a) * rad * 1.5);
+    ctx.lineTo(x + Math.cos(a) * rad * 1.5, y + Math.sin(a) * rad * 1.5);
+  }
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(x, y, rad, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#516b55';
+  ctx.beginPath();
+  ctx.arc(x - rad * 0.33, y - rad * 0.33, rad * 0.26, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+// A flag: a pole on a foot with a pennant.
+function drawFlag(x, y, rad) {
+  ctx.strokeStyle = '#e2eee2';
+  ctx.lineWidth = Math.max(1, rad * 0.2);
+  ctx.beginPath();
+  ctx.moveTo(x + rad * 0.25, y - rad);
+  ctx.lineTo(x + rad * 0.25, y + rad * 0.7);
+  ctx.moveTo(x - rad * 0.5, y + rad * 0.85);
+  ctx.lineTo(x + rad * 0.9, y + rad * 0.85);
+  ctx.stroke();
+  ctx.fillStyle = '#ef4444';
+  ctx.beginPath();
+  ctx.moveTo(x + rad * 0.25, y - rad);
+  ctx.lineTo(x - rad * 0.85, y - rad * 0.42);
+  ctx.lineTo(x + rad * 0.25, y + rad * 0.15);
+  ctx.closePath();
+  ctx.fill();
+}
+
+// A cross, for a flag that turned out to be planted on nothing.
+function drawCross(x, y, rad) {
+  ctx.strokeStyle = '#fca5a5';
+  ctx.lineWidth = Math.max(1, rad * 0.22);
+  ctx.beginPath();
+  ctx.moveTo(x - rad * 0.8, y - rad * 0.8); ctx.lineTo(x + rad * 0.8, y + rad * 0.8);
+  ctx.moveTo(x + rad * 0.8, y - rad * 0.8); ctx.lineTo(x - rad * 0.8, y + rad * 0.8);
+  ctx.stroke();
+}
+
+function draw() {
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  // the tiling first, one cell at a time, in board units
+  ctx.setTransform(view.s, 0, 0, view.s, view.ox, view.oy);
+  ctx.lineJoin = 'round';
+  ctx.lineWidth = 0.07;
+  for (let i = 0; i < n; i++) {
+    const open = state[i] === OPEN;
+    if (open && mine[i]) ctx.fillStyle = i === exploded ? BOOM : MINED;
+    else if (open) ctx.fillStyle = DUG;
+    else ctx.fillStyle = i === hover && !over ? COVER_HI : COVER;
+    ctx.fill(cellPath[i]);
+    ctx.strokeStyle = open ? LINE : RIM;
+    ctx.stroke(cellPath[i]);
+  }
+
+  if (document.getElementById('cbBlocks').checked) {
+    ctx.strokeStyle = 'rgba(250, 204, 21, 0.38)';
+    ctx.lineWidth = 0.11;
+    ctx.stroke(blockPath);
+  }
+
+  // then the glyphs, in screen pixels, so the type stays crisp
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  const rad = INR * view.s * 0.55;
+  ctx.font = '600 ' + (INR * view.s * 1.15).toFixed(1) + 'px "Segoe UI", sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+
+  for (let i = 0; i < n; i++) {
+    const x = mids[i][0] * view.s + view.ox, y = mids[i][1] * view.s + view.oy;
+    if (state[i] === FLAG) {
+      drawFlag(x, y, rad);
+      if (over && !mine[i]) drawCross(x, y, rad * 1.3);
+    } else if (state[i] === OPEN) {
+      if (mine[i]) drawMine(x, y, rad * 0.62);
+      else if (count[i]) { ctx.fillStyle = NUMS[count[i]]; ctx.fillText(count[i], x, y); }
+    }
+  }
+}
+
+/* =====================================================================
+   5. POINTING AT A CELL
+
+   Blocks are on a square grid, and no cell reaches more than one block
+   away from its own hub, so the nine blocks around the nearest one are
+   enough to look through.
+   ===================================================================== */
+
+function pointInPoly(pts, bx, by, x, y) {
+  let inside = false;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    const xi = bx + pts[i][0], yi = by + pts[i][1];
+    const xj = bx + pts[j][0], yj = by + pts[j][1];
+    if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+function cellAt(clientX, clientY) {
+  const rect = canvas.getBoundingClientRect();
+  const x = ((clientX - rect.left) * canvas.width / rect.width - view.ox) / view.s;
+  const y = ((clientY - rect.top) * canvas.height / rect.height - view.oy) / view.s;
+
+  const c0 = Math.round(x / S6), r0 = Math.round(y / S6);
+  for (let dr = -1; dr <= 1; dr++)
+    for (let dc = -1; dc <= 1; dc++) {
+      const c = c0 + dc, r = r0 + dr;
+      if (c < 0 || c >= W || r < 0 || r >= H) continue;
+      for (let k = 0; k < 4; k++)
+        if (pointInPoly(CELL[k], c * S6, r * S6, x, y)) return idx(c, r, k);
+    }
+  return -1;
+}
+
+/* =====================================================================
+   6. CONTROLS
+   ===================================================================== */
+
+const el = id => document.getElementById(id);
+
+function fmtTime(ms) {
+  const t = Math.floor(ms / 1000);
+  return Math.floor(t / 60) + ':' + String(t % 60).padStart(2, '0');
+}
+
+function paintStatus() {
+  el('statMines').textContent = mines - flags;
+  const ms = !seeded ? 0 : (over ? endTime : performance.now()) - startTime;
+  el('statTime').textContent = fmtTime(ms);
+  const v = el('verdict');
+  v.className = 'verdict' + (over ? (won ? ' won' : ' lost') : '');
+  v.textContent = over ? (won ? 'Swept — ' + fmtTime(endTime - startTime) : 'Boom.') : '';
+}
+
+// The clock is the only thing that moves on its own, so the loop only redraws
+// the panel; the board is redrawn when something is actually done to it.
+(function tick() {
+  requestAnimationFrame(tick);
+  if (seeded && !over) paintStatus();
+})();
+
+canvas.addEventListener('contextmenu', e => e.preventDefault());
+
+// A cell is uncovered by clicking it, or by clicking an open number that has
+// its flags in place; the right button plants a flag instead.
+function dig(i, chording) {
+  if (i < 0) return;
+  if (chording || state[i] === OPEN) chord(i); else reveal(i);
+  paintStatus();
+  draw();
+}
+
+// Touch is handled below, on its own terms, so it is passed over here.
+canvas.addEventListener('pointerdown', e => {
+  if (e.pointerType === 'touch') return;
+  const i = cellAt(e.clientX, e.clientY);
+  if (i < 0) return;
+  if (e.button === 2) { flag(i); paintStatus(); draw(); }
+  else dig(i, e.button === 1);
+});
+
+canvas.addEventListener('pointermove', e => {
+  const i = cellAt(e.clientX, e.clientY);
+  if (i === hover) return;
+  hover = i;
+  draw();
+});
+canvas.addEventListener('pointerleave', () => { if (hover >= 0) { hover = -1; draw(); } });
+
+/* A touchscreen has no right button, so a long press plants the flag instead.
+   That means a tap cannot be acted on when it lands — it might yet become a
+   press — so the digging waits for the finger to lift, and a finger that
+   wanders is taken to be the page being scrolled and does nothing at all. */
+let holdTimer = 0, holdCell = -1;
+canvas.addEventListener('touchstart', e => {
+  const t = e.touches[0];
+  holdCell = cellAt(t.clientX, t.clientY);
+  if (holdCell < 0) return;
+  holdTimer = setTimeout(() => {
+    holdTimer = 0;
+    flag(holdCell);
+    holdCell = -1;
+    paintStatus();
+    draw();
+  }, 450);
+}, { passive: true });
+canvas.addEventListener('touchend', () => {
+  if (holdTimer) { clearTimeout(holdTimer); holdTimer = 0; dig(holdCell, false); }
+  holdCell = -1;
+});
+canvas.addEventListener('touchmove', () => {
+  if (holdTimer) clearTimeout(holdTimer);
+  holdTimer = 0; holdCell = -1;
+}, { passive: true });
+
+// --- the size controls ---
+const rngAcross = el('rngAcross'), rngDown = el('rngDown'), rngMines = el('rngMines');
+
+function cellCount() { return (+rngAcross.value / 2) * (+rngDown.value / 2) * 4; }
+
+function paintSizeLabels() {
+  const total = cellCount();
+  rngMines.max = Math.max(1, total - 9);
+  if (+rngMines.value > +rngMines.max) rngMines.value = rngMines.max;
+  el('valAcross').textContent = rngAcross.value;
+  el('valDown').textContent = rngDown.value;
+  el('valMines').textContent = rngMines.value + ' of ' + total +
+    ' (' + Math.round(rngMines.value / total * 100) + '%)';
+}
+
+function startFromControls() {
+  newGame(+rngAcross.value / 2, +rngDown.value / 2, +rngMines.value);
+  draw();
+}
+
+for (const r of [rngAcross, rngDown, rngMines]) r.oninput = paintSizeLabels;
+rngAcross.onchange = rngDown.onchange = rngMines.onchange = startFromControls;
+
+for (const b of document.querySelectorAll('[data-preset]'))
+  b.onclick = () => {
+    const [a, d, m] = b.dataset.preset.split('|');
+    rngAcross.value = a; rngDown.value = d;
+    paintSizeLabels();
+    rngMines.value = m;
+    paintSizeLabels();
+    startFromControls();
+  };
+
+el('btnNew').onclick = startFromControls;
+el('cbCorners').onchange = startFromControls;
+el('cbBlocks').onchange = draw;
+
+/* The canvas follows its panel rather than the window, since the panel also
+   changes width when the sidebar drops below it. Only a width change is acted
+   on: laying out sets the canvas height, which would otherwise call us back. */
+let lastPanelWidth = 0;
+new ResizeObserver(() => {
+  const w = canvas.parentElement.clientWidth;
+  if (w === lastPanelWidth) return;
+  lastPanelWidth = w;
+  layout();
+}).observe(canvas.parentElement);
+
+/* =====================================================================
+   7. SELF-CHECK
+
+   Both the shape and the neighbour rule are written down rather than
+   measured, so both are checked against each other. The tiling is sound
+   if the angles round every interior corner come to a full turn; the
+   neighbour list is right if two cells are called neighbours exactly
+   when their pentagons share a corner, and edge neighbours exactly when
+   they share two. Reported to the console, and only there.
+   ===================================================================== */
+
+function verify() {
+  const wasW = W, wasH = H, wasN = n;
+  W = 5; H = 5; n = W * H * 4;
+
+  const key = p => Math.round(p[0] * 1e4) + ',' + Math.round(p[1] * 1e4);
+  const at = new Map();          // corner -> the cells with a corner there
+  const angleAt = new Map();     // corner -> the angles they contribute
+  for (let r = 0; r < H; r++)
+    for (let c = 0; c < W; c++)
+      for (let k = 0; k < 4; k++) {
+        const bx = c * S6, by = r * S6, s = CELL[k], i = idx(c, r, k);
+        for (let m = 0; m < 5; m++) {
+          const p = [bx + s[m][0], by + s[m][1]];
+          const u = s[(m + 4) % 5], v = s[(m + 1) % 5];
+          const a1 = Math.atan2(u[1] - s[m][1], u[0] - s[m][0]);
+          const a2 = Math.atan2(v[1] - s[m][1], v[0] - s[m][0]);
+          let ang = Math.abs(a1 - a2); if (ang > Math.PI) ang = 2 * Math.PI - ang;
+          const q = key(p);
+          let w = at.get(q); if (!w) at.set(q, w = []);
+          w.push(i);
+          angleAt.set(q, (angleAt.get(q) || 0) + ang);
+        }
+      }
+
+  // corners well inside the board: their angles must come to a full turn
+  const lo = S6 * 1.6, hi = S6 * (W - 1) - S6 * 0.6;
+  let corners = 0, gaps = 0;
+  for (const [q, ang] of angleAt) {
+    const [x, y] = q.split(',').map(v => v / 1e4);
+    if (x < lo || x > hi || y < lo || y > hi) continue;
+    corners++;
+    if (Math.abs(ang - 2 * Math.PI) > 1e-6) gaps++;
+  }
+
+  // adjacency by shared corners, against the list neighboursOf claims
+  const share = Array.from({ length: n }, () => new Map());
+  for (const w of at.values())
+    for (const x of w) for (const y of w) if (x !== y) share[x].set(y, (share[x].get(y) || 0) + 1);
+
+  let checked = 0, wrong = 0;
+  for (let r = 1; r < H - 1; r++)
+    for (let c = 1; c < W - 1; c++)
+      for (let k = 0; k < 4; k++) {
+        const i = idx(c, r, k);
+        if (share[i].size !== 7) continue;               // still on the rim
+        checked++;
+        const list = neighboursOf(c, r, k);
+        if (list.length !== 7 || new Set(list).size !== 7) { wrong++; continue; }
+        // first five must share two corners (an edge), the last two just one
+        for (let t = 0; t < 7; t++) {
+          const want = t < 5 ? 2 : 1;
+          if (share[i].get(list[t]) !== want) { wrong++; break; }
+        }
+      }
+
+  W = wasW; H = wasH; n = wasN;
+  console.log(`cairo tiling: ${corners} interior corners, ${gaps} did not close to a full turn`);
+  console.log(`cairo adjacency: ${checked} interior cells checked, ${wrong} disagreed with the geometry`);
+}
+
+/* =====================================================================
+   8. GO
+   ===================================================================== */
+
+paintSizeLabels();
+startFromControls();
+verify();
+</script>
+</body>
+</html>
