@@ -618,11 +618,50 @@ function alongRuns(e, i) {
 const boss = new Map(faces.map(f => [f, f]));
 const find = f => (boss.get(f) === f ? f : (boss.set(f, find(boss.get(f))), boss.get(f)));
 const join = (a, b) => { a = find(a); b = find(b); if (a !== b) boss.set(a, b); };
+/* Which tile a point stands in, for looking across a straight side. */
+const inTile = (t, p) => {
+  let pos = 0, neg = 0;
+  t.poly.forEach((v, i) => {
+    const w = t.poly[(i + 1) % t.poly.length];
+    const side = (w[0] - v[0]) * (p[1] - v[1]) - (w[1] - v[1]) * (p[0] - v[0]);
+    if (side > 1e-9) pos++; else if (side < -1e-9) neg++;
+  });
+  return !(pos && neg);
+};
+const holdSame = (a, b) => cutters.every((c, i) => !isTurner[i] || a.word[i] === b.word[i]);
+const faceAt = p => {
+  const t = tiles.find(t2 => inTile(t2, p));
+  if (!t) return null;
+  const kin = facesAt.get(t.sides + ':' + spot(t.centre) + ':' + wordAt(p));
+  if (!kin) return null;
+  let best = kin[0], bd = Infinity;
+  for (const g of kin) for (const q of corners(g.loop)) {
+    const d = Math.hypot(q[0] - p[0], q[1] - p[1]);
+    if (d < bd) { bd = d; best = g; }
+  }
+  return best;
+};
+
 for (const f of faces) {
   f.show = [];
   for (const e of f.loop) {
     const i = onCutter(e);
-    if (i < 0) { f.show.push(e); continue; }            // a side of the tile, always a cut
+    if (i < 0) {
+      /* A straight side is where two tiles meet, and no circle runs along it,
+         so both sides lie the same way round every turning circle: every turn
+         takes the pair together and nothing can part them. They are the one
+         piece, wearing the two colours. */
+      const mid = [(e.from[0] + e.to[0]) / 2, (e.from[1] + e.to[1]) / 2];
+      const dx = e.to[0] - e.from[0], dy = e.to[1] - e.from[1];
+      const len = Math.hypot(dx, dy);
+      if (len > 1e-6) for (const way of [1, -1]) {
+        const n = [mid[0] + way * 1e-4 * (-dy / len), mid[1] + way * 1e-4 * (dx / len)];
+        if (inTile(f.tile, n)) continue;
+        const o = faceAt(n);
+        if (o && o !== f && holdSame(f, o)) join(f, o);
+      }
+      continue;
+    }
     for (const { bit, mid } of alongRuns(e, i)) {
       if (cutHere(i, mid)) { f.show.push(bit); continue; }
       // nothing cut here, so the face across the way is the same piece
@@ -652,11 +691,40 @@ for (const bits of grouped.values()) {
   board.push({
     word: bits[0].word,
     sides: bits[0].tile.sides,
-    parts: bits.map(b => ({ loop: b.loop, show: b.show })),
-    home: bits[0].tile.colour,
-    colour: bits[0].tile.colour,
+    parts: bits.map(b => ({ loop: b.loop, show: b.show, colour: b.tile.colour })),
     centre: markOf(bits.map(b => b.loop)),
   });
+}
+
+/* Every vertex of the tiling has exactly one triangle at it, and the triangle's
+   colour bulges round that vertex into the square and hexagon ground beyond —
+   so the small pieces gathered at a vertex carry two colours instead of one and
+   can be told apart. The bulge is half the longest of those pieces across, so
+   neither colour on one is too small to read. */
+const FLARE = 0.183;
+{
+  const lobes = [];
+  for (const t of tiles) if (t.sides === 3 && t.plays)
+    for (const v of t.poly) lobes.push({ c: v, colour: t.colour });
+  for (const p of board) {
+    p.patches = [];
+    for (const q of p.parts) {
+      let bits = [{ loop: q.loop, colour: q.colour }];
+      for (const lobe of lobes) {
+        const next = [];
+        for (const b of bits) {
+          if (b.colour !== q.colour) { next.push(b); continue; }
+          const cut = sliceLoop(b.loop, lobe.c, FLARE);
+          for (const l of cut.in) next.push({ loop: l, colour: lobe.colour });
+          for (const l of cut.out) next.push({ loop: l, colour: q.colour });
+        }
+        bits = next;
+      }
+      for (const b of bits)
+        if (Math.abs(loopArea(b.loop)) > 1e-7) p.patches.push(b);
+    }
+  }
+  board.forEach((p, i) => { p.id = i; });
 }
 
 /* Which pieces each circle holds, and where a turn sends them. Read off by
@@ -726,18 +794,22 @@ function render() {
   const svg = document.getElementById('board');
   root = svgEl('g', { transform: 'scale(1,-1)' });
 
+  /* A piece is drawn once, where it belongs, and goes about the board on a
+     transform. Its colours are painted in and never touched again — they are
+     the piece's own, and they travel with it. Fill and outline are held in
+     two groups so every outline still lies over every fill. */
   const fills = svgEl('g');
-  for (const p of board)
-    for (const part of p.parts) {
-      part.el = svgEl('path', { class: 'part', d: pathOf(part.loop) });
-      fills.appendChild(part.el);
-    }
-
-  // the circles, drawn where they cut and only if wanted
   ringLayer = svgEl('g', { 'stroke-width': '0.009' });
   for (const p of board) {
-    p.el = svgEl('path', { class: 'cell', 'stroke-width': '0.009', d: p.parts.map(q => arcsOf(q.show)).join('') });
-    ringLayer.appendChild(p.el);
+    p.gFill = svgEl('g');
+    for (const part of p.patches)
+      p.gFill.appendChild(svgEl('path',
+        { class: 'part', d: pathOf(part.loop), fill: part.colour, stroke: part.colour }));
+    fills.appendChild(p.gFill);
+    p.gLine = svgEl('g');
+    p.gLine.appendChild(svgEl('path',
+      { class: 'cell', 'stroke-width': '0.009', d: p.parts.map(q => arcsOf(q.show)).join('') }));
+    ringLayer.appendChild(p.gLine);
   }
 
   const hits = svgEl('g', { 'stroke-width': '0.03' });
@@ -794,23 +866,40 @@ function render() {
   });
 }
 
-const paint = () => {
-  for (const p of board)
-    for (const part of p.parts) {
-      part.el.setAttribute('fill', p.colour);
-      part.el.setAttribute('stroke', p.colour);
-    }
-};
-
 /* ---- turning ---------------------------------------------------------- */
 
-/* A turn is read off before any of it is written back: every piece takes the
-   colours the piece it came from was wearing. */
+/* Where each piece has got to, as the turn that carried it there. */
+const ID = [1, 0, 0, 1, 0, 0];
+const after = (m, n) => [                   // n first, then m
+  m[0] * n[0] + m[2] * n[1], m[1] * n[0] + m[3] * n[1],
+  m[0] * n[2] + m[2] * n[3], m[1] * n[2] + m[3] * n[3],
+  m[0] * n[4] + m[2] * n[5] + m[4], m[1] * n[4] + m[3] * n[5] + m[5],
+];
+const spun = (ang, cx, cy) => {
+  const co = Math.cos(ang), si = Math.sin(ang);
+  return [co, si, -si, co, cx - co * cx + si * cy, cy - si * cx - co * cy];
+};
+const asText = m => 'matrix(' + m.map(v => v.toFixed(6)).join(',') + ')';
+const put = (p, m) => {
+  p.gFill.setAttribute('transform', asText(m));
+  p.gLine.setAttribute('transform', asText(m));
+};
+const place = () => { for (const p of board) put(p, p.m); };
+
+// which piece is standing in each place, and how it is turned
+const standing = new Map();
+
+/* A turn is read off before any of it is written back: each place takes the
+   piece that stood in the place the turn brings to it. */
 function move(c, dir) {
+  const step = spun(dir > 0 ? STEP_OF(c) : -STEP_OF(c), c.c[0], c.c[1]);
   const map = dir > 0 ? c.acw : c.cw;
   const taken = [];
-  for (const [from, to] of map) taken.push([to, from.colour]);
-  for (const [to, colour] of taken) to.colour = colour;
+  for (const [from, to] of map) taken.push([to, standing.get(from)]);
+  for (const [to, piece] of taken) {
+    standing.set(to, piece);
+    piece.m = after(step, piece.m);
+  }
 }
 
 const SPIN_MS = 190;
@@ -819,25 +908,28 @@ let spinning = null;
 const settle = () => { if (spinning) spinning(); };
 
 function spin(c, from, ms = SPIN_MS) {
-  const els = c.holds.flatMap(p => [p.el, ...p.parts.map(q => q.el)]).concat(c.hit);
-  const place = a => {
-    const tr = `rotate(${a.toFixed(3)} ${c.c[0].toFixed(4)} ${c.c[1].toFixed(4)})`;
-    for (const el of els) el.setAttribute('transform', tr);
+  const moved = c.holds.map(slot => standing.get(slot));
+  const swing = a => {
+    const extra = spun(a * Math.PI / 180, c.c[0], c.c[1]);
+    for (const p of moved) put(p, after(extra, p.m));
+    c.hit.setAttribute('transform',
+      `rotate(${a.toFixed(3)} ${c.c[0].toFixed(4)} ${c.c[1].toFixed(4)})`);
   };
   let raf = 0, backstop = 0;
   const stop = () => {
     cancelAnimationFrame(raf);
     clearTimeout(backstop);
-    for (const el of els) el.removeAttribute('transform');
+    for (const p of moved) put(p, p.m);
+    c.hit.removeAttribute('transform');
     spinning = null;
   };
   const t0 = performance.now();
   const step = now => {
     const u = Math.min(1, Math.max(0, (now - t0) / ms));
-    if (u < 1) { place(from * (1 - ease(u))); raf = requestAnimationFrame(step); }
+    if (u < 1) { swing(from * (1 - ease(u))); raf = requestAnimationFrame(step); }
     else stop();
   };
-  place(from);
+  swing(from);
   spinning = stop;
   raf = requestAnimationFrame(step);
   backstop = setTimeout(stop, ms + 300);
@@ -849,13 +941,13 @@ const clickDir = () => (inverted ? -1 : 1);
 function turn(c, dir) {
   settle();
   move(c, dir);
-  paint();
+  place();
   spin(c, -dir * c.deg);
 }
 
 function reset() {
-  for (const p of board) p.colour = p.home;
-  paint();
+  for (const p of board) { standing.set(p, p); p.m = ID; }
+  place();
 }
 
 const SCRAMBLE = 400;
@@ -863,7 +955,7 @@ function scramble() {
   settle();
   for (let i = 0; i < SCRAMBLE; i++)
     move(turners[Math.floor(Math.random() * turners.length)], Math.random() < 0.5 ? 1 : -1);
-  paint();
+  place();
 }
 
 /* ---- the page --------------------------------------------------------- */
