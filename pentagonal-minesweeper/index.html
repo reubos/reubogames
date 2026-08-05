@@ -124,7 +124,12 @@
         </div>
         <p class="note">Click to uncover. Right-click to plant a flag. Clicking a number that already
           has its full quota of flags beside it uncovers everything else it touches.</p>
-        <p class="note">The first click is always safe, and always opens out.</p>
+        <label class="check" style="margin-top: 12px">
+          <input type="checkbox" id="cbFair" checked> Never need to guess</label>
+        <p class="note" id="noteGiven"></p>
+        <p class="note">With that on, the board opens with enough cells already showing that counting,
+          subsets and the mine total settle every last square. Turn it off for the plain game, where
+          mines fall where they fall and the end can come down to a coin.</p>
       </div>
 
       <div class="panel">
@@ -302,7 +307,7 @@ function wire() {
 const COVERED = 0, OPEN = 1, FLAG = 2;
 
 let mine, state, count;
-let mines = 10, opened = 0, flags = 0;
+let mines = 10, opened = 0, flags = 0, given = 0;
 let seeded = false, over = false, won = false, exploded = -1;
 let startTime = 0, endTime = 0;
 
@@ -316,27 +321,30 @@ function newGame(cols, rows, m) {
   count = new Uint8Array(n);
   wire();
 
-  opened = 0; flags = 0;
+  opened = 0; flags = 0; given = 0;
   seeded = false; over = false; won = false; exploded = -1;
   startTime = 0; endTime = 0; hover = -1;
 
   buildPaths();
+
+  /* A board that needs no guessing has to be worked out before it is shown,
+     since what it starts with showing is part of the answer. */
+  if (document.getElementById('cbFair').checked) {
+    seeded = true;
+    for (const g of buildPuzzle()) reveal(g);
+    given = opened;
+  }
+
   paintStatus();
 }
 
-/* Mines are laid only once the first cell is asked for, and never on that
-   cell or anything touching it — so the first click always opens out into
-   a region rather than onto a bare number. If the board is so crowded that
-   there is no room for that, only the clicked cell itself is spared. */
-function seed(first) {
-  const banned = new Set([first]);
-  for (let t = 0; t < deg; t++) { const j = nb[first * 7 + t]; if (j >= 0) banned.add(j); }
+// Mines scattered at random over whatever is allowed to hold them, and the
+// numbers read off afterwards.
+function layMines(banned) {
+  mine.fill(0);
   let pool = [];
   for (let j = 0; j < n; j++) if (!banned.has(j)) pool.push(j);
-  if (pool.length < mines) {
-    pool = [];
-    for (let j = 0; j < n; j++) if (j !== first) pool.push(j);
-  }
+  if (pool.length < mines) { pool = []; for (let j = 0; j < n; j++) pool.push(j); }
   for (let m = 0; m < mines; m++) {
     const p = m + Math.floor(Math.random() * (pool.length - m));
     const tmp = pool[m]; pool[m] = pool[p]; pool[p] = tmp;
@@ -347,9 +355,21 @@ function seed(first) {
     for (let t = 0; t < deg; t++) { const i = nb[j * 7 + t]; if (i >= 0 && mine[i]) c++; }
     count[j] = c;
   }
-  seeded = true;
-  startTime = performance.now();
 }
+
+/* In the plain game mines are laid only once the first cell is asked for, and
+   never on that cell or anything touching it — so the first click always opens
+   out into a region rather than onto a bare number. If the board is so crowded
+   that there is no room for that, only the clicked cell itself is spared. */
+function seed(first) {
+  const banned = new Set([first]);
+  for (let t = 0; t < deg; t++) { const j = nb[first * 7 + t]; if (j >= 0) banned.add(j); }
+  layMines(banned);
+  seeded = true;
+}
+
+// The clock does not start until the player does something.
+function startClock() { if (!startTime) startTime = performance.now(); }
 
 function reveal(i) {
   if (over || state[i] !== COVERED) return;
@@ -401,6 +421,205 @@ function win() {
   over = true; won = true;
   endTime = performance.now();
   for (let j = 0; j < n; j++) if (mine[j] && state[j] !== FLAG) { state[j] = FLAG; flags++; }
+}
+
+/* =====================================================================
+   3a. NO GUESSING
+
+   A board is only fair if every cell that is not a mine can be reasoned
+   out. Three kinds of reasoning are allowed here, and they are the three
+   a player actually uses:
+
+     counting  a number with its mines all accounted for has nothing but
+               safe ground left, and one with only just enough covered
+               cells left to hold its mines has nothing but mines;
+
+     subsets   if one number's covered cells all lie inside another's,
+               the difference between the two numbers is spread over
+               exactly the cells the second has and the first has not —
+               which is the 1-2-1 and all its relatives;
+
+     the total the mine counter is information too, and near the end it
+               is often the only thing that settles the last corner.
+
+   The generator scatters mines, then follows that reasoning as far as it
+   goes. Wherever it stops short it hands over one more cell for nothing
+   and carries on. Those handed-over cells are what the board starts with
+   showing. Since the three rules alone always finish the job, a player
+   who knows them never has to guess — and a player who reasons better
+   than they do is only ever further ahead.
+   ===================================================================== */
+
+const UNKNOWN = 0, SAFE = 1, KNOWN_MINE = 2;
+
+// Opening a cell the way the board does, cascading through the blanks.
+function markOpen(known, i) {
+  const stack = [i];
+  while (stack.length) {
+    const j = stack.pop();
+    if (known[j] !== UNKNOWN) continue;
+    known[j] = SAFE;
+    if (count[j] === 0)
+      for (let t = 0; t < deg; t++) {
+        const m = nb[j * 7 + t];
+        if (m >= 0 && known[m] === UNKNOWN) stack.push(m);
+      }
+  }
+}
+
+/* What each open number still has to say: the covered cells it looks at and
+   how many mines are left among them. Each is a true statement about the
+   board, so it stays true as other cells are worked out — which is why a
+   whole sweep of them can be used before any of them is rebuilt. */
+function constraintsOf(known) {
+  const cons = [];
+  for (let i = 0; i < n; i++) {
+    if (known[i] !== SAFE) continue;
+    const cells = [];
+    let left = count[i];
+    for (let t = 0; t < deg; t++) {
+      const j = nb[i * 7 + t]; if (j < 0) continue;
+      if (known[j] === UNKNOWN) cells.push(j);
+      else if (known[j] === KNOWN_MINE) left--;
+    }
+    if (cells.length) cons.push({ cells, left });
+  }
+  return cons;
+}
+
+// Follow the three rules as far as they go. Returns how many cells came out safe.
+function deduce(known) {
+  const setSafe = j => { if (known[j] !== UNKNOWN) return false; markOpen(known, j); return true; };
+  const setMine = j => { if (known[j] !== UNKNOWN) return false; known[j] = KNOWN_MINE; return true; };
+
+  const counting = () => {
+    let moved = false;
+    for (const c of constraintsOf(known)) {
+      if (c.left === 0) for (const j of c.cells) moved = setSafe(j) || moved;
+      else if (c.left === c.cells.length) for (const j of c.cells) moved = setMine(j) || moved;
+    }
+    return moved;
+  };
+
+  const subsets = () => {
+    const cons = constraintsOf(known);
+    const owner = new Map();                 // cell -> the numbers watching it
+    for (const c of cons) for (const x of c.cells) {
+      let w = owner.get(x); if (!w) owner.set(x, w = []); w.push(c);
+    }
+    let moved = false;
+    for (const a of cons) {
+      const seen = new Set();
+      for (const x of a.cells) for (const b of owner.get(x)) {
+        if (b === a || seen.has(b) || b.cells.length <= a.cells.length) continue;
+        seen.add(b);
+        if (!a.cells.every(y => b.cells.includes(y))) continue;
+        const diff = b.cells.filter(y => !a.cells.includes(y));
+        const d = b.left - a.left;
+        if (d === 0) for (const j of diff) moved = setSafe(j) || moved;
+        else if (d === diff.length) for (const j of diff) moved = setMine(j) || moved;
+      }
+    }
+    return moved;
+  };
+
+  const total = () => {
+    const covered = [];
+    let found = 0;
+    for (let i = 0; i < n; i++) {
+      if (known[i] === UNKNOWN) covered.push(i);
+      else if (known[i] === KNOWN_MINE) found++;
+    }
+    const left = mines - found;
+    let moved = false;
+    if (left === 0) { for (const j of covered) moved = setSafe(j) || moved; return moved; }
+    if (left === covered.length) { for (const j of covered) moved = setMine(j) || moved; return moved; }
+    // one number holding every mine that is left leaves the rest of the board clear
+    for (const a of constraintsOf(known)) {
+      const inA = new Set(a.cells);
+      if (a.left === left)
+        for (const j of covered) { if (!inA.has(j)) moved = setSafe(j) || moved; }
+      else if (left - a.left === covered.length - a.cells.length)
+        for (const j of covered) { if (!inA.has(j)) moved = setMine(j) || moved; }
+      if (moved) break;
+    }
+    return moved;
+  };
+
+  // cheapest reasoning first, and back to it the moment anything gives way
+  while (counting() || subsets() || total()) { /* keep going */ }
+
+  let safe = 0;
+  for (let i = 0; i < n; i++) if (known[i] === SAFE) safe++;
+  return safe;
+}
+
+/* Which cell to hand over. The first is the opening, and wants to be a blank,
+   since a blank cascades and gives the player a region to work from. Every
+   handout after that wants the opposite: a bare number, touching ground that
+   is already open, which gives away one cell and no more. Handing over another
+   blank would cascade too, and a board that cascades twice has told the player
+   most of what it knows. */
+function pickGiven(known, opening) {
+  let best = -1, bestScore = -Infinity;
+  for (let i = 0; i < n; i++) {
+    if (known[i] !== UNKNOWN || mine[i]) continue;
+    let touches = 0;
+    for (let t = 0; t < deg; t++) { const j = nb[i * 7 + t]; if (j >= 0 && known[j] === SAFE) touches++; }
+    const score = opening
+      ? (count[i] === 0 ? 100 : 10 - count[i])
+      : (count[i] === 0 ? 0 : 60) + (touches ? 40 : 0) + count[i];
+    if (score + Math.random() > bestScore) { bestScore = score + Math.random(); best = i; }
+  }
+  return best;
+}
+
+// How much of the board a set of handouts actually puts on show, cascades and all.
+function shownBy(given) {
+  const shown = new Uint8Array(n);
+  for (const g of given) markOpen(shown, g);
+  let cells = 0;
+  for (let i = 0; i < n; i++) if (shown[i] === SAFE) cells++;
+  return cells;
+}
+
+/* Scatter, reason, hand over, repeat — and since every handout opens at least
+   one new cell, it cannot fail to finish.
+
+   Many layouts are tried and the best kept, judged first on how many hints it
+   needs beyond the opening. Most layouts of an ordinary density need none at
+   all, and one that needs none is just the familiar game with its first click
+   already made. Hints are the fallback for crowded boards, where no scattering
+   of that many mines can be picked apart from one opening alone. Between two
+   layouts asking for the same number of hints the tie goes to the one whose
+   opening is nearest a quarter of the board — big enough to work from, small
+   enough to leave a game. */
+function buildPuzzle() {
+  const target = (n - mines) * 0.25;
+  const deadline = performance.now() + (n > 300 ? 300 : 120);
+  let best = null;
+
+  for (let attempt = 0; attempt < 500; attempt++) {
+    layMines(new Set());
+    const known = new Uint8Array(n);
+    const given = [];
+    while (true) {
+      const g = pickGiven(known, given.length === 0);
+      if (g < 0) break;
+      given.push(g);
+      markOpen(known, g);
+      if (deduce(known) === n - mines) break;
+    }
+    const cells = shownBy(given);
+    const score = (given.length - 1) * 1e5 + Math.abs(cells - target);
+    if (!best || score < best.score)
+      best = { mine: mine.slice(), count: count.slice(), given, score };
+    if (performance.now() > deadline) break;
+  }
+
+  mine.set(best.mine);
+  count.set(best.count);
+  return best.given;
 }
 
 /* =====================================================================
@@ -620,18 +839,21 @@ function fmtTime(ms) {
 
 function paintStatus() {
   el('statMines').textContent = mines - flags;
-  const ms = !seeded ? 0 : (over ? endTime : performance.now()) - startTime;
+  const ms = !startTime ? 0 : (over ? endTime : performance.now()) - startTime;
   el('statTime').textContent = fmtTime(ms);
   const v = el('verdict');
   v.className = 'verdict' + (over ? (won ? ' won' : ' lost') : '');
   v.textContent = over ? (won ? 'Swept — ' + fmtTime(endTime - startTime) : 'Boom.') : '';
+  el('noteGiven').textContent = given
+    ? given + ' of the ' + (n - mines) + ' safe cells were given away to start.'
+    : 'Mines are laid on your first click, so it is always a safe one.';
 }
 
 // The clock is the only thing that moves on its own, so the loop only redraws
 // the panel; the board is redrawn when something is actually done to it.
 (function tick() {
   requestAnimationFrame(tick);
-  if (seeded && !over) paintStatus();
+  if (startTime && !over) paintStatus();
 })();
 
 canvas.addEventListener('contextmenu', e => e.preventDefault());
@@ -640,6 +862,7 @@ canvas.addEventListener('contextmenu', e => e.preventDefault());
 // its flags in place; the right button plants a flag instead.
 function dig(i, chording) {
   if (i < 0) return;
+  startClock();
   if (chording || state[i] === OPEN) chord(i); else reveal(i);
   paintStatus();
   draw();
@@ -650,7 +873,7 @@ canvas.addEventListener('pointerdown', e => {
   if (e.pointerType === 'touch') return;
   const i = cellAt(e.clientX, e.clientY);
   if (i < 0) return;
-  if (e.button === 2) { flag(i); paintStatus(); draw(); }
+  if (e.button === 2) { startClock(); flag(i); paintStatus(); draw(); }
   else dig(i, e.button === 1);
 });
 
@@ -673,6 +896,7 @@ canvas.addEventListener('touchstart', e => {
   if (holdCell < 0) return;
   holdTimer = setTimeout(() => {
     holdTimer = 0;
+    startClock();
     flag(holdCell);
     holdCell = -1;
     paintStatus();
@@ -723,6 +947,7 @@ for (const b of document.querySelectorAll('[data-preset]'))
 
 el('btnNew').onclick = startFromControls;
 el('cbCorners').onchange = startFromControls;
+el('cbFair').onchange = startFromControls;
 el('cbBlocks').onchange = draw;
 
 /* The canvas follows its panel rather than the window, since the panel also
