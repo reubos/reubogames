@@ -75,6 +75,7 @@
     <button type="button" id="scramble">Scramble</button>
     <button type="button" id="reset">Reset puzzle</button>
     <label class="toggle"><input type="checkbox" id="invert">Invert controls</label>
+    <label class="toggle"><input type="checkbox" id="flare" checked>Flared triangles</label>
   </div>
 
 </div>
@@ -708,6 +709,7 @@ const FLARE = 0.183;
     for (const v of t.poly) lobes.push({ c: v, colour: t.colour });
   for (const p of board) {
     p.patches = [];
+    p.plain = p.parts.map(q => ({ loop: q.loop, colour: q.colour }));
     for (const q of p.parts) {
       let bits = [{ loop: q.loop, colour: q.colour }];
       for (const lobe of lobes) {
@@ -800,11 +802,19 @@ function render() {
      two groups so every outline still lies over every fill. */
   const fills = svgEl('g');
   ringLayer = svgEl('g', { 'stroke-width': '0.009' });
-  for (const p of board) {
-    p.gFill = svgEl('g');
-    for (const part of p.patches)
-      p.gFill.appendChild(svgEl('path',
+  const painted = list => {
+    const g = svgEl('g');
+    for (const part of list)
+      g.appendChild(svgEl('path',
         { class: 'part', d: pathOf(part.loop), fill: part.colour, stroke: part.colour }));
+    return g;
+  };
+  for (const p of board) {
+    // both schemes are drawn and one is hidden, so the switch costs nothing
+    p.gFill = svgEl('g');
+    p.flareG = painted(p.patches);
+    p.plainG = painted(p.plain);
+    p.gFill.append(p.plainG, p.flareG);
     fills.appendChild(p.gFill);
     p.gLine = svgEl('g');
     p.gLine.appendChild(svgEl('path',
@@ -960,9 +970,18 @@ function scramble() {
 
 /* ---- the page --------------------------------------------------------- */
 
+const showFlare = on => {
+  for (const p of board) {
+    p.flareG.style.display = on ? '' : 'none';
+    p.plainG.style.display = on ? 'none' : '';
+  }
+};
+
 render();
 reset();
+showFlare(document.getElementById('flare').checked);
 
+document.getElementById('flare').addEventListener('change', e => showFlare(e.target.checked));
 document.getElementById('scramble').addEventListener('click', scramble);
 document.getElementById('reset').addEventListener('click', () => { settle(); reset(); });
 document.getElementById('invert').addEventListener('change', e => { inverted = e.target.checked; });
