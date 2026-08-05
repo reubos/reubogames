@@ -96,6 +96,18 @@
     color: var(--accent); text-align: center;
   }
 
+  /* ---------- pattern stamps ---------- */
+  .stamps { display: grid; grid-template-columns: repeat(auto-fill, minmax(54px, 1fr)); gap: 6px; }
+  .stamp {
+    padding: 4px; display: flex; flex-direction: column; align-items: center; gap: 2px;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+  }
+  .stamp svg { width: 100%; height: 38px; display: block; }
+  .stamp .sn { font-size: 0.62rem; color: var(--muted); letter-spacing: 0.04em; }
+  .stamp:hover .sn { color: #fff; }
+  .stamp.osc { border-color: #6b5a1f; }
+  .stamp.osc .sn { color: var(--gold); }
+
   .check { display: flex; align-items: center; gap: 9px; font-size: 0.85rem; cursor: pointer; }
   .check + .check { margin-top: 10px; }
   .check input { accent-color: var(--accent); width: 15px; height: 15px; cursor: pointer; }
@@ -159,6 +171,16 @@
           generations and then stops: a flower is a tight knot of eight-way
           neighbours, and a crowd cannot hold together in it. <b>S234</b> gives
           cells the one extra tolerance they need to keep going.</p>
+      </div>
+
+      <div class="panel">
+        <p class="label">Patterns</p>
+        <div class="stamps" id="stamps"></div>
+        <p class="note">Everything B3/S23 leaves behind. Clicking one clears the board, sets that
+          rule and lays the pattern alone in the middle, where nothing can reach it.</p>
+        <p class="note">The fourteen still lifes are every one that fits inside three flowers, and
+          no soup since has turned up another. <b>P3</b> is the only oscillator small enough to
+          write down: fifteen cells, of which just three move.</p>
       </div>
 
       <div class="panel">
@@ -586,6 +608,104 @@ function setRule(b, s) {
 for (const b of document.querySelectorAll('[data-rule]'))
   b.onclick = () => setRule(...b.dataset.rule.split('|'));
 
+/* =====================================================================
+   6a. PATTERNS
+
+   What B3/S23 actually leaves lying about on this tiling, written in
+   lattice coordinates (flower across, flower down, petal) because those
+   are what a translation acts on cleanly.
+
+   The still lifes are exhaustive for anything fitting inside three
+   flowers, found by testing all 262144 subsets of one; the rest were
+   swept up out of settled soup, which stopped yielding new ones long
+   before it stopped running. Only one oscillator is small enough to
+   list, and it is rare enough in soup — about one seed in two thousand
+   — to be worth a button of its own.
+   ===================================================================== */
+
+const PATTERNS = [
+  /* A phase of the cycle itself, not the seed it was found from: that seed took
+     a generation to fall onto the cycle, and a stamp should start oscillating
+     at once. The three phases run 15, 14 and 16 cells. */
+  { n: 'P3', osc: true, cells: [[2,0,2],[1,1,3],[1,1,4],[1,1,5],[2,1,0],[2,1,1],[2,1,5],
+                                [0,2,0],[0,2,1],[0,2,3],[0,2,4],[1,2,0],[1,2,1],[1,2,2],[1,2,5]] },
+  { n: '3',  cells: [[0,0,0],[0,0,1],[1,0,3]] },
+  { n: '3',  cells: [[0,0,1],[1,0,3],[0,1,5]] },
+  { n: '4',  cells: [[0,0,0],[0,0,1],[0,0,2],[0,0,3]] },
+  { n: '4',  cells: [[0,0,0],[0,0,1],[0,0,2],[0,0,4]] },
+  { n: '4',  cells: [[0,0,0],[0,0,1],[0,0,3],[0,0,4]] },
+  { n: '4',  cells: [[0,0,0],[0,0,1],[1,0,3],[1,0,4]] },
+  { n: '4',  cells: [[0,0,0],[0,0,1],[1,0,3],[0,1,5]] },
+  { n: '5',  cells: [[0,0,0],[0,0,1],[1,0,2],[1,0,4],[0,1,5]] },
+  { n: '6',  cells: [[0,0,1],[0,0,2],[1,0,2],[0,1,0],[0,1,4],[1,1,4]] },
+  { n: '6',  cells: [[0,0,1],[1,0,1],[1,0,2],[0,1,4],[0,1,5],[1,1,4]] },
+  { n: '6',  cells: [[0,0,1],[1,0,1],[1,0,3],[0,1,0],[0,1,4],[1,1,4]] },
+  { n: '7',  cells: [[0,0,1],[0,0,2],[1,0,1],[1,0,2],[0,1,4],[0,1,5],[1,1,4]] },
+  { n: '8',  cells: [[0,0,1],[0,0,2],[1,0,1],[1,0,2],[0,1,4],[0,1,5],[1,1,4],[1,1,5]] },
+  { n: '9',  cells: [[0,0,1],[0,0,2],[1,0,0],[1,0,2],[2,0,3],[0,1,4],[0,1,5],[1,1,4],[1,1,5]] }
+];
+
+// A pattern drawn on its own flowers, so the thumbnail shows it in context.
+function thumbnail(cells) {
+  const live = new Set(cells.map(c => c.join(',')));
+  const flowers = new Set(cells.map(c => c[0] + ',' + c[1]));
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  const parts = [];
+  for (const f of flowers) {
+    const [a, b] = f.split(',').map(Number);
+    const cx = (a + b / 2) * PITCH, cy = b * ROW_H;
+    for (let k = 0; k < 6; k++) {
+      const pts = SPOKE[k].map(p => [cx + p[0], cy + p[1]]);
+      for (const q of pts) {
+        x0 = Math.min(x0, q[0]); x1 = Math.max(x1, q[0]);
+        y0 = Math.min(y0, q[1]); y1 = Math.max(y1, q[1]);
+      }
+      parts.push('<polygon points="' + pts.map(p => p[0].toFixed(2) + ',' + p[1].toFixed(2)).join(' ') +
+        '" fill="' + (live.has(a + ',' + b + ',' + k) ? '#4ade80' : '#24422a') +
+        '" stroke="#17301b" stroke-width="0.08"/>');
+    }
+  }
+  const m = 0.2;
+  return '<svg viewBox="' + (x0-m) + ' ' + (y0-m) + ' ' + (x1-x0+2*m) + ' ' + (y1-y0+2*m) +
+         '" preserveAspectRatio="xMidYMid meet">' + parts.join('') + '</svg>';
+}
+
+/* Laid alone in the middle of a cleared board. Leaving the rest of the board
+   standing was tried and is not worth it: clearing a margin round the stamp
+   still lets a cell just outside that margin give birth against it, and a
+   stamp always lands in the middle anyway, so there is nowhere to put a second
+   one. One pattern at a time, shown honestly. */
+function stamp(cells) {
+  setRule('3', '23');
+  const wF = Math.max(...cells.map(c => c[0])) + 1;
+  const hF = Math.max(...cells.map(c => c[1])) + 1;
+  if (wF > W || hF > H) return;
+  const b0 = (H - hF) >> 1, a0 = ((W - wF) >> 1) - (b0 >> 1);
+  const list = [];
+  for (const [da, db, k] of cells) {
+    const b = b0 + db, col = a0 + da + (b >> 1);
+    if (col < 0 || col >= W || b < 0 || b >= H) return;
+    list.push(idx(col, b, k));
+  }
+  alive.fill(0); age.fill(0);
+  for (const i of list) { alive[i] = 1; age[i] = 1; }
+  gen = 0;
+  recount();
+  draw();
+}
+
+function buildStamps() {
+  const box = document.getElementById('stamps');
+  box.innerHTML = PATTERNS.map((p, i) =>
+    '<button class="stamp' + (p.osc ? ' osc' : '') + '" data-p="' + i + '" title="' +
+    (p.osc ? 'Period 3 oscillator, 15 cells' : 'Still life, ' + p.n + ' cells') + '">' +
+    thumbnail(p.cells) + '<span class="sn">' + p.n + '</span></button>').join('');
+  box.onclick = e => {
+    const b = e.target.closest('.stamp');
+    if (b) stamp(PATTERNS[+b.dataset.p].cells);
+  };
+}
+
 // --- painting ---
 let painting = 0;     // 0 none, 1 filling, 2 erasing
 canvas.addEventListener('pointerdown', e => {
@@ -666,18 +786,58 @@ function verify() {
   console.log(`floret adjacency: ${checked} interior cells checked, ${wrong} disagreed with the geometry`);
 }
 
+/* The patterns are checked the same way: each is run under B3/S23 on a bare
+   set of coordinates, with no board and so no edge to lean on, and has to come
+   back to itself after one generation — or after three, having genuinely moved
+   in between, for the oscillator. */
+function verifyPatterns() {
+  const key = (a, b, k) => a + ',' + b + ',' + k;
+  const around = (a, b, k) => {
+    const out = [], d = DIR[k], e = DIR[(k + 5) % 6];
+    for (let k2 = 0; k2 < 6; k2++) if (k2 !== k) out.push(key(a, b, k2));
+    out.push(key(a + d[0], b + d[1], (k + 3) % 6));
+    out.push(key(a + d[0], b + d[1], (k + 4) % 6));
+    out.push(key(a + e[0], b + e[1], (k + 2) % 6));
+    return out;
+  };
+  const advance = set => {
+    const count = new Map();
+    for (const s of set) {
+      const [a, b, k] = s.split(',').map(Number);
+      for (const q of around(a, b, k)) count.set(q, (count.get(q) || 0) + 1);
+    }
+    const out = new Set();
+    for (const [q, c] of count) if (set.has(q) ? (c === 2 || c === 3) : c === 3) out.add(q);
+    return out;
+  };
+  const same = (x, y) => x.size === y.size && [...x].every(v => y.has(v));
+
+  let wrong = 0;
+  for (const p of PATTERNS) {
+    const start = new Set(p.cells.map(c => key(c[0], c[1], c[2])));
+    const one = advance(start);
+    if (p.osc) {
+      if (same(one, start)) wrong++;                       // a still life would not do
+      if (!same(advance(advance(one)), start)) wrong++;    // back where it started
+    } else if (!same(one, start)) wrong++;
+  }
+  console.log(`patterns: ${PATTERNS.length} checked, ${wrong} did not behave as labelled`);
+}
+
 /* =====================================================================
    8. GO
    ===================================================================== */
 
 buildRuleGrid();
 paintRule();
+buildStamps();
 rngSpeed.oninput();
 rngDens.oninput();
 rngSize.oninput();
 buildBoard(+rngSize.value);
 randomSoup();
 verify();
+verifyPatterns();
 </script>
 </body>
 </html>
