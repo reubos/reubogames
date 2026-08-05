@@ -1,0 +1,683 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pentagonal Life</title>
+<style>
+  :root {
+    --bg: #1a3a1a;
+    --panel: #204324;
+    --panel-2: #1c3a20;
+    --line: #2f5c38;
+    --text: #d4e8d4;
+    --muted: #86a886;
+    --accent: #4ade80;
+    --accent-soft: #86efac;
+    --gold: #facc15;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    background-color: var(--bg);
+    color: var(--text);
+    font-family: 'Segoe UI', sans-serif;
+    margin: 0;
+    padding: 24px 20px 60px;
+    min-height: 100vh;
+  }
+
+  .wrap { max-width: 1040px; margin: 0 auto; }
+
+  .backlink { display: inline-block; margin: 0 0 10px; color: var(--muted); font-size: 0.85rem; }
+  h1 { font-size: 2rem; color: #fff; margin: 0 0 6px; }
+  .sub { color: var(--muted); font-size: 0.95rem; margin: 0 0 24px; max-width: 70ch; line-height: 1.5; }
+
+  .layout { display: grid; grid-template-columns: 1fr 280px; gap: 24px; align-items: start; }
+  @media (max-width: 820px) { .layout { grid-template-columns: 1fr; } }
+
+  .panel {
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 16px;
+  }
+
+  .board-panel { padding: 10px; }
+  /* a drag across the board paints cells, so it must not scroll the page */
+  #board { width: 100%; display: block; touch-action: none; cursor: crosshair; border-radius: 6px; }
+
+  .side { display: flex; flex-direction: column; gap: 16px; }
+
+  .label {
+    font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.09em;
+    color: var(--muted); margin: 0 0 8px;
+  }
+
+  button {
+    font-family: inherit; font-size: 0.9rem;
+    background: var(--panel); color: var(--text);
+    border: 1px solid var(--line); border-radius: 7px;
+    padding: 9px 12px; cursor: pointer;
+    transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+  }
+  button:hover:not(:disabled) { background: #2a5530; border-color: var(--accent); color: #fff; }
+  button.primary { background: #2c6b3c; border-color: #3d8a51; color: #fff; font-weight: 600; }
+  button.primary:hover { background: #35804a; }
+
+  .btn-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .btn-row .full { grid-column: 1 / -1; }
+
+  .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .stat { background: var(--panel); border: 1px solid var(--line); border-radius: 7px; padding: 8px 10px; }
+  .stat .v { font-size: 1.25rem; color: #fff; font-weight: 600; line-height: 1.2; font-variant-numeric: tabular-nums; }
+  .stat .k { font-size: 0.7rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+
+  input[type=range] { width: 100%; margin: 0; accent-color: var(--accent); }
+  .rowlab { display: flex; justify-content: space-between; align-items: baseline; }
+  .rowlab .val { font-size: 0.8rem; color: var(--text); font-variant-numeric: tabular-nums; }
+  .field + .field { margin-top: 14px; }
+
+  /* ---------- rule editor ---------- */
+  /* Eight neighbours means nine counts, and the count is the only thing a rule
+     asks about, so the rule is nine switches twice over rather than a string to
+     be parsed. The B/S name is written back out underneath. */
+  .rule-grid { display: grid; grid-template-columns: 18px repeat(9, 1fr); gap: 4px; align-items: center; }
+  .rule-grid .rlab { font-size: 0.72rem; color: var(--muted); }
+  .rule-grid .num { font-size: 0.66rem; color: var(--muted); text-align: center; }
+  .bit {
+    padding: 0; height: 24px; font-size: 0.75rem; border-radius: 5px;
+    background: #24422a; border: 1px solid var(--line); color: var(--muted);
+  }
+  .bit.on { background: #2c6b3c; border-color: var(--accent); color: #fff; }
+  .rule-name {
+    margin-top: 10px; font-family: ui-monospace, monospace; font-size: 0.9rem;
+    color: var(--accent); text-align: center;
+  }
+
+  .check { display: flex; align-items: center; gap: 9px; font-size: 0.85rem; cursor: pointer; }
+  .check + .check { margin-top: 10px; }
+  .check input { accent-color: var(--accent); width: 15px; height: 15px; cursor: pointer; }
+
+  .note { font-size: 0.78rem; color: var(--muted); line-height: 1.55; margin: 10px 0 0; }
+  .note b { color: var(--text); font-weight: 600; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <a class="backlink" href="../index.html">&larr; back to reubo's website</a>
+  <h1>Pentagonal Life</h1>
+  <p class="sub">Conway's Game of Life on the floret pentagonal tiling. Cells touching by an edge
+    <em>or</em> by a corner count as neighbours &mdash; and on this tiling that comes to eight of
+    them, exactly as on the square grid, so B3/S23 is the same rule it always was.</p>
+
+  <div class="layout">
+
+    <div class="panel board-panel">
+      <canvas id="board"></canvas>
+    </div>
+
+    <div class="side">
+
+      <div class="panel">
+        <div class="stat-grid">
+          <div class="stat"><div class="v" id="statGen">0</div><div class="k">Generation</div></div>
+          <div class="stat"><div class="v" id="statPop">0</div><div class="k">Alive</div></div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="btn-row">
+          <button class="primary full" id="btnPlay">Play</button>
+          <button id="btnStep">Step</button>
+          <button id="btnClear">Clear</button>
+          <button class="full" id="btnRandom">Random soup</button>
+        </div>
+        <div class="field">
+          <div class="rowlab"><p class="label">Speed</p><span class="val" id="valSpeed"></span></div>
+          <input type="range" id="rngSpeed" min="1" max="60" value="12">
+        </div>
+        <div class="field">
+          <div class="rowlab"><p class="label">Soup density</p><span class="val" id="valDens"></span></div>
+          <input type="range" id="rngDens" min="5" max="70" value="32">
+        </div>
+        <p class="note">Drag across the board to paint cells, running or not.</p>
+      </div>
+
+      <div class="panel">
+        <p class="label">Rule</p>
+        <div class="rule-grid" id="ruleGrid"></div>
+        <div class="rule-name" id="ruleName">B3/S23</div>
+        <div class="btn-row" style="margin-top: 10px">
+          <button class="full" data-rule="3|23">B3/S23 &mdash; Conway</button>
+          <button data-rule="3|234">B3/S234</button>
+          <button data-rule="34|245">B34/S245</button>
+        </div>
+        <p class="note">Conway's own rule settles here in a couple of hundred
+          generations and then stops: a flower is a tight knot of eight-way
+          neighbours, and a crowd cannot hold together in it. <b>S234</b> gives
+          cells the one extra tolerance they need to keep going.</p>
+      </div>
+
+      <div class="panel">
+        <p class="label">Board</p>
+        <div class="field">
+          <div class="rowlab"><p class="label">Flowers across</p><span class="val" id="valSize"></span></div>
+          <input type="range" id="rngSize" min="6" max="30" value="18">
+        </div>
+        <div class="field">
+          <label class="check"><input type="checkbox" id="cbWrap" checked> Edges join up</label>
+          <label class="check"><input type="checkbox" id="cbFlorets"> Outline the flowers</label>
+          <label class="check"><input type="checkbox" id="cbAge" checked> Shade by age</label>
+        </div>
+      </div>
+
+      <div class="panel">
+        <p class="label">The neighbourhood</p>
+        <p class="note">Six pentagons meet at a hub to make a flower. Five of any cell's neighbours
+          are the rest of its own flower &mdash; all six share the hub corner. The other three lie
+          across its three short outer edges. Five and three: <b>eight</b>.</p>
+        <p class="note">Counted the other way round, a cell has five edges and so five neighbours by
+          edge, plus three more that only touch it at the hub. The square grid splits its eight four
+          and four; this one splits them five and three.</p>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+
+/* =====================================================================
+   1. THE TILING
+
+   The floret pentagonal tiling is the dual of the snub trihexagonal
+   tiling, so its pentagon has one 60 degree corner (a hexagon of the
+   parent, six pentagons round it) and four of 120 degrees (triangles of
+   the parent, three round each). That fixes the shape exactly: with the
+   three short edges at length 1 the two long ones are length 2, and the
+   five corners can be written down.
+
+   Six of them turned about the 60 degree corner make a flower; the
+   flowers sit on a triangular lattice of pitch sqrt(21).
+   ===================================================================== */
+
+const TAU = Math.PI * 2, S3 = Math.sqrt(3);
+const PITCH = Math.sqrt(21);
+const ROW_H = PITCH * S3 / 2;
+
+/* Corners of one pentagon, hub first, before the flower is spun.
+   Turned so that the lattice's first vector lies along x, which is what
+   lets the flowers be laid out in plain offset rows below. */
+const TILT = -Math.atan2(1.5, 2.5 * S3);
+const rot = (v, ang) => [v[0] * Math.cos(ang) - v[1] * Math.sin(ang),
+                         v[0] * Math.sin(ang) + v[1] * Math.cos(ang)];
+const PENT = [[0, 0], [S3, 1], [1.5 * S3, 0.5], [1.5 * S3, -0.5], [S3, -1]]
+  .map(p => rot(p, TILT));
+
+// SPOKE[k] is that pentagon turned by k sixths of a turn: petal k of a flower.
+const SPOKE = [];
+for (let k = 0; k < 6; k++) SPOKE.push(PENT.map(p => rot(p, TAU * k / 6)));
+
+/* The flower's own outline, for drawing it: an eighteen-gon, since each
+   petal contributes two far corners and one shared near one. Corner 1 of
+   a petal is corner 4 of the next, which is why it is listed once. */
+const FLOWER = [];
+for (let k = 0; k < 6; k++) FLOWER.push(SPOKE[k][3], SPOKE[k][2], SPOKE[k][1]);
+
+/* =====================================================================
+   2. THE BOARD
+
+   A cell is a flower and a petal. Flowers are held in offset rows: row r
+   is shifted half a pitch when r is odd, which is the same triangular
+   lattice drawn as a brick wall. In lattice coordinates (a, b) a flower
+   sits at a*w1 + b*w2 with w2 sixty degrees off w1, and the two views
+   convert by a = col - (row >> 1), b = row.
+
+   Wrapping identifies col + W with col and row + H with row. The second
+   is only a translation of the lattice when H is even (it shifts a by
+   H/2), so the row count is always rounded to an even number.
+   ===================================================================== */
+
+const DIR = [[1, 0], [0, 1], [-1, 1], [-1, 0], [0, -1], [1, -1]];  // the six flower steps
+
+let W = 0, H = 0, n = 0;          // flowers across, flowers down, cells
+let wrap = true;
+let alive, age, nb;               // state, generations lived, neighbour table
+let gen = 0, pop = 0;
+
+const idx = (col, row, k) => (row * W + col) * 6 + k;
+
+// Lattice coordinates back to a cell index, wrapping or falling off the edge.
+function resolve(a, b, k) {
+  if (wrap) {
+    const q = Math.floor(b / H);
+    b -= q * H;
+    a += q * (H >> 1);
+    let col = ((a + (b >> 1)) % W + W) % W;
+    return idx(col, b, k);
+  }
+  if (b < 0 || b >= H) return -1;
+  const col = a + (b >> 1);
+  if (col < 0 || col >= W) return -1;
+  return idx(col, b, k);
+}
+
+/* The eight neighbours of petal k. Five are the rest of the flower, which
+   all meet it at the hub. The other three lie across its short edges: two
+   of them in the flower one step away in direction k, the third in the
+   flower one step away in direction k-1. Turning the whole picture by a
+   sixth carries this to petal k+1, which is why one rule serves all six. */
+function neighboursOf(col, row, k) {
+  const a = col - (row >> 1), b = row;
+  const d = DIR[k], e = DIR[(k + 5) % 6];
+  const out = [];
+  for (let k2 = 0; k2 < 6; k2++) if (k2 !== k) out.push(idx(col, row, k2));
+  out.push(resolve(a + d[0], b + d[1], (k + 3) % 6));
+  out.push(resolve(a + d[0], b + d[1], (k + 4) % 6));
+  out.push(resolve(a + e[0], b + e[1], (k + 2) % 6));
+  return out;
+}
+
+function buildBoard(cols) {
+  W = cols;
+  H = Math.max(4, Math.round(cols * 0.866 / 2) * 2);   // even, and near enough square on screen
+  n = W * H * 6;
+
+  alive = new Uint8Array(n);
+  age = new Uint16Array(n);
+  nb = new Int32Array(n * 8);
+  for (let row = 0; row < H; row++)
+    for (let col = 0; col < W; col++)
+      for (let k = 0; k < 6; k++) {
+        const list = neighboursOf(col, row, k), o = idx(col, row, k) * 8;
+        for (let t = 0; t < 8; t++) nb[o + t] = list[t];
+      }
+
+  gen = 0; pop = 0;
+  buildPaths();
+}
+
+// Rebuilding only the neighbour table, for when wrapping is switched.
+function rewire() {
+  for (let row = 0; row < H; row++)
+    for (let col = 0; col < W; col++)
+      for (let k = 0; k < 6; k++) {
+        const list = neighboursOf(col, row, k), o = idx(col, row, k) * 8;
+        for (let t = 0; t < 8; t++) nb[o + t] = list[t];
+      }
+}
+
+const hubX = (col, row) => (col + (row & 1) * 0.5) * PITCH;
+const hubY = row => row * ROW_H;
+
+/* =====================================================================
+   3. THE RULE
+   ===================================================================== */
+
+let birth = [0, 0, 0, 1, 0, 0, 0, 0, 0];
+let survive = [0, 0, 1, 1, 0, 0, 0, 0, 0];
+
+function ruleName() {
+  const s = a => a.map((v, i) => v ? i : '').join('');
+  return 'B' + s(birth) + '/S' + s(survive);
+}
+
+function step() {
+  const next = new Uint8Array(n);
+  let live = 0;
+  for (let i = 0; i < n; i++) {
+    const o = i * 8;
+    let c = 0;
+    for (let t = 0; t < 8; t++) { const j = nb[o + t]; if (j >= 0 && alive[j]) c++; }
+    const on = alive[i] ? survive[c] : birth[c];
+    if (on) {
+      next[i] = 1;
+      age[i] = alive[i] ? Math.min(65535, age[i] + 1) : 1;
+      live++;
+    } else age[i] = 0;
+  }
+  alive = next;
+  pop = live;
+  gen++;
+}
+
+/* =====================================================================
+   4. DRAWING
+   ===================================================================== */
+
+const canvas = document.getElementById('board');
+const ctx = canvas.getContext('2d');
+
+let cellPath = [];        // one Path2D per cell, in board units
+let groundPath = null;    // all of them at once, for the dead ground in one call
+let flowerPath = null;    // every flower outline in one path
+let bounds = null;        // board extent in board units
+let view = { s: 1, ox: 0, oy: 0 };
+
+const DEAD = '#24422a', LINE = '#17301b';
+/* Newborn cells are palest and settle darker as they hold on, on a
+   doubling scale so that the change is quick where the interest is. */
+const AGES = ['#dcfce7', '#a7f3c4', '#86efac', '#4ade80', '#2fbf6d', '#1f9d57', '#15803d'];
+const ageColour = a => AGES[Math.min(6, 31 - Math.clz32(a))];
+
+function buildPaths() {
+  cellPath = new Array(n);
+  groundPath = new Path2D();
+  flowerPath = new Path2D();
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+
+  for (let row = 0; row < H; row++)
+    for (let col = 0; col < W; col++) {
+      const cx = hubX(col, row), cy = hubY(row);
+
+      for (let k = 0; k < 6; k++) {
+        const p = new Path2D(), s = SPOKE[k];
+        p.moveTo(cx + s[0][0], cy + s[0][1]);
+        for (let m = 1; m < 5; m++) p.lineTo(cx + s[m][0], cy + s[m][1]);
+        p.closePath();
+        cellPath[idx(col, row, k)] = p;
+        groundPath.addPath(p);
+      }
+
+      flowerPath.moveTo(cx + FLOWER[0][0], cy + FLOWER[0][1]);
+      for (let m = 1; m < FLOWER.length; m++)
+        flowerPath.lineTo(cx + FLOWER[m][0], cy + FLOWER[m][1]);
+      flowerPath.closePath();
+
+      for (const q of FLOWER) {
+        x0 = Math.min(x0, cx + q[0]); x1 = Math.max(x1, cx + q[0]);
+        y0 = Math.min(y0, cy + q[1]); y1 = Math.max(y1, cy + q[1]);
+      }
+    }
+
+  bounds = { x0, y0, w: x1 - x0, h: y1 - y0 };
+  layout();
+}
+
+// The canvas takes the panel's width and whatever height the board needs.
+function layout() {
+  if (!bounds) return;
+  const cssW = canvas.parentElement.clientWidth - 20;
+  const pad = 4;
+  const s = (cssW - pad * 2) / bounds.w;
+  const cssH = bounds.h * s + pad * 2;
+
+  const dpr = window.devicePixelRatio || 1;
+  canvas.style.width = cssW + 'px';
+  canvas.style.height = cssH + 'px';
+  canvas.width = Math.round(cssW * dpr);
+  canvas.height = Math.round(cssH * dpr);
+
+  view = { s: s * dpr, ox: (pad - bounds.x0 * s) * dpr, oy: (pad - bounds.y0 * s) * dpr };
+  draw();
+}
+
+function draw() {
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.setTransform(view.s, 0, 0, view.s, view.ox, view.oy);
+  ctx.lineJoin = 'round';
+
+  // dead ground first, in one call, then the living painted over it
+  ctx.fillStyle = DEAD;
+  ctx.strokeStyle = LINE;
+  ctx.lineWidth = 0.07;
+  ctx.fill(groundPath);
+  ctx.stroke(groundPath);
+
+  const shade = document.getElementById('cbAge').checked;
+  ctx.fillStyle = '#4ade80';
+  for (let i = 0; i < n; i++) {
+    if (!alive[i]) continue;
+    if (shade) ctx.fillStyle = ageColour(age[i] || 1);
+    ctx.fill(cellPath[i]);
+    ctx.stroke(cellPath[i]);
+  }
+
+  if (document.getElementById('cbFlorets').checked) {
+    ctx.strokeStyle = 'rgba(250, 204, 21, 0.55)';
+    ctx.lineWidth = 0.12;
+    ctx.stroke(flowerPath);
+  }
+
+  document.getElementById('statGen').textContent = gen;
+  document.getElementById('statPop').textContent = pop;
+}
+
+/* =====================================================================
+   5. POINTING AT A CELL
+
+   A pentagon is exactly its flower's share of one sixth-turn wedge about
+   the hub, so finding the cell under a point is: find the flower, then
+   read the angle. Nine candidate flowers are tested because the outlines
+   interlock and the nearest hub is not always the right one.
+   ===================================================================== */
+
+function pointInPoly(pts, cx, cy, x, y) {
+  let inside = false;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    const xi = cx + pts[i][0], yi = cy + pts[i][1];
+    const xj = cx + pts[j][0], yj = cy + pts[j][1];
+    if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+function cellAt(clientX, clientY) {
+  const r = canvas.getBoundingClientRect();
+  const x = ((clientX - r.left) * canvas.width / r.width - view.ox) / view.s;
+  const y = ((clientY - r.top) * canvas.height / r.height - view.oy) / view.s;
+
+  const row0 = Math.round(y / ROW_H);
+  for (let dr = -1; dr <= 1; dr++) {
+    const row = row0 + dr;
+    if (row < 0 || row >= H) continue;
+    const col0 = Math.round(x / PITCH - (row & 1) * 0.5);
+    for (let dc = -1; dc <= 1; dc++) {
+      const col = col0 + dc;
+      if (col < 0 || col >= W) continue;
+      const cx = hubX(col, row), cy = hubY(row);
+      if (!pointInPoly(FLOWER, cx, cy, x, y)) continue;
+      let a = Math.atan2(y - cy, x - cx) - TILT + TAU / 12;
+      a = ((a % TAU) + TAU) % TAU;
+      return idx(col, row, Math.floor(a / (TAU / 6)) % 6);
+    }
+  }
+  return -1;
+}
+
+/* =====================================================================
+   6. CONTROLS
+   ===================================================================== */
+
+let running = false, lastTick = 0, speed = 12;
+
+function tick(now) {
+  requestAnimationFrame(tick);
+  if (!running) return;
+  if (now - lastTick < 1000 / speed) return;
+  lastTick = now;
+  step();
+  draw();
+}
+requestAnimationFrame(tick);
+
+function setRunning(on) {
+  running = on;
+  document.getElementById('btnPlay').textContent = on ? 'Pause' : 'Play';
+}
+
+function recount() {
+  pop = 0;
+  for (let i = 0; i < n; i++) if (alive[i]) pop++;
+}
+
+function randomSoup() {
+  const d = +document.getElementById('rngDens').value / 100;
+  for (let i = 0; i < n; i++) { alive[i] = Math.random() < d ? 1 : 0; age[i] = alive[i]; }
+  gen = 0;
+  recount();
+  draw();
+}
+
+document.getElementById('btnPlay').onclick = () => setRunning(!running);
+document.getElementById('btnStep').onclick = () => { setRunning(false); step(); draw(); };
+document.getElementById('btnClear').onclick = () => {
+  alive.fill(0); age.fill(0); gen = 0; pop = 0; setRunning(false); draw();
+};
+document.getElementById('btnRandom').onclick = randomSoup;
+
+const rngSpeed = document.getElementById('rngSpeed');
+rngSpeed.oninput = () => {
+  speed = +rngSpeed.value;
+  document.getElementById('valSpeed').textContent = speed + '/s';
+};
+const rngDens = document.getElementById('rngDens');
+rngDens.oninput = () => {
+  document.getElementById('valDens').textContent = rngDens.value + '%';
+};
+
+const rngSize = document.getElementById('rngSize');
+rngSize.oninput = () => {
+  document.getElementById('valSize').textContent = rngSize.value + ' × ' +
+    Math.max(4, Math.round(+rngSize.value * 0.866 / 2) * 2);
+};
+rngSize.onchange = () => { buildBoard(+rngSize.value); randomSoup(); };
+
+document.getElementById('cbWrap').onchange = e => { wrap = e.target.checked; rewire(); };
+document.getElementById('cbFlorets').onchange = draw;
+document.getElementById('cbAge').onchange = draw;
+
+// --- rule editor ---
+const ruleGrid = document.getElementById('ruleGrid');
+function buildRuleGrid() {
+  const parts = ['<span></span>'];
+  for (let c = 0; c <= 8; c++) parts.push('<span class="num">' + c + '</span>');
+  for (const which of ['B', 'S']) {
+    parts.push('<span class="rlab">' + which + '</span>');
+    for (let c = 0; c <= 8; c++)
+      parts.push('<button class="bit" data-w="' + which + '" data-c="' + c + '"></button>');
+  }
+  ruleGrid.innerHTML = parts.join('');
+  ruleGrid.onclick = e => {
+    const b = e.target.closest('.bit');
+    if (!b) return;
+    const arr = b.dataset.w === 'B' ? birth : survive;
+    arr[+b.dataset.c] ^= 1;
+    paintRule();
+  };
+}
+function paintRule() {
+  for (const b of ruleGrid.querySelectorAll('.bit')) {
+    const arr = b.dataset.w === 'B' ? birth : survive;
+    b.classList.toggle('on', !!arr[+b.dataset.c]);
+  }
+  document.getElementById('ruleName').textContent = ruleName();
+}
+function setRule(b, s) {
+  birth = Array.from({ length: 9 }, (_, i) => b.includes(String(i)) ? 1 : 0);
+  survive = Array.from({ length: 9 }, (_, i) => s.includes(String(i)) ? 1 : 0);
+  paintRule();
+}
+for (const b of document.querySelectorAll('[data-rule]'))
+  b.onclick = () => setRule(...b.dataset.rule.split('|'));
+
+// --- painting ---
+let painting = 0;     // 0 none, 1 filling, 2 erasing
+canvas.addEventListener('pointerdown', e => {
+  const i = cellAt(e.clientX, e.clientY);
+  if (i < 0) return;
+  canvas.setPointerCapture(e.pointerId);
+  painting = alive[i] ? 2 : 1;
+  paintAt(i);
+});
+canvas.addEventListener('pointermove', e => {
+  if (!painting) return;
+  const i = cellAt(e.clientX, e.clientY);
+  if (i >= 0) paintAt(i);
+});
+canvas.addEventListener('pointerup', () => { painting = 0; });
+canvas.addEventListener('pointercancel', () => { painting = 0; });
+
+function paintAt(i) {
+  const want = painting === 1 ? 1 : 0;
+  if (alive[i] === want) return;
+  alive[i] = want;
+  age[i] = want;
+  pop += want ? 1 : -1;
+  draw();
+}
+
+/* The canvas follows its panel rather than the window, since the panel also
+   changes width when the sidebar drops below it. Only a width change is acted
+   on: laying out sets the canvas height, which would otherwise call us back. */
+let lastPanelWidth = 0;
+new ResizeObserver(() => {
+  const w = canvas.parentElement.clientWidth;
+  if (w === lastPanelWidth) return;
+  lastPanelWidth = w;
+  layout();
+}).observe(canvas.parentElement);
+
+/* =====================================================================
+   7. SELF-CHECK
+
+   The neighbour rule is written down rather than measured, so it is
+   checked against the coordinates it claims to describe: two cells are
+   neighbours exactly when their pentagons share a corner. Reported to
+   the console, and only there.
+   ===================================================================== */
+
+function verify() {
+  const wasWrap = wrap, wasW = W, wasH = H, wasN = n;
+  wrap = false;
+  W = 5; H = 6; n = W * H * 6;
+  const at = new Map(), rounded = p => Math.round(p[0] * 1e4) + ',' + Math.round(p[1] * 1e4);
+  for (let row = 0; row < H; row++)
+    for (let col = 0; col < W; col++)
+      for (let k = 0; k < 6; k++) {
+        const cx = hubX(col, row), cy = hubY(row);
+        for (const p of SPOKE[k]) {
+          const key = rounded([cx + p[0], cy + p[1]]);
+          let w = at.get(key); if (!w) at.set(key, w = []);
+          w.push(idx(col, row, k));
+        }
+      }
+  const geo = Array.from({ length: n }, () => new Set());
+  for (const w of at.values())
+    for (const x of w) for (const y of w) if (x !== y) geo[x].add(y);
+
+  let checked = 0, wrong = 0;
+  for (let row = 1; row < H - 1; row++)
+    for (let col = 1; col < W - 1; col++)
+      for (let k = 0; k < 6; k++) {
+        const i = idx(col, row, k);
+        if (geo[i].size !== 8) continue;                  // still on the rim
+        const claim = neighboursOf(col, row, k);
+        checked++;
+        if (claim.length !== 8 || claim.some(j => !geo[i].has(j))) wrong++;
+      }
+
+  wrap = wasWrap; W = wasW; H = wasH; n = wasN;
+  console.log(`floret adjacency: ${checked} interior cells checked, ${wrong} disagreed with the geometry`);
+}
+
+/* =====================================================================
+   8. GO
+   ===================================================================== */
+
+buildRuleGrid();
+paintRule();
+rngSpeed.oninput();
+rngDens.oninput();
+rngSize.oninput();
+buildBoard(+rngSize.value);
+randomSoup();
+verify();
+</script>
+</body>
+</html>
