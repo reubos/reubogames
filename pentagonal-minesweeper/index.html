@@ -65,6 +65,14 @@
   button.primary { background: #2c6b3c; border-color: #3d8a51; color: #fff; font-weight: 600; font-size: 1rem; }
   button.primary:hover { background: #35804a; }
 
+  select {
+    font-family: inherit; font-size: 0.9rem; width: 100%;
+    background: var(--panel); color: var(--text);
+    border: 1px solid var(--line); border-radius: 7px;
+    padding: 9px 10px; cursor: pointer;
+  }
+  select:hover { border-color: var(--accent); }
+
   .btn-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
   .btn-row .full { grid-column: 1 / -1; }
 
@@ -98,9 +106,11 @@
 
   <a class="backlink" href="../index.html">&larr; back to reubo's website</a>
   <h1>Pentagonal Minesweeper</h1>
-  <p class="sub">Minesweeper on the Cairo pentagonal tiling. Every cell is the same pentagon and every
-    cell has the same seven neighbours &mdash; five across an edge and two more that only meet it at a
-    corner &mdash; so the numbers run as high as seven.</p>
+  <p class="sub">Minesweeper on the pentagonal tilings &mdash; the ones whose every tile is a pentagon.
+    A cell's neighbours are the cells it touches, by an edge or merely at a corner, and how many that
+    comes to is a property of the tiling rather than something the game gets to choose. On the square
+    grid it is always eight. Here it is seven, or on the floret eight &mdash; but a count is not a
+    shape, and seven neighbours arranged five ways make five different games.</p>
 
   <div class="layout">
 
@@ -116,6 +126,13 @@
           <div class="stat"><div class="v" id="statTime">0:00</div><div class="k">Time</div></div>
         </div>
         <div class="verdict" id="verdict"></div>
+      </div>
+
+      <div class="panel">
+        <p class="label">Tiling</p>
+        <select id="selTiling"></select>
+        <p class="note" id="noteTiling"></p>
+        <p class="note" id="noteDegree"></p>
       </div>
 
       <div class="panel">
@@ -151,24 +168,17 @@
           <div class="rowlab"><p class="label">Mines</p><span class="val" id="valMines"></span></div>
           <input type="range" id="rngMines" min="1" max="55" value="10">
         </div>
+        <p class="note">Only the square grid can be counted off exactly in rows, so across and down
+          are a size asked for rather than a promise. The board comes out as near it as the tiling
+          allows.</p>
       </div>
 
       <div class="panel">
         <p class="label">Display</p>
         <label class="check"><input type="checkbox" id="cbCorners" checked> Corners count as touching</label>
-        <label class="check"><input type="checkbox" id="cbBlocks"> Outline the blocks of four</label>
-        <p class="note">Turn corners off and a cell keeps only its five edge neighbours, which is a
-          gentler game and a different one: numbers then run 1 to 5. Either way it starts afresh.</p>
-      </div>
-
-      <div class="panel">
-        <p class="label">The neighbourhood</p>
-        <p class="note">The Cairo pentagon has two right angles and three of 120&deg;. Four right
-          angles make a full turn, so four pentagons pinwheel about each right-angled corner &mdash;
-          that is the <b>block of four</b>, and blocks sit on a plain square grid.</p>
-        <p class="note">A cell has five edges and so five neighbours by edge. Each of its two
-          right-angled corners is shared with three others, and one of those three is reached only at
-          that point. Five and two: <b>seven</b>.</p>
+        <label class="check"><input type="checkbox" id="cbShapes"> Tell the pentagons apart</label>
+        <p class="note">Turn corners off and a cell keeps only the neighbours it shares an edge with,
+          which is a gentler game and a different one. Either way it starts afresh.</p>
       </div>
 
     </div>
@@ -179,45 +189,287 @@
 "use strict";
 
 /* =====================================================================
-   1. THE TILING
+   1. GEOMETRY PRIMITIVES
 
-   The Cairo pentagonal tiling is the dual of the snub square tiling, so
-   its pentagon is what you get by joining the centres of the five faces
-   round a 3.3.4.3.4 vertex: two squares and three triangles. The two
-   square centres become right angles and the three triangle centres
-   120 degree ones, which fixes the shape exactly. With the four long
-   sides at length 1 the fifth is sqrt(3) - 1, and the corners can be
-   written down.
+   Every tiling here is described as a fundamental unit cell — a handful
+   of polygons — plus two lattice vectors. Polygons are built with reg()
+   and attach() rather than typed-in coordinates, which keeps them exact.
+   All have edge length 1 and are wound counter-clockwise.
 
-   Four right angles make a full turn, so four pentagons meet at each
-   right-angled corner and no gap is left. Those four are a block, and
-   the blocks sit on a square lattice of pitch sqrt(6).
+   This engine, and the dual operator below, are lifted from the Lights
+   Out tiling picker on this site, which is where they were worked out.
    ===================================================================== */
 
-const S3 = Math.sqrt(3), S6 = Math.sqrt(6);
-const rot = (p, a) => [p[0] * Math.cos(a) - p[1] * Math.sin(a),
-                       p[0] * Math.sin(a) + p[1] * Math.cos(a)];
+const TAU = Math.PI * 2, S3 = Math.sqrt(3);
 
-/* One pentagon, written with its two right angles at A and B a distance
-   sqrt(3) apart along the x axis, then turned by 45 degrees so that B
-   lands on the diagonal of the block lattice rather than beside it.
-   Corner order: A, T3, T2, B, T1 — T3 and T2 are the ends of the short
-   side, T1 the far tip. */
-const BASE = [[0, 0], [0.5, -S3 / 2], [S3 - 0.5, -S3 / 2], [S3, 0], [S3 / 2, 0.5]];
+// Regular n-gon, edge length 1, centred at (cx,cy), first vertex at `start`.
+function reg(n, cx, cy, start) {
+  const R = 1 / (2 * Math.sin(Math.PI / n));
+  const out = [];
+  for (let k = 0; k < n; k++) {
+    const a = start + TAU * k / n;
+    out.push([cx + R * Math.cos(a), cy + R * Math.sin(a)]);
+  }
+  return out;
+}
 
-// CELL[k] is that pentagon turned by k quarter turns: cell k of a block.
-// k = 0 points to the block's up-right corner, and k counts round from there.
-const CELL = [];
-for (let k = 0; k < 4; k++) CELL.push(BASE.map(p => rot(p, Math.PI / 4 + k * Math.PI / 2)));
+// Regular n-gon glued to the outside of edge k of a CCW polygon.
+function attach(poly, k, n) {
+  const a = poly[k], b = poly[(k + 1) % poly.length];
+  const dx = b[0] - a[0], dy = b[1] - a[1], L = Math.hypot(dx, dy);
+  const nx = dy / L, ny = -dx / L;                 // outward normal for CCW winding
+  const ap = 1 / (2 * Math.tan(Math.PI / n));      // apothem for edge length 1
+  const cx = (a[0] + b[0]) / 2 + nx * ap;
+  const cy = (a[1] + b[1]) / 2 + ny * ap;
+  return reg(n, cx, cy, Math.atan2(b[1] - cy, b[0] - cx));
+}
 
-/* The block's own outline, for drawing it. Corner A and the tip T1 are
-   interior to the block — T1 of cell k is T3 of cell k+1 — so the
-   boundary is the other three corners of each cell in turn: a 12-gon. */
-const BLOCK = [];
-for (let k = 0; k < 4; k++) BLOCK.push(CELL[k][1], CELL[k][2], CELL[k][3]);
+const translate = (poly, ox, oy) => poly.map(p => [p[0] + ox, p[1] + oy]);
+const rot = (v, ang) => [v[0] * Math.cos(ang) - v[1] * Math.sin(ang),
+                         v[0] * Math.sin(ang) + v[1] * Math.cos(ang)];
 
-// Area centroid of a polygon, used to hang the numbers on.
-function centroid(pts) {
+const inBox = (p, h) => p.every(q =>
+  q[0] >= -h - 1e-6 && q[0] <= h + 1e-6 && q[1] >= -h - 1e-6 && q[1] <= h + 1e-6);
+
+/* A tiling source: repeat the unit cell over the lattice, far enough to
+   fill a square of half-size h. `density` is tiles per unit area, which is
+   what turns a wanted cell count into a size on the plane. */
+function lattice(cellFn, v1, v2) {
+  const A = Math.abs(v1[0] * v2[1] - v1[1] * v2[0]);
+  const pitch = Math.sqrt(A);
+
+  /* Tiles and vertices per unit area, straight off the cell: F, and
+     V = E - F by Euler on the torus. The dual has one tile per vertex of
+     this one, so it needs the second. */
+  const cell0 = cellFn();
+  const F = cell0.length;
+  const E = cell0.reduce((s, p) => s + p.length, 0) / 2;
+
+  function raw(h) {
+    const cell = cellFn();
+    let rad = 0;
+    for (const p of cell) for (const q of p) rad = Math.max(rad, Math.hypot(q[0], q[1]));
+    const reach = h * Math.SQRT2 + rad + 1;
+    const n1 = Math.ceil(reach * Math.hypot(v2[0], v2[1]) / A) + 1;
+    const n2 = Math.ceil(reach * Math.hypot(v1[0], v1[1]) / A) + 1;
+    const out = [];
+    for (let i = -n1; i <= n1; i++) for (let j = -n2; j <= n2; j++) {
+      const ox = i * v1[0] + j * v2[0], oy = i * v1[1] + j * v2[1];
+      if (Math.hypot(ox, oy) > reach) continue;
+      for (const p of cell) out.push(translate(p, ox, oy));
+    }
+    return out;
+  }
+
+  return { pitch, density: F / A, vertexDensity: (E - F) / A, raw };
+}
+
+const fromCells = d => lattice(() => d.cell.map(c => reg(c[0], c[1], c[2], c[3])), d.v1, d.v2);
+
+/* =====================================================================
+   2. VERTEX TOPOLOGY AND THE DUAL
+
+   Snapping merges corners that coincide to within a fraction of an edge.
+   Everything downstream — who touches whom, and the dual operator that
+   makes the pentagons in the first place — is read off this.
+   ===================================================================== */
+
+function topology(polys) {
+  const pts = [], buckets = new Map(), EPS = 0.02;
+  function snap(x, y) {
+    const ix = Math.round(x / 0.25), iy = Math.round(y / 0.25);
+    for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) {
+      const b = buckets.get((ix + dx) + ',' + (iy + dy));
+      if (b) for (const p of b) if (Math.abs(p.x - x) < EPS && Math.abs(p.y - y) < EPS) return p.id;
+    }
+    const p = { x, y, id: pts.length };
+    pts.push(p);
+    const k = ix + ',' + iy;
+    let b = buckets.get(k); if (!b) buckets.set(k, b = []);
+    b.push(p);
+    return p.id;
+  }
+
+  const faces = polys.map(poly => {
+    let sx = 0, sy = 0;
+    for (const p of poly) { sx += p[0]; sy += p[1]; }
+    return { poly, v: poly.map(p => snap(p[0], p[1])),
+             cx: sx / poly.length, cy: sy / poly.length };
+  });
+
+  const edgeMap = new Map(), vertFaces = new Map();
+  faces.forEach((f, fi) => {
+    for (let i = 0; i < f.v.length; i++) {
+      const a = f.v[i], b = f.v[(i + 1) % f.v.length];
+      const k = a < b ? a + ':' + b : b + ':' + a;
+      let e = edgeMap.get(k); if (!e) edgeMap.set(k, e = []); e.push(fi);
+      let w = vertFaces.get(a); if (!w) vertFaces.set(a, w = []); w.push(fi);
+    }
+  });
+
+  return { pts, faces, edgeMap, vertFaces };
+}
+
+// Interior angle that face `f` occupies at vertex id `vid`.
+function angleAt(f, vid) {
+  const i = f.v.indexOf(vid);
+  const m = f.poly.length;
+  const c = f.poly[i], p = f.poly[(i - 1 + m) % m], q = f.poly[(i + 1) % m];
+  let d = Math.atan2(p[1] - c[1], p[0] - c[0]) - Math.atan2(q[1] - c[1], q[0] - c[0]);
+  while (d < 0) d += TAU;
+  while (d > TAU) d -= TAU;
+  return d;
+}
+
+/* Each fully surrounded vertex of the parent becomes one face of the dual,
+   its corners being the centres of the faces around it. A vertex whose
+   angles do not come to a full turn is on the rim of the patch and has no
+   face to give. */
+function dualPolys(polys) {
+  const { pts, faces, vertFaces } = topology(polys);
+  const out = [];
+  for (const [vid, fl] of vertFaces) {
+    const around = [...new Set(fl)];
+    let sum = 0;
+    for (const fi of around) sum += angleAt(faces[fi], vid);
+    if (Math.abs(sum - TAU) > 1e-6) continue;
+    const v = pts[vid];
+    const ring = around.map(fi => faces[fi])
+      .map(f => ({ p: [f.cx, f.cy], a: Math.atan2(f.cy - v.y, f.cx - v.x) }))
+      .sort((m, k) => m.a - k.a)
+      .map(m => m.p);
+    if (ring.length >= 3) out.push(ring);
+  }
+  return out;
+}
+
+function dualOf(base) {
+  return {
+    pitch: base.pitch,
+    density: base.vertexDensity, vertexDensity: base.density,
+    // dualPolys only yields faces well inside the parent patch, so the parent
+    // is grown by a margin and the result trimmed back to what was asked for
+    raw: h => dualPolys(base.raw(h + 2.5 * base.pitch)).filter(p => inBox(p, h))
+  };
+}
+
+/* =====================================================================
+   3. THE TILINGS
+
+   There are fifteen kinds of convex pentagon that tile the plane, but
+   only a few tilings in which every tile is a pentagon and every tile is
+   alike, or alike in a small number of ways. Each of the ones here is
+   the dual of a tiling of regular polygons, so none of them needs any
+   geometry written down beyond its parent:
+
+     the Cairo pentagon is the dual of a 3.3.4.3.4 vertex,
+     the prismatic pentagon the dual of a 3.3.3.4.4 vertex,
+     the floret pentagon the dual of a 3.3.3.3.6 vertex.
+
+   A tiling using only Cairo and prismatic pentagons is therefore the
+   dual of a tiling using only those two vertex types. Three of those are
+   known, and all three are below — they differ in how many Cairo
+   pentagons accompany each prismatic one, and in how the two are laid
+   out. The unit cells for those three were recovered in the Lights Out
+   project and are copied here as [sides, cx, cy, rotation] per tile.
+   ===================================================================== */
+
+// Snub square 3.3.4.3.4 : square, its four triangles, and one rotated square.
+const T_snubSquare = lattice(() => {
+  const q = [[0, 0], [1, 0], [1, 1], [0, 1]];
+  const t = [0, 1, 2, 3].map(k => attach(q, k, 3));
+  return [q, ...t, attach(t[2], 1, 4)];
+}, [1 + S3 / 2, 0.5], [-0.5, 1 + S3 / 2]);
+
+// Elongated triangular 3.3.3.4.4 : a square row and a triangle row.
+const T_elongTri = lattice(() => {
+  const q = [[0, 0], [1, 0], [1, 1], [0, 1]];
+  const t = attach(q, 2, 3);
+  return [q, t, attach(t, 1, 3)];
+}, [1, 0], [0.5, 1 + S3 / 2]);
+
+// Snub trihexagonal 3.3.3.3.6 : hexagon, its six triangles, plus two in the gaps.
+const T_snubTrihex = lattice(() => {
+  const h = reg(6, 0, 0, 0);
+  const t = [0, 1, 2, 3, 4, 5].map(k => attach(h, k, 3));
+  return [h, ...t, attach(t[0], 2, 3), attach(t[1], 2, 3)];
+}, [2.5, S3 / 2], rot([2.5, S3 / 2], Math.PI / 3));
+
+// 2-uniform [3³.4²; 3².4.3.4], the two ways it can be done.
+const T_n16 = fromCells({
+  v1: [-2.366, 2.366], v2: [-2.366, -2.366],
+  cell: [[3,1.9434,-0.1572,1.5708],[3,-2.2886,0.1314,0.5236],[4,1.2604,0.2371,0.2618],
+         [4,-0.4226,1.4201,0.7854],[3,-1.7886,-0.1572,1.5708],[4,0.0774,-1.4459,0.7854],
+         [3,-0.7113,-1.4459,1.0472],[3,0.5774,0.6314,0.5236],[3,0.8661,-0.4459,0],
+         [3,-1.2113,1.4201,1.0472],[3,-0.4226,0.6314,0.5236],[4,-1.7886,-0.9459,0.7854],
+         [4,-1.1056,0.2371,1.309],[3,-1.5,0.9201,2.0944],[4,0.0774,-0.4459,0.7854],
+         [3,-1,-0.9459,2.0944],[3,0.0774,0.3428,1.5708],[3,-0.7113,-0.4459,1.0472]] });
+const T_n17 = fromCells({
+  v1: [-0.5, 1.866], v2: [3.7321, 1],
+  cell: [[3,-1.5515,-1.1555,1.5708],[3,-1.0515,-0.8668,0.5236],[3,1.6806,0.1332,0.5236],
+         [4,1.6806,0.9219,0.7854],[3,-1.0515,0.7105,1.5708],[4,-1.0515,-0.0781,0.7854],
+         [4,0.9975,-0.2612,1.309],[3,0.8919,0.9219,1.0472],[4,-0.3685,1.1049,1.309],
+         [3,-0.2628,-0.0781,2.0944],[3,0.6032,0.4219,0],[3,0.0259,0.4219,1.0472]] });
+
+// 3-uniform [(3³.4²)²; 3².4.3.4]: two orbits of prismatic to one of Cairo.
+const T_k53 = fromCells({
+  v1: [1.866, -0.5], v2: [1.5, 5.5981],
+  cell: [[4,-1.1728,-1.8524,0.2618],[4,-0.1728,2.8796,0.2618],[4,0.0102,-1.1694,0.7854],
+         [4,0.0102,-0.1694,0.7854],[4,0.0102,0.8306,0.7854],[4,1.1932,1.5136,0.2618],
+         [3,-1.0672,-0.6694,0],[3,-0.7785,-1.1694,1.0472],[3,-0.7785,-0.1694,1.0472],
+         [3,-0.4898,-2.8241,0.5236],[3,-0.4898,-2.2467,1.5708],[3,0.0102,-1.9581,0.5236],
+         [3,0.0102,1.6193,1.5708],[3,0.5102,1.908,0.5236],[3,0.5102,2.4853,1.5708],
+         [3,0.7988,-0.1694,0],[3,0.7988,0.8306,2.0944],[3,1.0875,0.3306,1.0472]] });
+
+const TILINGS = [
+  { id: 'cairo', name: 'Cairo Pentagonal', src: dualOf(T_snubSquare),
+    note: 'The dual of the snub square tiling. One pentagon, with two right angles and three of ' +
+          '120°, four of them pinwheeling about each right-angled corner.' },
+  { id: 'prismatic', name: 'Prismatic Pentagonal', src: dualOf(T_elongTri),
+    note: 'The dual of the elongated triangular tiling: rows of pentagons standing on a flat ' +
+          'course, each row facing the opposite way to the last.' },
+  { id: 'floret', name: 'Floret Pentagonal', src: dualOf(T_snubTrihex),
+    note: 'The dual of the snub trihexagonal tiling. Six pentagons turn about a common corner to ' +
+          'make a flower, and the flowers tile as hexagons do.' },
+  { id: 'cp11', name: 'Cairo and Prismatic Pentagons (1:1)', src: dualOf(T_n17),
+    note: 'Both pentagons at once, one of each, and the smaller of the two ways that can be done ' +
+          '— the dual of a 2-uniform tiling of 3³.4² and 3².4.3.4 vertices.' },
+  { id: 'cp21', name: 'Cairo and Prismatic Pentagons (2:1)', src: dualOf(T_n16),
+    note: 'The same two pentagons on a larger repeat, with two Cairo pentagons to each prismatic ' +
+          'one instead of one apiece.' },
+  { id: 'cp3', name: 'Cairo and Prismatic Pentagons (3-uniform)', src: dualOf(T_k53),
+    note: 'Two prismatic pentagons to each Cairo one, from a 3-uniform parent — the prismatic ' +
+          'pentagons here fall into two families that sit differently among their neighbours.' }
+];
+
+/* =====================================================================
+   4. THE BOARD
+
+   A board is a rectangle cut out of one of those tilings: every tile
+   that falls wholly inside it. That is the only sizing rule that can
+   serve all of them, since none but the square grid comes in rows that
+   can be counted off. Two cells are neighbours if they touch at all —
+   sharing an edge, or only a corner — and how many neighbours that
+   comes to is left to the tiling to decide, cell by cell.
+   ===================================================================== */
+
+let tiling = TILINGS[0];
+let n = 0;                    // cells
+let poly = [];                // poly[i] = the cell's corners
+let mids = [];                // centroid per cell, for hanging a glyph on
+let inr = [];                 // biggest circle that fits, per cell
+let shapeOf = [];             // which pentagon shape each cell is
+let shapeCount = 1;
+let interior = [];            // is the cell fully surrounded, or on the rim?
+let bounds = null, cellPitch = 1;
+
+// adjacency held twice, as touching-at-all and as sharing-an-edge, each in
+// compact form: nbAll[nbOff[i] .. nbOff[i+1]] are the neighbours of cell i
+let nbOffC, nbAllC, nbOffE, nbAllE;
+let nbOff, nbAll;
+const nbOf = i => nbAll.subarray(nbOff[i], nbOff[i + 1]);
+
+function centroidOf(pts) {
   let a = 0, cx = 0, cy = 0;
   for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
     const cross = pts[j][0] * pts[i][1] - pts[i][0] * pts[j][1];
@@ -228,80 +480,162 @@ function centroid(pts) {
   return [cx / (3 * a), cy / (3 * a)];
 }
 
-// How big a circle fits inside, centred there: the room a glyph has.
-function inradius(pts, c) {
+function inradiusOf(pts, c) {
   let best = Infinity;
   for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
     const ex = pts[i][0] - pts[j][0], ey = pts[i][1] - pts[j][1];
-    const len = Math.hypot(ex, ey);
-    best = Math.min(best, Math.abs((c[0] - pts[j][0]) * ey - (c[1] - pts[j][1]) * ex) / len);
+    best = Math.min(best, Math.abs((c[0] - pts[j][0]) * ey - (c[1] - pts[j][1]) * ex) / Math.hypot(ex, ey));
   }
   return best;
 }
 
-const MID = CELL.map(p => centroid(p));
-const INR = inradius(CELL[0], MID[0]);
+/* The corner angles of a tile, in order round it, in degrees. */
+function anglesOf(pts) {
+  const a = [];
+  for (let i = 0; i < pts.length; i++) {
+    const c = pts[i], p = pts[(i + pts.length - 1) % pts.length], q = pts[(i + 1) % pts.length];
+    let d = Math.atan2(p[1] - c[1], p[0] - c[0]) - Math.atan2(q[1] - c[1], q[0] - c[0]);
+    while (d < 0) d += TAU;
+    a.push(Math.round(d * 180 / Math.PI));
+  }
+  return a;
+}
+
+/* Which pentagon a tile is. The Cairo and the prismatic have exactly the same
+   angles — 90, 90, 120, 120, 120 — and are not told apart by them at all. What
+   separates them is where the two right angles sit: side by side in the
+   prismatic pentagon, held apart by a 120 in the Cairo one. The floret has no
+   right angle at all, having a 60 instead. */
+function pentagonKind(pts) {
+  const a = anglesOf(pts);
+  if (a.length !== 5) return 'not a pentagon';
+  if (a.includes(60)) return 'floret';
+  const right = a.map((v, i) => v === 90 ? i : -1).filter(i => i >= 0);
+  if (right.length !== 2) return 'other';
+  const gap = Math.abs(right[0] - right[1]);
+  return (gap === 1 || gap === 4) ? 'prismatic' : 'Cairo';
+}
+
+/* Two tiles count as the same shape when their edges and their angles agree
+   as multisets. Since the angles alone cannot separate Cairo from prismatic,
+   it is the edges that do the work here. */
+function shapeKey(pts) {
+  const lens = [];
+  for (let i = 0; i < pts.length; i++) {
+    const a = pts[i], b = pts[(i + 1) % pts.length];
+    lens.push(Math.hypot(b[0] - a[0], b[1] - a[1]));
+  }
+  lens.sort((x, y) => x - y);
+  return lens.map(v => v.toFixed(2)).join(',') + '|' + anglesOf(pts).sort((x, y) => x - y).join(',');
+}
+
+// A coarse grid over the board, so that finding the cell under a point does
+// not mean testing every cell on it.
+let buckets = null, bucketSize = 1, bx0 = 0, by0 = 0, bw = 0, bh = 0;
+
+function buildBoard(t, across, down) {
+  tiling = t;
+  cellPitch = 1 / Math.sqrt(t.src.density);          // mean width of a cell
+  const want = across * down;
+  const hx = across * cellPitch / 2, hy = down * cellPitch / 2;
+
+  /* Only tiles falling wholly inside the rectangle are kept, which costs about
+     half a cell all the way round — a rectangle of the bare size asked for comes
+     up well short. So the rectangle is grown until the count lands on the size
+     wanted. The patch is generated once and only the clipping is repeated,
+     which is cheap enough to bisect on. */
+  const all = t.src.raw(Math.max(hx, hy) + 2 * cellPitch);
+  const fits = (p, m) => p.every(q =>
+    q[0] >= -hx - m - 1e-6 && q[0] <= hx + m + 1e-6 &&
+    q[1] >= -hy - m - 1e-6 && q[1] <= hy + m + 1e-6);
+  const countAt = m => { let c = 0; for (const p of all) if (fits(p, m)) c++; return c; };
+
+  let lo = -cellPitch, hi = 1.5 * cellPitch;
+  if (countAt(hi) >= want)
+    for (let it = 0; it < 30; it++) {
+      const mid = (lo + hi) / 2;
+      if (countAt(mid) < want) lo = mid; else hi = mid;
+    }
+  poly = all.filter(p => fits(p, hi));
+  n = poly.length;
+
+  // who touches whom
+  const topo = topology(poly);
+  const byEdge = Array.from({ length: n }, () => new Set());
+  for (const fl of topo.edgeMap.values())
+    if (fl.length === 2) { byEdge[fl[0]].add(fl[1]); byEdge[fl[1]].add(fl[0]); }
+  const byCorner = Array.from({ length: n }, () => new Set());
+  for (const fl of topo.vertFaces.values()) {
+    const around = [...new Set(fl)];
+    for (const x of around) for (const y of around) if (x !== y) byCorner[x].add(y);
+  }
+  [nbOffC, nbAllC] = pack(byCorner);
+  [nbOffE, nbAllE] = pack(byEdge);
+
+  /* A corner is complete when the tiles at it come to a full turn, and a cell
+     is off the rim when every one of its corners is. Only those cells have the
+     neighbourhood the tiling really gives — the rest are cut short by the edge
+     of the board, and it would be the board talking, not the tiling. */
+  const closed = new Set();
+  for (const [vid, fl] of topo.vertFaces) {
+    let sum = 0;
+    for (const fi of [...new Set(fl)]) sum += angleAt(topo.faces[fi], vid);
+    if (Math.abs(sum - TAU) < 1e-6) closed.add(vid);
+  }
+  interior = topo.faces.map(f => f.v.every(v => closed.has(v)));
+
+  // shapes, centres and room for a glyph
+  const keys = new Map();
+  mids = new Array(n); inr = new Array(n); shapeOf = new Array(n);
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (let i = 0; i < n; i++) {
+    mids[i] = centroidOf(poly[i]);
+    inr[i] = inradiusOf(poly[i], mids[i]);
+    const k = shapeKey(poly[i]);
+    if (!keys.has(k)) keys.set(k, keys.size);
+    shapeOf[i] = keys.get(k);
+    for (const q of poly[i]) {
+      x0 = Math.min(x0, q[0]); x1 = Math.max(x1, q[0]);
+      y0 = Math.min(y0, q[1]); y1 = Math.max(y1, q[1]);
+    }
+  }
+  shapeCount = keys.size;
+  bounds = { x0, y0, w: x1 - x0, h: y1 - y0 };
+
+  // the lookup grid
+  bucketSize = cellPitch;
+  bx0 = x0; by0 = y0;
+  bw = Math.max(1, Math.ceil(bounds.w / bucketSize) + 1);
+  bh = Math.max(1, Math.ceil(bounds.h / bucketSize) + 1);
+  buckets = Array.from({ length: bw * bh }, () => []);
+  for (let i = 0; i < n; i++) {
+    let a0 = Infinity, b0 = Infinity, a1 = -Infinity, b1 = -Infinity;
+    for (const q of poly[i]) {
+      a0 = Math.min(a0, q[0]); a1 = Math.max(a1, q[0]);
+      b0 = Math.min(b0, q[1]); b1 = Math.max(b1, q[1]);
+    }
+    for (let gx = Math.floor((a0 - bx0) / bucketSize); gx <= Math.floor((a1 - bx0) / bucketSize); gx++)
+      for (let gy = Math.floor((b0 - by0) / bucketSize); gy <= Math.floor((b1 - by0) / bucketSize); gy++)
+        if (gx >= 0 && gx < bw && gy >= 0 && gy < bh) buckets[gy * bw + gx].push(i);
+  }
+}
+
+function pack(sets) {
+  const off = new Int32Array(sets.length + 1);
+  for (let i = 0; i < sets.length; i++) off[i + 1] = off[i] + sets[i].size;
+  const all = new Int32Array(off[sets.length]);
+  let w = 0;
+  for (const s of sets) for (const v of s) all[w++] = v;
+  return [off, all];
+}
+
+function useCorners(on) {
+  nbOff = on ? nbOffC : nbOffE;
+  nbAll = on ? nbAllC : nbAllE;
+}
 
 /* =====================================================================
-   2. THE BOARD
-
-   A cell is a block and a quarter. Blocks are held in plain rows and
-   columns, block (c, r) centred at (c, r) * sqrt(6), and a block is two
-   cells wide and two cells deep — so a board of W by H blocks is 2W
-   cells across and 2H down. Nothing wraps: the rim is a real rim, and
-   the pentagons that stick out past it are simply the edge of the board.
-   ===================================================================== */
-
-let W = 0, H = 0, n = 0;      // blocks across, blocks down, cells
-let deg = 7;                  // neighbours per cell: 7 with corners, 5 without
-let nb;                       // neighbour table, 7 wide, edge neighbours first
-
-const idx = (c, r, k) => (r * W + c) * 4 + k;
-const resolve = (c, r, k) => (c < 0 || c >= W || r < 0 || r >= H) ? -1 : idx(c, r, k);
-
-// A block offset turned by k quarter turns, to match the cell being turned.
-function rotOff(d, k) {
-  let x = d[0], y = d[1];
-  for (let t = 0; t < k; t++) { const nx = -y; y = x; x = nx; }
-  return [x, y];
-}
-
-/* The seven neighbours of cell k of a block, listed with the five edge
-   neighbours first. Two share the edges at corner A, which is the block's
-   own hub; two share the edges at corner B, the hub of the block diagonally
-   up-right; one lies across the short side, in the block directly right.
-   The last two touch at a corner only — the cell opposite across each hub.
-   Turning the picture by a quarter carries this to cell k+1, which is why
-   one list serves all four. */
-const NB_SPEC = [
-  [[0, 0], 1],   // edge at hub A
-  [[0, 0], 3],   // edge at hub A
-  [[1, 0], 1],   // edge at hub B
-  [[0, 1], 3],   // edge at hub B
-  [[1, 0], 2],   // edge, across the short side
-  [[0, 0], 2],   // corner only, opposite across hub A
-  [[1, 1], 2]    // corner only, opposite across hub B
-];
-
-function neighboursOf(c, r, k) {
-  return NB_SPEC.map(([d, dk]) => {
-    const o = rotOff(d, k);
-    return resolve(c + o[0], r + o[1], (dk + k) & 3);
-  });
-}
-
-function wire() {
-  nb = new Int32Array(n * 7);
-  for (let r = 0; r < H; r++)
-    for (let c = 0; c < W; c++)
-      for (let k = 0; k < 4; k++) {
-        const list = neighboursOf(c, r, k), o = idx(c, r, k) * 7;
-        for (let t = 0; t < 7; t++) nb[o + t] = list[t];
-      }
-}
-
-/* =====================================================================
-   3. THE GAME
+   5. THE GAME
    ===================================================================== */
 
 const COVERED = 0, OPEN = 1, FLAG = 2;
@@ -311,15 +645,14 @@ let mines = 10, opened = 0, flags = 0, given = 0;
 let seeded = false, over = false, won = false, exploded = -1;
 let startTime = 0, endTime = 0;
 
-function newGame(cols, rows, m) {
-  W = cols; H = rows; n = W * H * 4;
-  mines = Math.max(1, Math.min(m, n - 1));
-  deg = document.getElementById('cbCorners').checked ? 7 : 5;
+function newGame(across, down, m) {
+  buildBoard(tiling, across, down);
+  useCorners(document.getElementById('cbCorners').checked);
+  mines = Math.max(1, Math.min(m, n - 9));
 
   mine = new Uint8Array(n);
   state = new Uint8Array(n);
   count = new Uint8Array(n);
-  wire();
 
   opened = 0; flags = 0; given = 0;
   seeded = false; over = false; won = false; exploded = -1;
@@ -352,18 +685,17 @@ function layMines(banned) {
   }
   for (let j = 0; j < n; j++) {
     let c = 0;
-    for (let t = 0; t < deg; t++) { const i = nb[j * 7 + t]; if (i >= 0 && mine[i]) c++; }
+    for (const i of nbOf(j)) if (mine[i]) c++;
     count[j] = c;
   }
 }
 
 /* In the plain game mines are laid only once the first cell is asked for, and
    never on that cell or anything touching it — so the first click always opens
-   out into a region rather than onto a bare number. If the board is so crowded
-   that there is no room for that, only the clicked cell itself is spared. */
+   out into a region rather than onto a bare number. */
 function seed(first) {
   const banned = new Set([first]);
-  for (let t = 0; t < deg; t++) { const j = nb[first * 7 + t]; if (j >= 0) banned.add(j); }
+  for (const j of nbOf(first)) banned.add(j);
   layMines(banned);
   seeded = true;
 }
@@ -382,10 +714,7 @@ function reveal(i) {
     if (state[j] !== COVERED) continue;
     state[j] = OPEN; opened++;
     if (count[j] === 0)
-      for (let t = 0; t < deg; t++) {
-        const m = nb[j * 7 + t];
-        if (m >= 0 && state[m] === COVERED) stack.push(m);
-      }
+      for (const m of nbOf(j)) if (state[m] === COVERED) stack.push(m);
   }
   if (opened === n - mines) win();
 }
@@ -396,11 +725,10 @@ function reveal(i) {
 function chord(i) {
   if (over || state[i] !== OPEN || count[i] === 0) return;
   let f = 0;
-  for (let t = 0; t < deg; t++) { const j = nb[i * 7 + t]; if (j >= 0 && state[j] === FLAG) f++; }
+  for (const j of nbOf(i)) if (state[j] === FLAG) f++;
   if (f !== count[i]) return;
-  for (let t = 0; t < deg; t++) {
-    const j = nb[i * 7 + t];
-    if (j >= 0 && state[j] === COVERED) reveal(j);
+  for (const j of nbOf(i)) {
+    if (state[j] === COVERED) reveal(j);
     if (over) return;
   }
 }
@@ -424,7 +752,7 @@ function win() {
 }
 
 /* =====================================================================
-   3a. NO GUESSING
+   6. NO GUESSING
 
    A board is only fair if every cell that is not a mine can be reasoned
    out. Three kinds of reasoning are allowed here, and they are the three
@@ -448,6 +776,10 @@ function win() {
    showing. Since the three rules alone always finish the job, a player
    who knows them never has to guess — and a player who reasons better
    than they do is only ever further ahead.
+
+   None of this knows or cares which tiling it is working on. It asks the
+   board who touches whom and nothing else, so a tiling whose cells have
+   nine neighbours is no different to it than one whose cells have five.
    ===================================================================== */
 
 const UNKNOWN = 0, SAFE = 1, KNOWN_MINE = 2;
@@ -460,10 +792,7 @@ function markOpen(known, i) {
     if (known[j] !== UNKNOWN) continue;
     known[j] = SAFE;
     if (count[j] === 0)
-      for (let t = 0; t < deg; t++) {
-        const m = nb[j * 7 + t];
-        if (m >= 0 && known[m] === UNKNOWN) stack.push(m);
-      }
+      for (const m of nbOf(j)) if (known[m] === UNKNOWN) stack.push(m);
   }
 }
 
@@ -477,8 +806,7 @@ function constraintsOf(known) {
     if (known[i] !== SAFE) continue;
     const cells = [];
     let left = count[i];
-    for (let t = 0; t < deg; t++) {
-      const j = nb[i * 7 + t]; if (j < 0) continue;
+    for (const j of nbOf(i)) {
       if (known[j] === UNKNOWN) cells.push(j);
       else if (known[j] === KNOWN_MINE) left--;
     }
@@ -565,19 +893,19 @@ function pickGiven(known, opening) {
   for (let i = 0; i < n; i++) {
     if (known[i] !== UNKNOWN || mine[i]) continue;
     let touches = 0;
-    for (let t = 0; t < deg; t++) { const j = nb[i * 7 + t]; if (j >= 0 && known[j] === SAFE) touches++; }
-    const score = opening
+    for (const j of nbOf(i)) if (known[j] === SAFE) touches++;
+    const score = (opening
       ? (count[i] === 0 ? 100 : 10 - count[i])
-      : (count[i] === 0 ? 0 : 60) + (touches ? 40 : 0) + count[i];
-    if (score + Math.random() > bestScore) { bestScore = score + Math.random(); best = i; }
+      : (count[i] === 0 ? 0 : 60) + (touches ? 40 : 0) + count[i]) + Math.random();
+    if (score > bestScore) { bestScore = score; best = i; }
   }
   return best;
 }
 
 // How much of the board a set of handouts actually puts on show, cascades and all.
-function shownBy(given) {
+function shownBy(list) {
   const shown = new Uint8Array(n);
-  for (const g of given) markOpen(shown, g);
+  for (const g of list) markOpen(shown, g);
   let cells = 0;
   for (let i = 0; i < n; i++) if (shown[i] === SAFE) cells++;
   return cells;
@@ -602,78 +930,54 @@ function buildPuzzle() {
   for (let attempt = 0; attempt < 500; attempt++) {
     layMines(new Set());
     const known = new Uint8Array(n);
-    const given = [];
+    const list = [];
     while (true) {
-      const g = pickGiven(known, given.length === 0);
+      const g = pickGiven(known, list.length === 0);
       if (g < 0) break;
-      given.push(g);
+      list.push(g);
       markOpen(known, g);
       if (deduce(known) === n - mines) break;
     }
-    const cells = shownBy(given);
-    const score = (given.length - 1) * 1e5 + Math.abs(cells - target);
+    const cells = shownBy(list);
+    const score = (list.length - 1) * 1e5 + Math.abs(cells - target);
     if (!best || score < best.score)
-      best = { mine: mine.slice(), count: count.slice(), given, score };
+      best = { mine: mine.slice(), count: count.slice(), list, score };
     if (performance.now() > deadline) break;
   }
 
   mine.set(best.mine);
   count.set(best.count);
-  return best.given;
+  return best.list;
 }
 
 /* =====================================================================
-   4. DRAWING
+   7. DRAWING
    ===================================================================== */
 
 const canvas = document.getElementById('board');
 const ctx = canvas.getContext('2d');
 
-let cellPath = [];        // one Path2D per cell, in board units
-let blockPath = null;     // every block outline in one path
-let mids = [];            // cell centroids, board units
-let bounds = null;
+let cellPath = [];
 let view = { s: 1, ox: 0, oy: 0 };
 let hover = -1;
 
-const COVER = '#35603d', COVER_HI = '#427a4c', DUG = '#1b3620';
-const LINE = '#16301b', RIM = '#4a7d55';
+const DUG = '#1b3620', LINE = '#16301b', RIM = '#4a7d55';
 const BOOM = '#b91c1c', MINED = '#7f1d1d';
-const NUMS = ['', '#60a5fa', '#4ade80', '#f87171', '#c084fc', '#fbbf24', '#22d3ee', '#f9a8d4'];
-
-const MAX_SCALE = 34;     // board units to CSS pixels, so a small board stays sane
+// one green per pentagon shape, used only when asked for
+const COVERS = ['#35603d', '#2c5a4c', '#3d5f33', '#2f5560'];
+const COVER_HI = '#4b8557';
+const NUMS = ['', '#60a5fa', '#4ade80', '#f87171', '#c084fc', '#fbbf24',
+              '#22d3ee', '#f9a8d4', '#fb923c', '#a3e635', '#e879f9', '#94a3b8', '#fca5a5'];
 
 function buildPaths() {
   cellPath = new Array(n);
-  blockPath = new Path2D();
-  mids = new Array(n);
-  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-
-  for (let r = 0; r < H; r++)
-    for (let c = 0; c < W; c++) {
-      const bx = c * S6, by = r * S6;
-
-      for (let k = 0; k < 4; k++) {
-        const p = new Path2D(), s = CELL[k];
-        p.moveTo(bx + s[0][0], by + s[0][1]);
-        for (let m = 1; m < 5; m++) p.lineTo(bx + s[m][0], by + s[m][1]);
-        p.closePath();
-        const i = idx(c, r, k);
-        cellPath[i] = p;
-        mids[i] = [bx + MID[k][0], by + MID[k][1]];
-      }
-
-      blockPath.moveTo(bx + BLOCK[0][0], by + BLOCK[0][1]);
-      for (let m = 1; m < BLOCK.length; m++) blockPath.lineTo(bx + BLOCK[m][0], by + BLOCK[m][1]);
-      blockPath.closePath();
-
-      for (const q of BLOCK) {
-        x0 = Math.min(x0, bx + q[0]); x1 = Math.max(x1, bx + q[0]);
-        y0 = Math.min(y0, by + q[1]); y1 = Math.max(y1, by + q[1]);
-      }
-    }
-
-  bounds = { x0, y0, w: x1 - x0, h: y1 - y0 };
+  for (let i = 0; i < n; i++) {
+    const p = new Path2D(), s = poly[i];
+    p.moveTo(s[0][0], s[0][1]);
+    for (let m = 1; m < s.length; m++) p.lineTo(s[m][0], s[m][1]);
+    p.closePath();
+    cellPath[i] = p;
+  }
   layout();
 }
 
@@ -682,7 +986,7 @@ function layout() {
   if (!bounds) return;
   const cssW = canvas.parentElement.clientWidth - 20;
   const pad = 4;
-  const s = Math.min((cssW - pad * 2) / bounds.w, MAX_SCALE);
+  const s = Math.min((cssW - pad * 2) / bounds.w, 46 / cellPitch);
   const cssH = bounds.h * s + pad * 2;
 
   const dpr = window.devicePixelRatio || 1;
@@ -712,11 +1016,11 @@ function drawMine(x, y, rad) {
   }
   ctx.stroke();
   ctx.beginPath();
-  ctx.arc(x, y, rad, 0, Math.PI * 2);
+  ctx.arc(x, y, rad, 0, TAU);
   ctx.fill();
   ctx.fillStyle = '#516b55';
   ctx.beginPath();
-  ctx.arc(x - rad * 0.33, y - rad * 0.33, rad * 0.26, 0, Math.PI * 2);
+  ctx.arc(x - rad * 0.33, y - rad * 0.33, rad * 0.26, 0, TAU);
   ctx.fill();
 }
 
@@ -750,61 +1054,57 @@ function drawCross(x, y, rad) {
 }
 
 function draw() {
+  if (!n || cellPath.length !== n) return;
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  const byShape = document.getElementById('cbShapes').checked && shapeCount > 1;
 
   // the tiling first, one cell at a time, in board units
   ctx.setTransform(view.s, 0, 0, view.s, view.ox, view.oy);
   ctx.lineJoin = 'round';
-  ctx.lineWidth = 0.07;
+  ctx.lineWidth = cellPitch * 0.06;
   for (let i = 0; i < n; i++) {
     const open = state[i] === OPEN;
     if (open && mine[i]) ctx.fillStyle = i === exploded ? BOOM : MINED;
     else if (open) ctx.fillStyle = DUG;
-    else ctx.fillStyle = i === hover && !over ? COVER_HI : COVER;
+    else if (i === hover && !over) ctx.fillStyle = COVER_HI;
+    else ctx.fillStyle = COVERS[byShape ? shapeOf[i] % COVERS.length : 0];
     ctx.fill(cellPath[i]);
     ctx.strokeStyle = open ? LINE : RIM;
     ctx.stroke(cellPath[i]);
   }
 
-  if (document.getElementById('cbBlocks').checked) {
-    ctx.strokeStyle = 'rgba(250, 204, 21, 0.38)';
-    ctx.lineWidth = 0.11;
-    ctx.stroke(blockPath);
-  }
-
   // then the glyphs, in screen pixels, so the type stays crisp
   ctx.setTransform(1, 0, 0, 1, 0, 0);
-  const rad = INR * view.s * 0.55;
-  ctx.font = '600 ' + (INR * view.s * 1.15).toFixed(1) + 'px "Segoe UI", sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
 
   for (let i = 0; i < n; i++) {
+    if (state[i] === COVERED) continue;
     const x = mids[i][0] * view.s + view.ox, y = mids[i][1] * view.s + view.oy;
+    const rad = inr[i] * view.s * 0.55;
     if (state[i] === FLAG) {
       drawFlag(x, y, rad);
       if (over && !mine[i]) drawCross(x, y, rad * 1.3);
-    } else if (state[i] === OPEN) {
-      if (mine[i]) drawMine(x, y, rad * 0.62);
-      else if (count[i]) { ctx.fillStyle = NUMS[count[i]]; ctx.fillText(count[i], x, y); }
+    } else if (mine[i]) {
+      drawMine(x, y, rad * 0.62);
+    } else if (count[i]) {
+      ctx.font = '600 ' + (inr[i] * view.s * 1.15).toFixed(1) + 'px "Segoe UI", sans-serif';
+      ctx.fillStyle = NUMS[Math.min(count[i], NUMS.length - 1)];
+      ctx.fillText(count[i], x, y);
     }
   }
 }
 
 /* =====================================================================
-   5. POINTING AT A CELL
-
-   Blocks are on a square grid, and no cell reaches more than one block
-   away from its own hub, so the nine blocks around the nearest one are
-   enough to look through.
+   8. POINTING AT A CELL
    ===================================================================== */
 
-function pointInPoly(pts, bx, by, x, y) {
+function pointInPoly(pts, x, y) {
   let inside = false;
   for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
-    const xi = bx + pts[i][0], yi = by + pts[i][1];
-    const xj = bx + pts[j][0], yj = by + pts[j][1];
+    const xi = pts[i][0], yi = pts[i][1], xj = pts[j][0], yj = pts[j][1];
     if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) inside = !inside;
   }
   return inside;
@@ -814,20 +1114,14 @@ function cellAt(clientX, clientY) {
   const rect = canvas.getBoundingClientRect();
   const x = ((clientX - rect.left) * canvas.width / rect.width - view.ox) / view.s;
   const y = ((clientY - rect.top) * canvas.height / rect.height - view.oy) / view.s;
-
-  const c0 = Math.round(x / S6), r0 = Math.round(y / S6);
-  for (let dr = -1; dr <= 1; dr++)
-    for (let dc = -1; dc <= 1; dc++) {
-      const c = c0 + dc, r = r0 + dr;
-      if (c < 0 || c >= W || r < 0 || r >= H) continue;
-      for (let k = 0; k < 4; k++)
-        if (pointInPoly(CELL[k], c * S6, r * S6, x, y)) return idx(c, r, k);
-    }
+  const gx = Math.floor((x - bx0) / bucketSize), gy = Math.floor((y - by0) / bucketSize);
+  if (gx < 0 || gx >= bw || gy < 0 || gy >= bh) return -1;
+  for (const i of buckets[gy * bw + gx]) if (pointInPoly(poly[i], x, y)) return i;
   return -1;
 }
 
 /* =====================================================================
-   6. CONTROLS
+   9. CONTROLS
    ===================================================================== */
 
 const el = id => document.getElementById(id);
@@ -847,6 +1141,24 @@ function paintStatus() {
   el('noteGiven').textContent = given
     ? given + ' of the ' + (n - mines) + ' safe cells were given away to start.'
     : 'Mines are laid on your first click, so it is always a safe one.';
+}
+
+/* How many neighbours the cells of this board actually have. Cells on the rim
+   have fewer, so only the fully surrounded ones are counted — they are the ones
+   the tiling itself is speaking for. */
+function paintTilingNote() {
+  el('noteTiling').textContent = tiling.note;
+  const inside = [];
+  for (let i = 0; i < n; i++) if (interior[i]) inside.push(nbOf(i).length);
+  if (!inside.length) { el('noteDegree').textContent = ''; return; }
+  const hi = Math.max(...inside), lo = Math.min(...inside);
+  const tally = new Map();
+  for (const d of inside) tally.set(d, (tally.get(d) || 0) + 1);
+  const spread = [...tally.entries()].sort((a, b) => a[0] - b[0])
+    .map(([d, c]) => d + ' (' + Math.round(c / inside.length * 100) + '%)').join(', ');
+  el('noteDegree').innerHTML = lo === hi
+    ? 'Every cell away from the rim touches <b>' + hi + '</b> others, so the numbers run 1 to ' + hi + '.'
+    : 'Neighbours away from the rim: <b>' + spread + '</b> — so the numbers run 1 to ' + hi + '.';
 }
 
 // The clock is the only thing that moves on its own, so the loop only redraws
@@ -915,10 +1227,10 @@ canvas.addEventListener('touchmove', () => {
 // --- the size controls ---
 const rngAcross = el('rngAcross'), rngDown = el('rngDown'), rngMines = el('rngMines');
 
-function cellCount() { return (+rngAcross.value / 2) * (+rngDown.value / 2) * 4; }
-
-function paintSizeLabels() {
-  const total = cellCount();
+// Before a board is built the cell count can only be guessed at, and after one
+// is built it is simply known.
+function paintSizeLabels(actual) {
+  const total = actual || Math.round(+rngAcross.value * +rngDown.value);
   rngMines.max = Math.max(1, total - 9);
   if (+rngMines.value > +rngMines.max) rngMines.value = rngMines.max;
   el('valAcross').textContent = rngAcross.value;
@@ -928,11 +1240,13 @@ function paintSizeLabels() {
 }
 
 function startFromControls() {
-  newGame(+rngAcross.value / 2, +rngDown.value / 2, +rngMines.value);
+  newGame(+rngAcross.value, +rngDown.value, +rngMines.value);
+  paintSizeLabels(n);
+  paintTilingNote();
   draw();
 }
 
-for (const r of [rngAcross, rngDown, rngMines]) r.oninput = paintSizeLabels;
+for (const r of [rngAcross, rngDown, rngMines]) r.oninput = () => paintSizeLabels();
 rngAcross.onchange = rngDown.onchange = rngMines.onchange = startFromControls;
 
 for (const b of document.querySelectorAll('[data-preset]'))
@@ -945,10 +1259,14 @@ for (const b of document.querySelectorAll('[data-preset]'))
     startFromControls();
   };
 
+const selTiling = el('selTiling');
+selTiling.innerHTML = TILINGS.map((t, i) => '<option value="' + i + '">' + t.name + '</option>').join('');
+selTiling.onchange = () => { tiling = TILINGS[+selTiling.value]; startFromControls(); };
+
 el('btnNew').onclick = startFromControls;
 el('cbCorners').onchange = startFromControls;
 el('cbFair').onchange = startFromControls;
-el('cbBlocks').onchange = draw;
+el('cbShapes').onchange = draw;
 
 /* The canvas follows its panel rather than the window, since the panel also
    changes width when the sidebar drops below it. Only a width change is acted
@@ -962,83 +1280,76 @@ new ResizeObserver(() => {
 }).observe(canvas.parentElement);
 
 /* =====================================================================
-   7. SELF-CHECK
+   10. SELF-CHECK
 
-   Both the shape and the neighbour rule are written down rather than
-   measured, so both are checked against each other. The tiling is sound
-   if the angles round every interior corner come to a full turn; the
-   neighbour list is right if two cells are called neighbours exactly
-   when their pentagons share a corner, and edge neighbours exactly when
-   they share two. Reported to the console, and only there.
+   Each tiling is built from its parent rather than typed in, so what
+   wants checking is that the result really is a tiling of pentagons: no
+   tile with any number of sides but five, every corner well inside the
+   patch closing to a full turn — which is exactly the statement that
+   there is no gap and no overlap — and neighbourliness that both cells
+   agree on. Reported to the console, and only there.
    ===================================================================== */
 
 function verify() {
-  const wasW = W, wasH = H, wasN = n;
-  W = 5; H = 5; n = W * H * 4;
+  const keep = tiling;
+  for (const t of TILINGS) {
+    buildBoard(t, 12, 12);
 
-  const key = p => Math.round(p[0] * 1e4) + ',' + Math.round(p[1] * 1e4);
-  const at = new Map();          // corner -> the cells with a corner there
-  const angleAt = new Map();     // corner -> the angles they contribute
-  for (let r = 0; r < H; r++)
-    for (let c = 0; c < W; c++)
-      for (let k = 0; k < 4; k++) {
-        const bx = c * S6, by = r * S6, s = CELL[k], i = idx(c, r, k);
-        for (let m = 0; m < 5; m++) {
-          const p = [bx + s[m][0], by + s[m][1]];
-          const u = s[(m + 4) % 5], v = s[(m + 1) % 5];
-          const a1 = Math.atan2(u[1] - s[m][1], u[0] - s[m][0]);
-          const a2 = Math.atan2(v[1] - s[m][1], v[0] - s[m][0]);
-          let ang = Math.abs(a1 - a2); if (ang > Math.PI) ang = 2 * Math.PI - ang;
-          const q = key(p);
-          let w = at.get(q); if (!w) at.set(q, w = []);
-          w.push(i);
-          angleAt.set(q, (angleAt.get(q) || 0) + ang);
-        }
-      }
+    const sides = [...new Set(poly.map(p => p.length))];
 
-  // corners well inside the board: their angles must come to a full turn
-  const lo = S6 * 1.6, hi = S6 * (W - 1) - S6 * 0.6;
-  let corners = 0, gaps = 0;
-  for (const [q, ang] of angleAt) {
-    const [x, y] = q.split(',').map(v => v / 1e4);
-    if (x < lo || x > hi || y < lo || y > hi) continue;
-    corners++;
-    if (Math.abs(ang - 2 * Math.PI) > 1e-6) gaps++;
+    /* Every corner of a fully surrounded cell must close to a full turn. That
+       is what says the pentagons meet with no gap and no overlap, and it is
+       checked here against the geometry rather than taken from the parent. */
+    const topo = topology(poly);
+    let corners = 0, gaps = 0;
+    for (const [vid, fl] of topo.vertFaces) {
+      const around = [...new Set(fl)];
+      if (!around.some(fi => interior[fi])) continue;
+      let sum = 0;
+      for (const fi of around) sum += angleAt(topo.faces[fi], vid);
+      if (Math.abs(sum - TAU) > 1e-6) gaps++; else corners++;
+    }
+
+    // if I call you a neighbour you must call me one, by edge and by corner
+    let oneWay = 0;
+    for (const which of [true, false]) {
+      useCorners(which);
+      for (let i = 0; i < n; i++)
+        for (const j of nbOf(i)) if (!nbOf(j).includes(i)) oneWay++;
+    }
+    useCorners(true);
+
+    // every edge is shared by two cells, or is on the rim and shared by one
+    let oddEdges = 0;
+    for (const fl of topo.edgeMap.values()) if (fl.length > 2) oddEdges++;
+
+    // and the pentagons present must be the ones the tiling is named after
+    const kinds = new Map();
+    const degs = [];
+    for (let i = 0; i < n; i++) if (interior[i]) {
+      const k = pentagonKind(poly[i]);
+      kinds.set(k, (kinds.get(k) || 0) + 1);
+      degs.push(nbOf(i).length);
+    }
+    const mix = [...kinds.entries()].sort((a, b) => b[1] - a[1]);
+    const ratio = mix.length === 2 ? ` (${(mix[0][1] / mix[1][1]).toFixed(2)}:1)` : '';
+    console.log(`${t.name}: ${n} cells, sides {${sides}}, ${shapeCount} shape(s), ` +
+      `${corners} corners closed / ${gaps} not, ${oneWay} one-way, ${oddEdges} bad edges, ` +
+      `interior degrees ${Math.min(...degs)}-${Math.max(...degs)}, ` +
+      `pentagons ${mix.map(([k, c]) => k + ' x' + c).join(' + ')}${ratio}`);
   }
-
-  // adjacency by shared corners, against the list neighboursOf claims
-  const share = Array.from({ length: n }, () => new Map());
-  for (const w of at.values())
-    for (const x of w) for (const y of w) if (x !== y) share[x].set(y, (share[x].get(y) || 0) + 1);
-
-  let checked = 0, wrong = 0;
-  for (let r = 1; r < H - 1; r++)
-    for (let c = 1; c < W - 1; c++)
-      for (let k = 0; k < 4; k++) {
-        const i = idx(c, r, k);
-        if (share[i].size !== 7) continue;               // still on the rim
-        checked++;
-        const list = neighboursOf(c, r, k);
-        if (list.length !== 7 || new Set(list).size !== 7) { wrong++; continue; }
-        // first five must share two corners (an edge), the last two just one
-        for (let t = 0; t < 7; t++) {
-          const want = t < 5 ? 2 : 1;
-          if (share[i].get(list[t]) !== want) { wrong++; break; }
-        }
-      }
-
-  W = wasW; H = wasH; n = wasN;
-  console.log(`cairo tiling: ${corners} interior corners, ${gaps} did not close to a full turn`);
-  console.log(`cairo adjacency: ${checked} interior cells checked, ${wrong} disagreed with the geometry`);
+  tiling = keep;
 }
 
 /* =====================================================================
-   8. GO
+   11. GO
    ===================================================================== */
 
+// The check runs first, since it builds scratch boards of its own; starting the
+// game afterwards is what puts a real one back.
 paintSizeLabels();
-startFromControls();
 verify();
+startFromControls();
 </script>
 </body>
 </html>
