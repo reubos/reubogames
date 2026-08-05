@@ -32,16 +32,17 @@
     border-radius: 14px;
     padding: 16px;
   }
-  #board { width: 100%; height: auto; display: block; user-select: none; }
+  #board { width: 100%; height: auto; display: block; user-select: none; cursor: pointer; }
 
   /* a piece is filled by its parts; the hairline is the fill again so the two
      sides of a colour boundary meet without the background showing through */
   .part { stroke-width: 0.006; }
   .cell { fill: none; stroke: #101114; stroke-linejoin: round; stroke-linecap: round; }
 
-  /* transparent, not none: a disc has to be there to be clicked */
-  .hit { fill: transparent; stroke: none; cursor: pointer; }
-  .hit:hover { stroke: rgba(255, 255, 255, 0.8); }
+  /* the circles only show which one is taken; what is under the pointer is
+     worked out from where it is, not from what it happens to be over */
+  .hit { fill: none; stroke: none; pointer-events: none; }
+  .hit.on { stroke: rgba(255, 255, 255, 0.8); }
 
   .controls { display: flex; flex-wrap: wrap; gap: 10px; margin: 16px 0 0; }
   button, .toggle {
@@ -739,19 +740,14 @@ function render() {
     ringLayer.appendChild(p.el);
   }
 
-  /* What is clicked is the disc, smallest first so a triangle or a square
-     sitting inside a hexagon's reach can still be taken. */
   const hits = svgEl('g', { 'stroke-width': '0.03' });
-  for (const c of [...turners].sort((a, b) => b.r - a.r)) {
+  for (const c of turners) {
     c.hit = svgEl('circle', { class: 'hit', cx: c.c[0], cy: c.c[1], r: c.r });
-    c.hit.addEventListener('click', () => turn(c, clickDir()));
-    c.hit.addEventListener('contextmenu', e => { e.preventDefault(); turn(c, -clickDir()); });
     hits.appendChild(c.hit);
   }
 
   root.append(fills, ringLayer, hits);
   svg.replaceChildren(root);
-  svg.addEventListener('contextmenu', e => e.preventDefault());
 
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
   for (const c of turners) {
@@ -760,6 +756,42 @@ function render() {
   }
   svg.setAttribute('viewBox',
     [x0 - PAD, -y1 - PAD, x1 - x0 + 2 * PAD, y1 - y0 + 2 * PAD].join(' '));
+
+  /* Which circle the pointer is in: of the circles it is inside, the one whose
+     middle is nearest. Laying the discs one over another instead would hand a
+     whole circle to whichever sat on top, and the small ones sit on top. */
+  const pointAt = ev => {
+    const box = svg.getBoundingClientRect();
+    const vb = svg.viewBox.baseVal;
+    return [vb.x + (ev.clientX - box.left) / box.width * vb.width,
+            -(vb.y + (ev.clientY - box.top) / box.height * vb.height)];
+  };
+  const nearest = p => {
+    let best = null, near = Infinity;
+    for (const c of turners) {
+      const d = Math.hypot(p[0] - c.c[0], p[1] - c.c[1]);
+      if (d < c.r && d < near) { near = d; best = c; }
+    }
+    return best;
+  };
+  let under = null;
+  const mark = c => {
+    if (under === c) return;
+    if (under) under.hit.classList.remove('on');
+    under = c;
+    if (under) under.hit.classList.add('on');
+  };
+  svg.addEventListener('mousemove', ev => mark(nearest(pointAt(ev))));
+  svg.addEventListener('mouseleave', () => mark(null));
+  svg.addEventListener('click', ev => {
+    const c = nearest(pointAt(ev));
+    if (c) turn(c, clickDir());
+  });
+  svg.addEventListener('contextmenu', ev => {
+    ev.preventDefault();
+    const c = nearest(pointAt(ev));
+    if (c) turn(c, -clickDir());
+  });
 }
 
 const paint = () => {
