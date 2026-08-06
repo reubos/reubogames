@@ -456,12 +456,17 @@ const TILINGS = [
           'make a flower, and the flowers tile as hexagons do. The board is a hexagonal ball of ' +
           'whole flowers, built out from one such corner in the middle — no flower is ever cut.' },
   { id: 'cp11', name: 'Cairo and Prismatic Pentagons (1:1)', src: dualOf(T_n17),
-    region: { kind: 'rect', groups: 'blocks11' },
+    /* A row runs prismatic, Cairo, prismatic, ... across to the right, dropping
+       a whole cell every four; the row below starts one step down the chain of
+       prismatic fenceposts, which leans left. Four cells to a row-step and two
+       rows to a fencepost-step is eight, which is what the repeat holds. */
+    region: { kind: 'walk', start: 'prismatic',
+              step: [0.7, 1.15, -0.25, 0.7], drop: [-0.7, 0.15, 0.65, 1.25] },
     note: 'Both pentagons at once, one of each, and the smaller of the two ways that can be done ' +
-          '— the dual of a 2-uniform tiling of 3³.4² and 3².4.3.4 vertices. It reads as blocks of ' +
-          'six with flat tops and bottoms — two rows of Cairo, prismatic, Cairo — with chains of ' +
-          'prismatic fenceposts running down the seams between them. The board is kept to whole ' +
-          'blocks.' },
+          '— the dual of a 2-uniform tiling of 3³.4² and 3².4.3.4 vertices. Its rows run ' +
+          'prismatic, Cairo, prismatic and so on, sloping gently down as they go; each row starts ' +
+          'one place further down the chain of prismatic fenceposts, so the board leans left as ' +
+          'it descends.' },
   { id: 'cp21', name: 'Cairo and Prismatic Pentagons (2:1)', src: dualOf(T_n16),
     region: { kind: 'rings', anchor: 'prismaticPair' },
     note: 'The same two pentagons on a larger repeat, with two Cairo pentagons to each prismatic ' +
@@ -469,9 +474,17 @@ const TILINGS = [
           'the page, so the board is built in whole rings about the middle and comes out as a ' +
           'diamond — centred on the upright edge joining a pair of prismatic pentagons. Rings are ' +
           'far apart in size, so this one is better spoken of as small, medium or large.' },
+  /* Here a row runs Cairo, prismatic, prismatic and repeats, and it runs down
+     the page rather than across it; the next row stands a cell to the right and
+     a little higher. Six cells to a row-step and two rows to the other is
+     twelve, which is what this repeat holds. */
   { id: 'cp3', name: 'Cairo and Prismatic Pentagons (3-uniform)', src: dualOf(T_k53),
+    region: { kind: 'walk', start: 'Cairo',
+              step: [-0.2, 0.65, 0.75, 1.15], drop: [0.7, 1.15, -0.7, 0.2] },
     note: 'Two prismatic pentagons to each Cairo one, from a 3-uniform parent — the prismatic ' +
-          'pentagons here fall into two families that sit differently among their neighbours.' }
+          'pentagons here fall into two families that sit differently among their neighbours. Its ' +
+          'rows run Cairo, prismatic, prismatic down the page, and each row stands a cell right ' +
+          'of the last and a little higher, so the board leans as it goes.' }
 ];
 
 /* =====================================================================
@@ -876,6 +889,71 @@ function ringBoard(t, rings) {
   return keep;
 }
 
+/* Some tilings are best described by walking them rather than by cutting a
+   shape out of them. A row is a run of cells each a fixed step from the last,
+   and the row below starts one further step from the row above — and since
+   neither step is along a line of the page, no region drawn on the page picks
+   them out. So the board is walked: `across` cells along each row, `down` rows
+   down, following the tiling from cell to cell.
+
+   Each step is given as the window its move falls in, [dx from, dx to, dy from,
+   dy to], and only one neighbour of a cell ever lies in it. Walking the same
+   windows backwards from the middle is what puts the first cell of the first
+   row where the board comes out centred. */
+function walkBoard(t, across, down, spec) {
+  const cp = 1 / Math.sqrt(t.src.density);
+  /* The walk starts in the middle and goes at most half the cells each way, and
+     no step covers much more than one cell, so this reaches comfortably past
+     the furthest corner without generating a patch four times the size. */
+  const all = t.src.raw((across + down) / 2 * 1.15 * cp + 4 * cp);
+  const { byCorner } = adjacencyOf(all);
+  const mid = all.map(centroidOf), kind = all.map(pentagonKind);
+
+  const move = (i, w) => {
+    for (const j of byCorner[i]) {
+      const dx = mid[j][0] - mid[i][0], dy = mid[j][1] - mid[i][1];
+      if (dx >= w[0] && dx <= w[1] && dy >= w[2] && dy <= w[3]) return j;
+    }
+    return -1;
+  };
+  const back = w => [-w[1], -w[0], -w[3], -w[2]];
+
+  let seed = -1, bd = Infinity;
+  for (let i = 0; i < all.length; i++) {
+    if (kind[i] !== spec.start) continue;
+    const d = Math.hypot(mid[i][0], mid[i][1]);
+    if (d < bd) { bd = d; seed = i; }
+  }
+  if (seed < 0) return [];
+
+  let corner = seed;
+  for (let k = 0; k < Math.floor(down / 2); k++) {
+    const j = move(corner, back(spec.drop)); if (j < 0) break; corner = j;
+  }
+  for (let k = 0; k < Math.floor(across / 2); k++) {
+    const j = move(corner, back(spec.step)); if (j < 0) break; corner = j;
+  }
+
+  /* Walking back lands wherever the counting leaves it, which need not be the
+     kind of cell a row is meant to open on — the kinds repeat every two cells
+     along one of these rows and every three along the other, so half the sizes
+     would start a row in the middle of its pattern. Stepping on until the kind
+     comes right sets every row's opening straight, since the move to the next
+     row keeps to the one kind. */
+  for (let k = 0; k < 4 && kind[corner] !== spec.start; k++) {
+    const j = move(corner, spec.step); if (j < 0) break; corner = j;
+  }
+
+  const keep = [];
+  let rowStart = corner;
+  for (let r = 0; r < down && rowStart >= 0; r++) {
+    let c = rowStart;
+    for (let s = 0; s < across && c >= 0; s++) { keep.push(all[c]); c = move(c, spec.step); }
+    rowStart = move(rowStart, spec.drop);
+  }
+  return keep;
+}
+
 function buildBoard(t, across, down) {
   tiling = t;
   cellPitch = 1 / Math.sqrt(t.src.density);          // mean width of a cell
@@ -883,7 +961,10 @@ function buildBoard(t, across, down) {
   const hx = across * cellPitch / 2, hy = down * cellPitch / 2;
   const kind = (t.region || {}).kind || 'rect';
 
-  if (kind === 'rings') {
+  if (kind === 'walk') {
+    poly = walkBoard(t, across, down, t.region);
+    n = poly.length;
+  } else if (kind === 'rings') {
     /* Whichever whole number of rings comes nearest the size asked for. A ring
        of this lattice is twelve cells to a unit and the rings go 1, 9, 25 units,
        so the sizes it can take are far apart — which is why these boards are
