@@ -268,6 +268,15 @@ function lattice(cellFn, v1, v2) {
 
 const fromCells = d => lattice(() => d.cell.map(c => reg(c[0], c[1], c[2], c[3])), d.v1, d.v2);
 
+// The same tiling stood at a different angle. Turning it so that its lattice
+// runs along the page is what lets a board be cut square to the screen and
+// square to the tiling at the same time.
+const turned = (src, ang) => ({
+  pitch: src.pitch, density: src.density, vertexDensity: src.vertexDensity,
+  v1: rot(src.v1, ang), v2: rot(src.v2, ang),
+  raw: h => src.raw(h).map(p => p.map(q => rot(q, ang)))
+});
+
 /* =====================================================================
    2. VERTEX TOPOLOGY AND THE DUAL
 
@@ -426,9 +435,15 @@ const T_k53 = fromCells({
          [3,0.7988,-0.1694,0],[3,0.7988,0.8306,2.0944],[3,1.0875,0.3306,1.0472]] });
 
 const TILINGS = [
-  { id: 'cairo', name: 'Cairo Pentagonal', src: dualOf(T_snubSquare),
+  /* Turned so its lattice stands square to the page. Four pentagons pinwheel
+     about each right-angled corner and that group of four is the unit cell, so
+     a board counted out in whole cells is a board of whole pinwheels. */
+  { id: 'cairo', name: 'Cairo Pentagonal',
+    src: turned(dualOf(T_snubSquare), -Math.atan2(0.5, 1 + S3 / 2)),
+    region: { kind: 'para' },
     note: 'The dual of the snub square tiling. One pentagon, with two right angles and three of ' +
-          '120°, four of them pinwheeling about each right-angled corner.' },
+          '120°, four of them pinwheeling about each right-angled corner. The board is a whole ' +
+          'number of those pinwheels across by a whole number down.' },
   { id: 'prismatic', name: 'Prismatic Pentagonal', src: dualOf(T_elongTri),
     region: { kind: 'para' },
     note: 'The dual of the elongated triangular tiling: rows of pentagons standing on a flat ' +
@@ -441,10 +456,12 @@ const TILINGS = [
           'make a flower, and the flowers tile as hexagons do. The board is a hexagonal ball of ' +
           'whole flowers, built out from one such corner in the middle — no flower is ever cut.' },
   { id: 'cp11', name: 'Cairo and Prismatic Pentagons (1:1)', src: dualOf(T_n17),
+    region: { kind: 'rect', groups: 'blocks11' },
     note: 'Both pentagons at once, one of each, and the smaller of the two ways that can be done ' +
-          '— the dual of a 2-uniform tiling of 3³.4² and 3².4.3.4 vertices. The prismatic ' +
-          'pentagons run north-east to south-west in zigzag chains, with the Cairo pentagons ' +
-          'filling the bands between them.' },
+          '— the dual of a 2-uniform tiling of 3³.4² and 3².4.3.4 vertices. It reads as blocks of ' +
+          'six with flat tops and bottoms — two rows of Cairo, prismatic, Cairo — with chains of ' +
+          'prismatic fenceposts running down the seams between them. The board is kept to whole ' +
+          'blocks.' },
   { id: 'cp21', name: 'Cairo and Prismatic Pentagons (2:1)', src: dualOf(T_n16),
     region: { kind: 'para', anchor: 'prismaticPair' },
     note: 'The same two pentagons on a larger repeat, with two Cairo pentagons to each prismatic ' +
@@ -577,6 +594,53 @@ function adjacencyOf(polys) {
    through one would leave a petal with nothing to belong to. Every pentagon has
    exactly one corner where six meet, so the flowers fall out as a clean
    partition rather than an overlapping cover. */
+/* The 1:1 tiling reads as blocks of six with a flat top and a flat bottom.
+   A row of it runs Cairo, prismatic, Cairo — a prismatic with one Cairo level
+   on each side — and a block is two such rows, the lower set a little to the
+   left of the upper. The two prismatics are consecutive along one of the
+   zigzag chains, joined by the leaning step rather than the upright one.
+
+   Not every prismatic has a Cairo on both sides. Those that do not are the
+   fenceposts, and they are what runs down the seams between one column of
+   blocks and the next; they belong to no block and are kept on their own. */
+function blocks11(polys) {
+  const { byCorner } = adjacencyOf(polys);
+  const kind = polys.map(pentagonKind), mid = polys.map(centroidOf);
+
+  const flank = i => {
+    let L = -1, R = -1;
+    for (const j of byCorner[i]) {
+      if (kind[j] !== 'Cairo') continue;
+      const dx = mid[j][0] - mid[i][0], dy = mid[j][1] - mid[i][1];
+      if (Math.abs(dy) > 0.35 || Math.abs(dx) > 1.4) continue;
+      if (dx < 0) L = j; else R = j;
+    }
+    return [L, R];
+  };
+
+  const wings = polys.map((p, i) => kind[i] === 'prismatic' ? flank(i) : [-1, -1]);
+  const inBlock = wings.map(w => w[0] >= 0 && w[1] >= 0);
+  const groups = [], taken = new Set();
+
+  for (let i = 0; i < polys.length; i++) {
+    if (!inBlock[i] || taken.has(i)) continue;
+    for (const j of byCorner[i]) {
+      if (j <= i || !inBlock[j] || taken.has(j)) continue;
+      const dx = mid[j][0] - mid[i][0], dy = mid[j][1] - mid[i][1];
+      if (Math.abs(dx) < 0.25 || Math.abs(dx) > 0.8) continue;   // the upright step, not this one
+      if (Math.abs(dy) < 0.6 || Math.abs(dy) > 1.2) continue;
+      groups.push([i, j, ...wings[i], ...wings[j]]);
+      taken.add(i); taken.add(j);
+      break;
+    }
+  }
+  // the fenceposts, and anything the rim left without a partner, stand alone
+  const held = new Set();
+  for (const g of groups) for (const c of g) held.add(c);
+  for (let i = 0; i < polys.length; i++) if (!held.has(i)) groups.push([i]);
+  return groups;
+}
+
 function floretsOf(polys) {
   const { topo } = adjacencyOf(polys);
   const groups = [];
@@ -759,7 +823,9 @@ function buildBoard(t, across, down) {
   /* Most shapes keep a tile if the tile fits. A tiling built out of blocks
      instead keeps a block only if the whole block fits, and then keeps every
      tile of it, so that no tile is ever left without the rest of its group. */
-  const blocks = (t.region || {}).groups === 'florets' ? floretsOf(all) : null;
+  const grouper = (t.region || {}).groups;
+  const blocks = grouper === 'florets' ? floretsOf(all)
+               : grouper === 'blocks11' ? blocks11(all) : null;
   const keptAt = k => {
     if (!blocks) return all.filter(p => fits(p, k));
     const keep = new Set();
