@@ -436,22 +436,19 @@ const TILINGS = [
           'parallelogram, each row set a little right of the one above it, which is the step the ' +
           'rows take anyway.' },
   { id: 'floret', name: 'Floret Pentagonal', src: dualOf(T_snubTrihex),
-    region: { kind: 'hex', anchor: 'sixfold' },
+    region: { kind: 'hex', anchor: 'sixfold', groups: 'florets' },
     note: 'The dual of the snub trihexagonal tiling. Six pentagons turn about a common corner to ' +
           'make a flower, and the flowers tile as hexagons do. The board is a hexagonal ball of ' +
-          'whole flowers, built out from one such corner in the middle.' },
+          'whole flowers, built out from one such corner in the middle — no flower is ever cut.' },
   { id: 'cp11', name: 'Cairo and Prismatic Pentagons (1:1)', src: dualOf(T_n17),
-    region: { kind: 'clusters' },
     note: 'Both pentagons at once, one of each, and the smaller of the two ways that can be done ' +
           '— the dual of a 2-uniform tiling of 3³.4² and 3².4.3.4 vertices. The prismatic ' +
-          'pentagons run north-east to south-west in zigzag chains; the board is built out of ' +
-          'six-cell blocks, two of those as posts with two Cairo pentagons either side, so its ' +
-          'edge steps rather than cuts.' },
+          'pentagons run north-east to south-west in zigzag chains, with the Cairo pentagons ' +
+          'filling the bands between them.' },
   { id: 'cp21', name: 'Cairo and Prismatic Pentagons (2:1)', src: dualOf(T_n16),
-    region: { kind: 'diamond', anchor: 'prismaticPair' },
     note: 'The same two pentagons on a larger repeat, with two Cairo pentagons to each prismatic ' +
-          'one instead of one apiece. Here the prismatic pentagons come in pairs; the board is a ' +
-          'diamond about the upright edge that joins one such pair.' },
+          'one instead of one apiece. Here the prismatic pentagons come in pairs, joined along an ' +
+          'edge.' },
   { id: 'cp3', name: 'Cairo and Prismatic Pentagons (3-uniform)', src: dualOf(T_k53),
     note: 'Two prismatic pentagons to each Cairo one, from a 3-uniform parent — the prismatic ' +
           'pentagons here fall into two families that sit differently among their neighbours.' }
@@ -573,28 +570,17 @@ function adjacencyOf(polys) {
   return { topo, byEdge, byCorner };
 }
 
-/* The 1:1 tiling comes apart into small blocks. Its prismatic pentagons run in
-   zigzag chains from north-east to south-west, and consecutive pairs along a
-   chain each have exactly four Cairo pentagons touching both of them: two down
-   one side and two down the other. Those six — a pair of posts with a panel of
-   two either side — are one block, roughly a parallelogram.
-
-   The blocks overlap, because there are only as many Cairo pentagons as
-   prismatic ones and each block claims four: every Cairo panel is shared
-   between the two blocks it sits between. That is what makes the chains read
-   as fenceposts rather than as walls. A board keeps only blocks that fit
-   whole, so its edge comes out stepped along them. */
-function clustersOf(polys) {
-  const { byCorner } = adjacencyOf(polys);
-  const kind = polys.map(pentagonKind);
+/* The floret tiling's six pentagons about a common corner are a flower, and a
+   flower is the natural piece to build a board out of — a board that cut
+   through one would leave a petal with nothing to belong to. Every pentagon has
+   exactly one corner where six meet, so the flowers fall out as a clean
+   partition rather than an overlapping cover. */
+function floretsOf(polys) {
+  const { topo } = adjacencyOf(polys);
   const groups = [];
-  for (let i = 0; i < polys.length; i++) {
-    if (kind[i] !== 'prismatic') continue;
-    for (const j of byCorner[i]) {
-      if (j < i || kind[j] !== 'prismatic') continue;
-      const shared = [...byCorner[i]].filter(x => kind[x] === 'Cairo' && byCorner[j].has(x));
-      if (shared.length === 4) groups.push([i, j, ...shared]);
-    }
+  for (const fl of topo.vertFaces.values()) {
+    const around = [...new Set(fl)];
+    if (around.length === 6) groups.push(around);
   }
   return groups;
 }
@@ -609,28 +595,19 @@ function latticeCoords(src) {
 function regionOf(t) {
   const kind = (t.region || {}).kind || 'rect';
 
-  /* Straight sides along the lattice. The top and bottom run along v1 and the
-     sides along v2, so each row sits shifted from the one above by exactly the
-     step the tiling itself uses — a parallelogram the tiling agrees with. */
-  if (kind === 'para') {
-    const toAB = latticeCoords(t.src);
-    const ra = Math.hypot(...t.src.v1), rb = Math.hypot(...t.src.v2);
-    return (x, y, hx, hy) => {
-      const [a, b] = toAB(x, y);
-      return Math.abs(a) * ra <= hx && Math.abs(b) * rb <= hy;
-    };
-  }
-
   /* A ball of whole flowers about the centre one. With the lattice vectors
      sixty degrees apart, a, b are the usual hexagonal coordinates: the six
      nearest flowers are v1, v2 and v1-v2 with their opposites, and the ball of
      radius R is where none of a, b and a+b exceeds it. Bounding a-b instead
      would let two of the six corners run out to R(v1+v2), which is half as far
      again, and the hexagon would come out a lozenge. */
+  /* A ball is round, so it takes its size straight from the parameter, counted
+     in flowers, and pays no attention to how the board was asked for in across
+     and down. Sizing it off the shorter side would stop a wide board ever
+     growing past the height it was given. */
   if (kind === 'hex') {
     const toAB = latticeCoords(t.src);
-    return (x, y, hx, hy) => {
-      const R = Math.min(hx, hy) / t.src.pitch;
+    return (x, y, R) => {
       const [a, b] = toAB(x, y);
       return Math.abs(a) <= R && Math.abs(b) <= R && Math.abs(a + b) <= R;
     };
@@ -697,48 +674,110 @@ function anchorOf(t, polys) {
 // not mean testing every cell on it.
 let buckets = null, bucketSize = 1, bx0 = 0, by0 = 0, bw = 0, bh = 0;
 
+/* A parallelogram counted out in whole unit cells rather than cut from the
+   plane. Cutting leaves the rows that meet the edge short — one board came out
+   with a top row of seven where every other row held fifteen — but a whole
+   number of unit cells across by a whole number down gives rows that all end
+   together, which is what a parallelogram ought to look like.
+
+   Any consistent choice of unit parallelogram partitions the tiles between
+   them, so the count per cell is fixed and the total comes out exact. The
+   offset only keeps the dividing lines off the tile centres, where a rounding
+   could otherwise fall either way. */
+function paraBoard(t, across, down) {
+  const cp = 1 / Math.sqrt(t.src.density);
+  const area = Math.abs(t.src.v1[0] * t.src.v2[1] - t.src.v1[1] * t.src.v2[0]);
+  const per = Math.max(1, Math.round(t.src.density * area));       // tiles per unit cell
+  const nb = Math.max(1, Math.round(down * cp / Math.abs(t.src.v2[1])));
+  const na = Math.max(1, Math.round(across * down / (nb * per)));
+
+  const toAB = latticeCoords(t.src);
+  // the parallelogram is centred, so its reach is half its diagonal
+  const reach = (na * Math.hypot(...t.src.v1) + nb * Math.hypot(...t.src.v2)) / 2 + 3 * cp;
+  const a0 = -na / 2, b0 = -nb / 2, eps = 0.137;
+  const keep = [];
+  for (const p of t.src.raw(reach)) {
+    const c = centroidOf(p);
+    const [a, b] = toAB(c[0], c[1]);
+    const ia = Math.floor(a - a0 + eps), ib = Math.floor(b - b0 + eps);
+    if (ia >= 0 && ia < na && ib >= 0 && ib < nb) keep.push(p);
+  }
+  return keep;
+}
+
 function buildBoard(t, across, down) {
   tiling = t;
   cellPitch = 1 / Math.sqrt(t.src.density);          // mean width of a cell
   const want = across * down;
   const hx = across * cellPitch / 2, hy = down * cellPitch / 2;
+  const kind = (t.region || {}).kind || 'rect';
+
+  if (kind === 'para') {
+    poly = paraBoard(t, across, down);
+    n = poly.length;
+  } else {
 
   /* Only tiles falling wholly inside the region are kept, which costs about
      half a cell all the way round, and a shape that is not a rectangle needs
      more room again to hold the same number of cells. So the region is grown
      until the count lands on the size wanted. The patch is generated once and
-     only the clipping is repeated, which is cheap enough to bisect on. */
-  // room enough for the hungriest shape: a diamond needs about sqrt(2) times a
-  // rectangle's half-extents to hold the same number of cells, and clipping
-  // whole tiles wants a little more again
-  const FMAX = 1.7;
-  const all0 = t.src.raw(Math.max(hx, hy) * FMAX + 2 * cellPitch);
+     only the clipping is repeated, which is cheap enough to bisect on.
+
+     A plain rectangle is sized by a margin added all round, which is what it
+     always was; the shaped boards scale instead, since adding the same margin
+     to both sides of a long board would quietly change its proportions. */
+  const byMargin = kind === 'rect', byRadius = kind === 'hex';
+  const area = Math.abs(t.src.v1[0] * t.src.v2[1] - t.src.v1[1] * t.src.v2[0]);
+  const per = Math.max(1, Math.round(t.src.density * area));        // tiles per unit cell
+  // a ball of R flowers holds 3R^2+3R+1 of them, so this is the radius that
+  // could hold the board asked for, with a ring or two in hand
+  const rMax = Math.ceil(Math.sqrt(want / (3 * per))) + 2;
+
+  const KLO = byMargin ? -cellPitch : byRadius ? 0.4 : 0.2;
+  const KHI = byMargin ? 1.5 * cellPitch : byRadius ? rMax : 1.7;
+  const extents = k => byMargin ? [hx + k, hy + k] : byRadius ? [k, k] : [hx * k, hy * k];
+
+  const spanOf = k => byRadius
+    ? k * Math.max(Math.hypot(...t.src.v1), Math.hypot(...t.src.v2))
+    : Math.max(...extents(k));
+  const all0 = t.src.raw(spanOf(KHI) + 2 * cellPitch);
   const off = anchorOf(t, all0);
   const all = (off[0] || off[1]) ? all0.map(p => translate(p, -off[0], -off[1])) : all0;
 
   const inside = regionOf(t);
-  const fits = (p, f) => p.every(q => inside(q[0], q[1], hx * f + 1e-6, hy * f + 1e-6));
+  const fits = (p, k) => {
+    const [ex, ey] = extents(k);
+    return p.every(q => inside(q[0], q[1], ex + 1e-6, ey + 1e-6));
+  };
 
-  /* Most shapes keep a tile if the tile fits. A tiling cut into blocks instead
-     keeps a block if the whole block fits, and then keeps every tile of every
-     block kept — which is what leaves the edge stepped. */
-  const blocks = (t.region || {}).kind === 'clusters' ? clustersOf(all) : null;
-  const keptAt = f => {
-    if (!blocks) return all.filter(p => fits(p, f));
+  /* Most shapes keep a tile if the tile fits. A tiling built out of blocks
+     instead keeps a block only if the whole block fits, and then keeps every
+     tile of it, so that no tile is ever left without the rest of its group. */
+  const blocks = (t.region || {}).groups === 'florets' ? floretsOf(all) : null;
+  const keptAt = k => {
+    if (!blocks) return all.filter(p => fits(p, k));
     const keep = new Set();
-    for (const g of blocks) if (g.every(i => fits(all[i], f))) for (const i of g) keep.add(i);
+    for (const g of blocks) if (g.every(i => fits(all[i], k))) for (const i of g) keep.add(i);
     return [...keep].sort((a, b) => a - b).map(i => all[i]);
   };
-  const countAt = f => keptAt(f).length;
+  const countAt = k => keptAt(k).length;
 
-  let lo = 0.2, hi = FMAX;
+  let lo = KLO, hi = KHI;
   if (countAt(hi) >= want)
     for (let it = 0; it < 34; it++) {
       const mid = (lo + hi) / 2;
       if (countAt(mid) < want) lo = mid; else hi = mid;
     }
-  poly = keptAt(hi);
+
+  /* A board of whole blocks can only come in the sizes its blocks allow, and
+     the nearest of those is better than the smallest one that will do — a ring
+     of flowers is thirty-six cells, and always rounding up would hand back a
+     board half as big again as the one asked for. A plain rectangle keeps the
+     old rule, which is to take the first size that holds enough. */
+  poly = keptAt(blocks && Math.abs(countAt(lo) - want) < Math.abs(countAt(hi) - want) ? lo : hi);
   n = poly.length;
+
+  }
 
   // who touches whom
   const { topo, byEdge, byCorner } = adjacencyOf(poly);
