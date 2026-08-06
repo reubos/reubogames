@@ -461,7 +461,8 @@ const TILINGS = [
        prismatic fenceposts, which leans left. Four cells to a row-step and two
        rows to a fencepost-step is eight, which is what the repeat holds. */
     region: { kind: 'walk', start: 'prismatic',
-              step: [0.7, 1.15, -0.25, 0.7], drop: [-0.7, 0.15, 0.65, 1.25] },
+              step: [0.7, 1.15, -0.25, 0.7], drop: [-0.7, 0.15, 0.65, 1.25],
+              open: [-0.7, -0.25, 0.65, 0.95] },
     note: 'Both pentagons at once, one of each, and the smaller of the two ways that can be done ' +
           '— the dual of a 2-uniform tiling of 3³.4² and 3².4.3.4 vertices. Its rows run ' +
           'prismatic, Cairo, prismatic and so on, sloping gently down as they go; each row starts ' +
@@ -479,8 +480,14 @@ const TILINGS = [
      a little higher. Six cells to a row-step and two rows to the other is
      twelve, which is what this repeat holds. */
   { id: 'cp3', name: 'Cairo and Prismatic Pentagons (3-uniform)', src: dualOf(T_k53),
+    /* Cairo pentagons sit here in more than one attitude, and the step down to
+       the next row does not tell them apart on its own — a board can come out
+       with the right cells in it and every one of them turned a quarter. So the
+       opening cell must also be able to take the leaning step along its row,
+       which is what settles which way up the whole board stands. */
     region: { kind: 'walk', start: 'Cairo',
-              step: [-0.2, 0.65, 0.75, 1.15], drop: [0.7, 1.15, -0.7, 0.2] },
+              step: [-0.2, 0.65, 0.75, 1.15], drop: [0.7, 1.15, -0.7, 0.2],
+              open: [0.7, 0.95, -0.7, -0.3], first: [0.35, 0.65, 0.75, 0.95] },
     note: 'Two prismatic pentagons to each Cairo one, from a 3-uniform parent — the prismatic ' +
           'pentagons here fall into two families that sit differently among their neighbours. Its ' +
           'rows run Cairo, prismatic, prismatic down the page, and each row stands a cell right ' +
@@ -918,9 +925,19 @@ function walkBoard(t, across, down, spec) {
   };
   const back = w => [-w[1], -w[0], -w[3], -w[2]];
 
+  /* Which cell a board opens on is not just a matter of its kind. Going down,
+     the step to the next row alternates between a leaning one and an upright
+     one, so cells of the one kind come in two phases, and the two are the same
+     pentagon stood a different way up. A board begun on the wrong phase has the
+     right pattern of kinds and every tile turned the other way. `open` is the
+     step the first row must be able to take, which picks the phase out. */
+  const rightPhase = i => kind[i] === spec.start
+    && (!spec.open || move(i, spec.open) >= 0)
+    && (!spec.first || move(i, spec.first) >= 0);
+
   let seed = -1, bd = Infinity;
   for (let i = 0; i < all.length; i++) {
-    if (kind[i] !== spec.start) continue;
+    if (!rightPhase(i)) continue;
     const d = Math.hypot(mid[i][0], mid[i][1]);
     if (d < bd) { bd = d; seed = i; }
   }
@@ -940,7 +957,7 @@ function walkBoard(t, across, down, spec) {
      would start a row in the middle of its pattern. Stepping on until the kind
      comes right sets every row's opening straight, since the move to the next
      row keeps to the one kind. */
-  for (let k = 0; k < 4 && kind[corner] !== spec.start; k++) {
+  for (let k = 0; k < 8 && !rightPhase(corner); k++) {
     const j = move(corner, spec.step); if (j < 0) break; corner = j;
   }
 
