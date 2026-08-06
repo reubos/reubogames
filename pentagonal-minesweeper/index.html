@@ -445,11 +445,11 @@ const TILINGS = [
           '120°, four of them pinwheeling about each right-angled corner. The board is a whole ' +
           'number of those pinwheels across by a whole number down.' },
   { id: 'prismatic', name: 'Prismatic Pentagonal', src: dualOf(T_elongTri),
-    region: { kind: 'para' },
+    region: { kind: 'rows' },
     note: 'The dual of the elongated triangular tiling: rows of pentagons standing on a flat ' +
-          'course, each row facing the opposite way to the last. The board is cut as a ' +
-          'parallelogram, each row set a little right of the one above it, which is the step the ' +
-          'rows take anyway.' },
+          'course, each row facing the opposite way to the last. The rows fall into pairs — two ' +
+          'level with each other, then two starting half a cell further right — and the board is ' +
+          'counted out along them, so it leans as the rows do.' },
   { id: 'floret', name: 'Floret Pentagonal', src: dualOf(T_snubTrihex),
     region: { kind: 'hex', anchor: 'sixfold', groups: 'florets' },
     note: 'The dual of the snub trihexagonal tiling. Six pentagons turn about a common corner to ' +
@@ -463,11 +463,12 @@ const TILINGS = [
           'prismatic fenceposts running down the seams between them. The board is kept to whole ' +
           'blocks.' },
   { id: 'cp21', name: 'Cairo and Prismatic Pentagons (2:1)', src: dualOf(T_n16),
-    region: { kind: 'para', anchor: 'prismaticPair' },
+    region: { kind: 'lsq', anchor: 'prismaticPair', even: true },
     note: 'The same two pentagons on a larger repeat, with two Cairo pentagons to each prismatic ' +
           'one instead of one apiece. Its lattice is square and stands at forty-five degrees to ' +
           'the page, so a board counted out along that lattice comes out as a diamond — this one ' +
-          'centred on the upright edge joining a pair of prismatic pentagons.' },
+          'centred on the upright edge joining a pair of prismatic pentagons, and even about the ' +
+          'line down the middle.' },
   { id: 'cp3', name: 'Cairo and Prismatic Pentagons (3-uniform)', src: dualOf(T_k53),
     note: 'Two prismatic pentagons to each Cairo one, from a 3-uniform parent — the prismatic ' +
           'pentagons here fall into two families that sit differently among their neighbours.' }
@@ -679,6 +680,27 @@ function regionOf(t) {
     };
   }
 
+  /* A square counted along the lattice. This tiling's lattice is square and
+     stands at forty-five degrees, so that reads on the page as a diamond, and
+     its edges follow the tiling's own lines. The two bounds have to be equal:
+     a mirror down the middle of the page carries the lattice (a, b) to (-b, -a),
+     swapping the two, so any board bounding them differently comes out lopsided
+     — heavy at two opposite corners and light at the other two. */
+  if (kind === 'lsq') {
+    const toAB = latticeCoords(t.src);
+    /* The slack matters, and it has to be generous. Two tiles that answer to
+       each other across the mirror have their a and b swapped, so they stand or
+       fall together — but this tiling's unit cell is written down to four
+       decimal places, so they agree only to about that. A bound landing between
+       them takes one and drops the other, which is how a board loses two cells
+       out of sixty-four and its symmetry with them. The gap between one lattice
+       coordinate and the next is nearer a third, so there is room to be loose. */
+    return (x, y, A) => {
+      const [a, b] = toAB(x, y);
+      return Math.abs(a) <= A + 2e-3 && Math.abs(b) <= A + 2e-3;
+    };
+  }
+
   // A diamond, squared up to the screen rather than to the lattice.
   if (kind === 'diamond')
     return (x, y, hx, hy) => Math.abs(x) / hx + Math.abs(y) / hy <= 1;
@@ -775,6 +797,48 @@ function paraBoard(t, across, down) {
   return keep;
 }
 
+/* The prismatic tiling comes in flat rows, and its rows fall into pairs: two
+   rows share a left edge, then the next two start half a cell further right,
+   and so on down. So a board is counted out in rows — so many cells along each,
+   so many rows down — with the left edge stepping half a cell every second row.
+   Cutting to a shape instead leaves rows ending short of one another, and
+   grouping by unit cell pairs the rows across the wrong boundary. */
+function rowBoard(t, across, down) {
+  const cp = 1 / Math.sqrt(t.src.density);
+  const reach = (across + down) * cp;
+  const all = t.src.raw(reach);
+
+  const rows = new Map();
+  for (const p of all) {
+    const c = centroidOf(p);
+    const k = Math.round(c[1] * 1000) / 1000;
+    let w = rows.get(k); if (!w) rows.set(k, w = []);
+    w.push({ p, x: c[0] });
+  }
+  const ordered = [...rows.entries()].sort((a, b) => a[0] - b[0]).map(e => e[1]);
+  for (const r of ordered) r.sort((a, b) => a.x - b.x);
+
+  /* A pair starts where two rows running share a left edge. Stepping starts on
+     one of those, so that the two rows of every pair come out level. */
+  const phase = r => Math.abs(r[0].x - Math.round(r[0].x)) < 0.25 ? 0 : 1;
+  let start = Math.max(0, Math.floor((ordered.length - down) / 2));
+  while (start + 1 < ordered.length && phase(ordered[start]) !== phase(ordered[start + 1])) start++;
+
+  const mid = ordered[start + Math.floor(down / 2)] || ordered[start];
+  const base = mid[Math.max(0, Math.floor((mid.length - across) / 2))].x
+             - 0.5 * Math.floor(down / 2 / 2);
+
+  const keep = [];
+  for (let i = 0; i < down; i++) {
+    const r = ordered[start + i];
+    if (!r) break;
+    const left = base + 0.5 * Math.floor(i / 2);
+    const run = r.filter(c => c.x > left - 0.25);
+    for (const c of run.slice(0, across)) keep.push(c.p);
+  }
+  return keep;
+}
+
 function buildBoard(t, across, down) {
   tiling = t;
   cellPitch = 1 / Math.sqrt(t.src.density);          // mean width of a cell
@@ -782,7 +846,10 @@ function buildBoard(t, across, down) {
   const hx = across * cellPitch / 2, hy = down * cellPitch / 2;
   const kind = (t.region || {}).kind || 'rect';
 
-  if (kind === 'para') {
+  if (kind === 'rows') {
+    poly = rowBoard(t, across, down);
+    n = poly.length;
+  } else if (kind === 'para') {
     poly = paraBoard(t, across, down);
     n = poly.length;
   } else {
@@ -796,7 +863,10 @@ function buildBoard(t, across, down) {
      A plain rectangle is sized by a margin added all round, which is what it
      always was; the shaped boards scale instead, since adding the same margin
      to both sides of a long board would quietly change its proportions. */
-  const byMargin = kind === 'rect', byRadius = kind === 'hex';
+  const byMargin = kind === 'rect', byRadius = kind === 'hex' || kind === 'lsq';
+  // a square counted in lattice steps is judged by where a tile sits, not by
+  // where its corners reach, so that the bound stays exactly symmetric
+  const byCentre = kind === 'lsq';
   const area = Math.abs(t.src.v1[0] * t.src.v2[1] - t.src.v1[1] * t.src.v2[0]);
   const per = Math.max(1, Math.round(t.src.density * area));        // tiles per unit cell
   // a ball of R flowers holds 3R^2+3R+1 of them, so this is the radius that
@@ -817,6 +887,7 @@ function buildBoard(t, across, down) {
   const inside = regionOf(t);
   const fits = (p, k) => {
     const [ex, ey] = extents(k);
+    if (byCentre) { const c = centroidOf(p); return inside(c[0], c[1], ex, ey); }
     return p.every(q => inside(q[0], q[1], ex + 1e-6, ey + 1e-6));
   };
 
@@ -826,11 +897,32 @@ function buildBoard(t, across, down) {
   const grouper = (t.region || {}).groups;
   const blocks = grouper === 'florets' ? floretsOf(all)
                : grouper === 'blocks11' ? blocks11(all) : null;
+
+  /* A board asked to be even about the middle is made so outright, by taking in
+     any tile whose reflection is already in. Leaving it to the bound does not
+     work: reflected tiles ought to agree exactly, but this tiling is written
+     down to four decimal places and they come out a couple of ten-thousandths
+     apart — enough for a bound to fall between a tile and its reflection and
+     drop one of the pair. */
+  const evenUp = (t.region || {}).even;
+  const centreKey = c => Math.round(c[0] * 200) + ',' + Math.round(c[1] * 200);
+  const symmetrise = kept => {
+    if (!evenUp) return kept;
+    const have = new Set(kept.map(p => centreKey(centroidOf(p))));
+    const out = kept.slice();
+    for (const p of all) {
+      const c = centroidOf(p);
+      if (have.has(centreKey(c))) continue;
+      if (have.has(centreKey([-c[0], c[1]]))) { out.push(p); have.add(centreKey(c)); }
+    }
+    return out;
+  };
+
   const keptAt = k => {
-    if (!blocks) return all.filter(p => fits(p, k));
+    if (!blocks) return symmetrise(all.filter(p => fits(p, k)));
     const keep = new Set();
     for (const g of blocks) if (g.every(i => fits(all[i], k))) for (const i of g) keep.add(i);
-    return [...keep].sort((a, b) => a - b).map(i => all[i]);
+    return symmetrise([...keep].sort((a, b) => a - b).map(i => all[i]));
   };
   const countAt = k => keptAt(k).length;
 
