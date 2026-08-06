@@ -261,7 +261,9 @@ function lattice(cellFn, v1, v2) {
     return out;
   }
 
-  return { pitch, density: F / A, vertexDensity: (E - F) / A, raw };
+  // v1 and v2 travel with the tiling: a board cut along the lattice rather than
+  // along the screen needs to know which way the lattice runs.
+  return { pitch, density: F / A, vertexDensity: (E - F) / A, v1, v2, raw };
 }
 
 const fromCells = d => lattice(() => d.cell.map(c => reg(c[0], c[1], c[2], c[3])), d.v1, d.v2);
@@ -347,6 +349,8 @@ function dualOf(base) {
   return {
     pitch: base.pitch,
     density: base.vertexDensity, vertexDensity: base.density,
+    // the dual repeats on exactly the lattice its parent does
+    v1: base.v1, v2: base.v2,
     // dualPolys only yields faces well inside the parent patch, so the parent
     // is grown by a margin and the result trimmed back to what was asked for
     raw: h => dualPolys(base.raw(h + 2.5 * base.pitch)).filter(p => inBox(p, h))
@@ -426,17 +430,28 @@ const TILINGS = [
     note: 'The dual of the snub square tiling. One pentagon, with two right angles and three of ' +
           '120°, four of them pinwheeling about each right-angled corner.' },
   { id: 'prismatic', name: 'Prismatic Pentagonal', src: dualOf(T_elongTri),
+    region: { kind: 'para' },
     note: 'The dual of the elongated triangular tiling: rows of pentagons standing on a flat ' +
-          'course, each row facing the opposite way to the last.' },
+          'course, each row facing the opposite way to the last. The board is cut as a ' +
+          'parallelogram, each row set a little right of the one above it, which is the step the ' +
+          'rows take anyway.' },
   { id: 'floret', name: 'Floret Pentagonal', src: dualOf(T_snubTrihex),
+    region: { kind: 'hex', anchor: 'sixfold' },
     note: 'The dual of the snub trihexagonal tiling. Six pentagons turn about a common corner to ' +
-          'make a flower, and the flowers tile as hexagons do.' },
+          'make a flower, and the flowers tile as hexagons do. The board is a hexagonal ball of ' +
+          'whole flowers, built out from one such corner in the middle.' },
   { id: 'cp11', name: 'Cairo and Prismatic Pentagons (1:1)', src: dualOf(T_n17),
+    region: { kind: 'clusters' },
     note: 'Both pentagons at once, one of each, and the smaller of the two ways that can be done ' +
-          '— the dual of a 2-uniform tiling of 3³.4² and 3².4.3.4 vertices.' },
+          '— the dual of a 2-uniform tiling of 3³.4² and 3².4.3.4 vertices. The prismatic ' +
+          'pentagons run north-east to south-west in zigzag chains; the board is built out of ' +
+          'six-cell blocks, two of those as posts with two Cairo pentagons either side, so its ' +
+          'edge steps rather than cuts.' },
   { id: 'cp21', name: 'Cairo and Prismatic Pentagons (2:1)', src: dualOf(T_n16),
+    region: { kind: 'diamond', anchor: 'prismaticPair' },
     note: 'The same two pentagons on a larger repeat, with two Cairo pentagons to each prismatic ' +
-          'one instead of one apiece.' },
+          'one instead of one apiece. Here the prismatic pentagons come in pairs; the board is a ' +
+          'diamond about the upright edge that joins one such pair.' },
   { id: 'cp3', name: 'Cairo and Prismatic Pentagons (3-uniform)', src: dualOf(T_k53),
     note: 'Two prismatic pentagons to each Cairo one, from a 3-uniform parent — the prismatic ' +
           'pentagons here fall into two families that sit differently among their neighbours.' }
@@ -529,6 +544,155 @@ function shapeKey(pts) {
   return lens.map(v => v.toFixed(2)).join(',') + '|' + anglesOf(pts).sort((x, y) => x - y).join(',');
 }
 
+/* =====================================================================
+   4a. THE SHAPE OF A BOARD
+
+   A rectangle is the obvious thing to cut a tiling to, and for a tiling
+   laid out in rows and columns it is the right thing. The others each
+   read better cut to a shape of their own — one that follows how the
+   tiling is actually built rather than fighting it.
+
+   A shape has two parts: where to centre it, and what region to keep.
+   The region is written in lattice coordinates wherever the shape is
+   meant to follow the tiling, so its sides land on the tiling's own
+   lines instead of slicing across them.
+   ===================================================================== */
+
+// Who touches whom, over any list of tiles: by an edge, and by any corner.
+function adjacencyOf(polys) {
+  const topo = topology(polys);
+  const m = polys.length;
+  const byEdge = Array.from({ length: m }, () => new Set());
+  for (const fl of topo.edgeMap.values())
+    if (fl.length === 2) { byEdge[fl[0]].add(fl[1]); byEdge[fl[1]].add(fl[0]); }
+  const byCorner = Array.from({ length: m }, () => new Set());
+  for (const fl of topo.vertFaces.values()) {
+    const around = [...new Set(fl)];
+    for (const x of around) for (const y of around) if (x !== y) byCorner[x].add(y);
+  }
+  return { topo, byEdge, byCorner };
+}
+
+/* The 1:1 tiling comes apart into small blocks. Its prismatic pentagons run in
+   zigzag chains from north-east to south-west, and consecutive pairs along a
+   chain each have exactly four Cairo pentagons touching both of them: two down
+   one side and two down the other. Those six — a pair of posts with a panel of
+   two either side — are one block, roughly a parallelogram.
+
+   The blocks overlap, because there are only as many Cairo pentagons as
+   prismatic ones and each block claims four: every Cairo panel is shared
+   between the two blocks it sits between. That is what makes the chains read
+   as fenceposts rather than as walls. A board keeps only blocks that fit
+   whole, so its edge comes out stepped along them. */
+function clustersOf(polys) {
+  const { byCorner } = adjacencyOf(polys);
+  const kind = polys.map(pentagonKind);
+  const groups = [];
+  for (let i = 0; i < polys.length; i++) {
+    if (kind[i] !== 'prismatic') continue;
+    for (const j of byCorner[i]) {
+      if (j < i || kind[j] !== 'prismatic') continue;
+      const shared = [...byCorner[i]].filter(x => kind[x] === 'Cairo' && byCorner[j].has(x));
+      if (shared.length === 4) groups.push([i, j, ...shared]);
+    }
+  }
+  return groups;
+}
+
+// A point in lattice coordinates: p = a*v1 + b*v2.
+function latticeCoords(src) {
+  const [ax, ay] = src.v1, [bx, by] = src.v2;
+  const det = ax * by - ay * bx;
+  return (x, y) => [(x * by - y * bx) / det, (ax * y - ay * x) / det];
+}
+
+function regionOf(t) {
+  const kind = (t.region || {}).kind || 'rect';
+
+  /* Straight sides along the lattice. The top and bottom run along v1 and the
+     sides along v2, so each row sits shifted from the one above by exactly the
+     step the tiling itself uses — a parallelogram the tiling agrees with. */
+  if (kind === 'para') {
+    const toAB = latticeCoords(t.src);
+    const ra = Math.hypot(...t.src.v1), rb = Math.hypot(...t.src.v2);
+    return (x, y, hx, hy) => {
+      const [a, b] = toAB(x, y);
+      return Math.abs(a) * ra <= hx && Math.abs(b) * rb <= hy;
+    };
+  }
+
+  /* A ball of whole flowers about the centre one. With the lattice vectors
+     sixty degrees apart, a, b are the usual hexagonal coordinates: the six
+     nearest flowers are v1, v2 and v1-v2 with their opposites, and the ball of
+     radius R is where none of a, b and a+b exceeds it. Bounding a-b instead
+     would let two of the six corners run out to R(v1+v2), which is half as far
+     again, and the hexagon would come out a lozenge. */
+  if (kind === 'hex') {
+    const toAB = latticeCoords(t.src);
+    return (x, y, hx, hy) => {
+      const R = Math.min(hx, hy) / t.src.pitch;
+      const [a, b] = toAB(x, y);
+      return Math.abs(a) <= R && Math.abs(b) <= R && Math.abs(a + b) <= R;
+    };
+  }
+
+  // A diamond, squared up to the screen rather than to the lattice.
+  if (kind === 'diamond')
+    return (x, y, hx, hy) => Math.abs(x) / hx + Math.abs(y) / hy <= 1;
+
+  return (x, y, hx, hy) => Math.abs(x) <= hx && Math.abs(y) <= hy;
+}
+
+/* Where to put the middle. Some shapes want a particular feature of the tiling
+   at their centre rather than whatever the generator happened to leave at the
+   origin, so the whole patch is slid until that feature is there.
+
+   Only the tiles near the origin are searched. Whatever is being looked for
+   repeats every unit cell, so it is certainly among them, and searching the
+   whole patch instead would cost a great deal for no better answer. */
+function anchorOf(t, polys) {
+  const want = (t.region || {}).anchor;
+  if (!want) return [0, 0];
+
+  const reach = 2.5 * t.src.pitch;
+  const near = polys.filter(p => {
+    const c = centroidOf(p);
+    return Math.hypot(c[0], c[1]) < reach;
+  });
+
+  if (want === 'sixfold') {
+    // the corner nearest the middle where six tiles meet: a flower's hub
+    const topo = topology(near);
+    let best = null;
+    for (const [vid, fl] of topo.vertFaces) {
+      if (new Set(fl).size !== 6) continue;
+      const p = topo.pts[vid], d = Math.hypot(p.x, p.y);
+      if (!best || d < best.d) best = { d, at: [p.x, p.y] };
+    }
+    return best ? best.at : [0, 0];
+  }
+
+  if (want === 'prismaticPair') {
+    /* The middle of the upright edge shared by two prismatic pentagons. In this
+       tiling the prismatic pentagons come in pairs, and half of those pairs are
+       joined along an upright edge — that join is the centre of the diamond. */
+    const p2 = near.filter(p => pentagonKind(p) === 'prismatic');
+    let best = null;
+    for (let i = 0; i < p2.length; i++)
+      for (let j = i + 1; j < p2.length; j++) {
+        const shared = p2[i].filter(p =>
+          p2[j].some(q => Math.hypot(p[0] - q[0], p[1] - q[1]) < 1e-3));
+        if (shared.length !== 2 || Math.abs(shared[0][0] - shared[1][0]) > 1e-3) continue;
+        const at = [(shared[0][0] + shared[1][0]) / 2, (shared[0][1] + shared[1][1]) / 2];
+        const d = Math.hypot(at[0], at[1]);
+        if (!best || d < best.d) best = { d, at };
+      }
+    return best ? best.at : [0, 0];
+  }
+
+  return [0, 0];
+}
+
 // A coarse grid over the board, so that finding the cell under a point does
 // not mean testing every cell on it.
 let buckets = null, bucketSize = 1, bx0 = 0, by0 = 0, bw = 0, bh = 0;
@@ -539,36 +703,45 @@ function buildBoard(t, across, down) {
   const want = across * down;
   const hx = across * cellPitch / 2, hy = down * cellPitch / 2;
 
-  /* Only tiles falling wholly inside the rectangle are kept, which costs about
-     half a cell all the way round — a rectangle of the bare size asked for comes
-     up well short. So the rectangle is grown until the count lands on the size
-     wanted. The patch is generated once and only the clipping is repeated,
-     which is cheap enough to bisect on. */
-  const all = t.src.raw(Math.max(hx, hy) + 2 * cellPitch);
-  const fits = (p, m) => p.every(q =>
-    q[0] >= -hx - m - 1e-6 && q[0] <= hx + m + 1e-6 &&
-    q[1] >= -hy - m - 1e-6 && q[1] <= hy + m + 1e-6);
-  const countAt = m => { let c = 0; for (const p of all) if (fits(p, m)) c++; return c; };
+  /* Only tiles falling wholly inside the region are kept, which costs about
+     half a cell all the way round, and a shape that is not a rectangle needs
+     more room again to hold the same number of cells. So the region is grown
+     until the count lands on the size wanted. The patch is generated once and
+     only the clipping is repeated, which is cheap enough to bisect on. */
+  // room enough for the hungriest shape: a diamond needs about sqrt(2) times a
+  // rectangle's half-extents to hold the same number of cells, and clipping
+  // whole tiles wants a little more again
+  const FMAX = 1.7;
+  const all0 = t.src.raw(Math.max(hx, hy) * FMAX + 2 * cellPitch);
+  const off = anchorOf(t, all0);
+  const all = (off[0] || off[1]) ? all0.map(p => translate(p, -off[0], -off[1])) : all0;
 
-  let lo = -cellPitch, hi = 1.5 * cellPitch;
+  const inside = regionOf(t);
+  const fits = (p, f) => p.every(q => inside(q[0], q[1], hx * f + 1e-6, hy * f + 1e-6));
+
+  /* Most shapes keep a tile if the tile fits. A tiling cut into blocks instead
+     keeps a block if the whole block fits, and then keeps every tile of every
+     block kept — which is what leaves the edge stepped. */
+  const blocks = (t.region || {}).kind === 'clusters' ? clustersOf(all) : null;
+  const keptAt = f => {
+    if (!blocks) return all.filter(p => fits(p, f));
+    const keep = new Set();
+    for (const g of blocks) if (g.every(i => fits(all[i], f))) for (const i of g) keep.add(i);
+    return [...keep].sort((a, b) => a - b).map(i => all[i]);
+  };
+  const countAt = f => keptAt(f).length;
+
+  let lo = 0.2, hi = FMAX;
   if (countAt(hi) >= want)
-    for (let it = 0; it < 30; it++) {
+    for (let it = 0; it < 34; it++) {
       const mid = (lo + hi) / 2;
       if (countAt(mid) < want) lo = mid; else hi = mid;
     }
-  poly = all.filter(p => fits(p, hi));
+  poly = keptAt(hi);
   n = poly.length;
 
   // who touches whom
-  const topo = topology(poly);
-  const byEdge = Array.from({ length: n }, () => new Set());
-  for (const fl of topo.edgeMap.values())
-    if (fl.length === 2) { byEdge[fl[0]].add(fl[1]); byEdge[fl[1]].add(fl[0]); }
-  const byCorner = Array.from({ length: n }, () => new Set());
-  for (const fl of topo.vertFaces.values()) {
-    const around = [...new Set(fl)];
-    for (const x of around) for (const y of around) if (x !== y) byCorner[x].add(y);
-  }
+  const { topo, byEdge, byCorner } = adjacencyOf(poly);
   [nbOffC, nbAllC] = pack(byCorner);
   [nbOffE, nbAllE] = pack(byEdge);
 
@@ -1331,8 +1504,11 @@ function verify() {
       kinds.set(k, (kinds.get(k) || 0) + 1);
       degs.push(nbOf(i).length);
     }
+    /* The ratio is only roughly the tiling's on a patch this small — a board
+       centred on one feature of it samples the two pentagons unevenly, and it
+       settles onto the advertised ratio as the board grows. */
     const mix = [...kinds.entries()].sort((a, b) => b[1] - a[1]);
-    const ratio = mix.length === 2 ? ` (${(mix[0][1] / mix[1][1]).toFixed(2)}:1)` : '';
+    const ratio = mix.length === 2 ? ` (~${(mix[0][1] / mix[1][1]).toFixed(2)}:1)` : '';
     console.log(`${t.name}: ${n} cells, sides {${sides}}, ${shapeCount} shape(s), ` +
       `${corners} corners closed / ${gaps} not, ${oneWay} one-way, ${oddEdges} bad edges, ` +
       `interior degrees ${Math.min(...degs)}-${Math.max(...degs)}, ` +
