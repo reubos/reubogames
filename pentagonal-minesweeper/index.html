@@ -462,7 +462,7 @@ const TILINGS = [
        rows to a fencepost-step is eight, which is what the repeat holds. */
     region: { kind: 'walk', start: 'prismatic',
               step: [0.7, 1.15, -0.25, 0.7], drop: [-0.7, 0.15, 0.65, 1.25],
-              open: [-0.7, -0.25, 0.65, 0.95] },
+              open: [-0.7, -0.25, 0.65, 0.95], period: 2 },
     note: 'Both pentagons at once, one of each, and the smaller of the two ways that can be done ' +
           '— the dual of a 2-uniform tiling of 3³.4² and 3².4.3.4 vertices. Its rows run ' +
           'prismatic, Cairo, prismatic and so on, sloping gently down as they go; each row starts ' +
@@ -487,7 +487,7 @@ const TILINGS = [
        which is what settles which way up the whole board stands. */
     region: { kind: 'walk', start: 'Cairo',
               step: [-0.2, 0.65, 0.75, 1.15], drop: [0.7, 1.15, -0.7, 0.2],
-              open: [0.7, 0.95, -0.7, -0.3], first: [0.35, 0.65, 0.75, 0.95] },
+              open: [0.7, 0.95, -0.7, -0.3], first: [0.35, 0.65, 0.75, 0.95], period: 3 },
     note: 'Two prismatic pentagons to each Cairo one, from a 3-uniform parent — the prismatic ' +
           'pentagons here fall into two families that sit differently among their neighbours. Its ' +
           'rows run Cairo, prismatic, prismatic down the page, and each row stands a cell right ' +
@@ -908,6 +908,14 @@ function ringBoard(t, rings) {
    windows backwards from the middle is what puts the first cell of the first
    row where the board comes out centred. */
 function walkBoard(t, across, down, spec) {
+  /* A row ought to finish on the same kind of cell it began on — a prismatic at
+     both ends of the 1:1's rows, a Cairo at both ends of the 3-uniform's. The
+     kinds repeat every second cell along the one and every third along the
+     other, so only some widths close the pattern, and the width asked for is
+     nudged to the nearest that does. */
+  if (spec.period) across = Math.max(spec.period + 1,
+    Math.round((across - 1) / spec.period) * spec.period + 1);
+
   const cp = 1 / Math.sqrt(t.src.density);
   /* The walk starts in the middle and goes at most half the cells each way, and
      no step covers much more than one cell, so this reaches comfortably past
