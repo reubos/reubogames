@@ -446,9 +446,11 @@ const TILINGS = [
           'pentagons run north-east to south-west in zigzag chains, with the Cairo pentagons ' +
           'filling the bands between them.' },
   { id: 'cp21', name: 'Cairo and Prismatic Pentagons (2:1)', src: dualOf(T_n16),
+    region: { kind: 'para', anchor: 'prismaticPair' },
     note: 'The same two pentagons on a larger repeat, with two Cairo pentagons to each prismatic ' +
-          'one instead of one apiece. Here the prismatic pentagons come in pairs, joined along an ' +
-          'edge.' },
+          'one instead of one apiece. Its lattice is square and stands at forty-five degrees to ' +
+          'the page, so a board counted out along that lattice comes out as a diamond — this one ' +
+          'centred on the upright edge joining a pair of prismatic pentagons.' },
   { id: 'cp3', name: 'Cairo and Prismatic Pentagons (3-uniform)', src: dualOf(T_k53),
     note: 'Two prismatic pentagons to each Cairo one, from a 3-uniform parent — the prismatic ' +
           'pentagons here fall into two families that sit differently among their neighbours.' }
@@ -694,9 +696,13 @@ function paraBoard(t, across, down) {
   const toAB = latticeCoords(t.src);
   // the parallelogram is centred, so its reach is half its diagonal
   const reach = (na * Math.hypot(...t.src.v1) + nb * Math.hypot(...t.src.v2)) / 2 + 3 * cp;
+  const raw = t.src.raw(reach);
+  const off = anchorOf(t, raw);
+  const all = (off[0] || off[1]) ? raw.map(p => translate(p, -off[0], -off[1])) : raw;
+
   const a0 = -na / 2, b0 = -nb / 2, eps = 0.137;
   const keep = [];
-  for (const p of t.src.raw(reach)) {
+  for (const p of all) {
     const c = centroidOf(p);
     const [a, b] = toAB(c[0], c[1]);
     const ia = Math.floor(a - a0 + eps), ib = Math.floor(b - b0 + eps);
