@@ -469,12 +469,11 @@ const TILINGS = [
           'one place further down the chain of prismatic fenceposts, so the board leans left as ' +
           'it descends.' },
   { id: 'cp21', name: 'Cairo and Prismatic Pentagons (2:1)', src: dualOf(T_n16),
-    region: { kind: 'rings', anchor: 'prismaticPair' },
+    region: { kind: 'boxCentre', anchor: 'prismaticPair' },
     note: 'The same two pentagons on a larger repeat, with two Cairo pentagons to each prismatic ' +
-          'one instead of one apiece. Its lattice is square and stands at forty-five degrees to ' +
-          'the page, so the board is built in whole rings about the middle and comes out as a ' +
-          'diamond — centred on the upright edge joining a pair of prismatic pentagons. Rings are ' +
-          'far apart in size, so this one is better spoken of as small, medium or large.' },
+          'one instead of one apiece. Its rows run flat across, nine cells with a prismatic in ' +
+          'the middle, then eight, with pairs of prismatic pentagons between; the board is a ' +
+          'rectangle of them centred on the upright edge that joins one such pair.' },
   /* Here a row runs Cairo, prismatic, prismatic and repeats, and it runs down
      the page rather than across it; the next row stands a cell to the right and
      a little higher. Six cells to a row-step and two rows to the other is
@@ -720,6 +719,14 @@ function regionOf(t) {
       return Math.abs(a) <= A + 2e-3 && Math.abs(b) <= A + 2e-3;
     };
   }
+
+  /* A plain rectangle, but taking a tile when its centre is inside rather than
+     when the whole of it is. Insisting on the whole tile shaves a half-cell off
+     every side and leaves the edge ragged; going by the centre keeps the rows
+     full and lets the tiles overhang, which is what the edge of this tiling
+     looks like anyway. */
+  if (kind === 'boxCentre')
+    return (x, y, hx, hy) => Math.abs(x) <= hx && Math.abs(y) <= hy;
 
   // A diamond, squared up to the screen rather than to the lattice.
   if (kind === 'diamond')
@@ -1021,7 +1028,7 @@ function buildBoard(t, across, down) {
   const byMargin = kind === 'rect', byRadius = kind === 'hex' || kind === 'lsq';
   // a square counted in lattice steps is judged by where a tile sits, not by
   // where its corners reach, so that the bound stays exactly symmetric
-  const byCentre = kind === 'lsq';
+  const byCentre = kind === 'lsq' || kind === 'boxCentre';
   const area = Math.abs(t.src.v1[0] * t.src.v2[1] - t.src.v1[1] * t.src.v2[0]);
   const per = Math.max(1, Math.round(t.src.density * area));        // tiles per unit cell
   // a ball of R flowers holds 3R^2+3R+1 of them, so this is the radius that
