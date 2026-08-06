@@ -463,12 +463,12 @@ const TILINGS = [
           'prismatic fenceposts running down the seams between them. The board is kept to whole ' +
           'blocks.' },
   { id: 'cp21', name: 'Cairo and Prismatic Pentagons (2:1)', src: dualOf(T_n16),
-    region: { kind: 'lsq', anchor: 'prismaticPair', even: true },
+    region: { kind: 'rings', anchor: 'prismaticPair' },
     note: 'The same two pentagons on a larger repeat, with two Cairo pentagons to each prismatic ' +
           'one instead of one apiece. Its lattice is square and stands at forty-five degrees to ' +
-          'the page, so a board counted out along that lattice comes out as a diamond — this one ' +
-          'centred on the upright edge joining a pair of prismatic pentagons, and even about the ' +
-          'line down the middle.' },
+          'the page, so the board is built in whole rings about the middle and comes out as a ' +
+          'diamond — centred on the upright edge joining a pair of prismatic pentagons. Rings are ' +
+          'far apart in size, so this one is better spoken of as small, medium or large.' },
   { id: 'cp3', name: 'Cairo and Prismatic Pentagons (3-uniform)', src: dualOf(T_k53),
     note: 'Two prismatic pentagons to each Cairo one, from a 3-uniform parent — the prismatic ' +
           'pentagons here fall into two families that sit differently among their neighbours.' }
@@ -839,6 +839,43 @@ function rowBoard(t, across, down) {
   return keep;
 }
 
+/* Rings of whole unit cells about a middle one. The 2:1 tiling's lattice is
+   square and stands at forty-five degrees, so a ring of unit cells reads on the
+   page as a diamond, and taking whole rings means the board grows evenly all
+   round and its edge never cuts a repeat in half. The count is whatever a whole
+   number of rings comes to, which is the point of counting them. */
+function ringBoard(t, rings) {
+  const cp = 1 / Math.sqrt(t.src.density);
+  const step = Math.max(Math.hypot(...t.src.v1), Math.hypot(...t.src.v2));
+  const raw = t.src.raw((rings + 1.5) * step + 2 * cp);
+  const off = anchorOf(t, raw);
+  const all = (off[0] || off[1]) ? raw.map(p => translate(p, -off[0], -off[1])) : raw;
+
+  const toAB = latticeCoords(t.src);
+  const keep = [];
+  for (const p of all) {
+    const c = centroidOf(p);
+    const [a, b] = toAB(c[0], c[1]);
+    const ia = Math.round(a), ib = Math.round(b);
+    if (Math.max(Math.abs(ia), Math.abs(ib)) <= rings) keep.push(p);
+  }
+
+  /* A tile sitting all but exactly on the line between two unit cells can round
+     to the wrong side of it — this tiling is written down to four decimal
+     places, so a tile and its reflection do not agree to better than that. The
+     board is evened up afterwards, which puts any such stray back. */
+  const seen = new Set(keep.map(p => {
+    const c = centroidOf(p); return Math.round(c[0] * 200) + ',' + Math.round(c[1] * 200);
+  }));
+  for (const p of all) {
+    const c = centroidOf(p);
+    const me = Math.round(c[0] * 200) + ',' + Math.round(c[1] * 200);
+    const mirror = Math.round(-c[0] * 200) + ',' + Math.round(c[1] * 200);
+    if (!seen.has(me) && seen.has(mirror)) { keep.push(p); seen.add(me); }
+  }
+  return keep;
+}
+
 function buildBoard(t, across, down) {
   tiling = t;
   cellPitch = 1 / Math.sqrt(t.src.density);          // mean width of a cell
@@ -846,7 +883,19 @@ function buildBoard(t, across, down) {
   const hx = across * cellPitch / 2, hy = down * cellPitch / 2;
   const kind = (t.region || {}).kind || 'rect';
 
-  if (kind === 'rows') {
+  if (kind === 'rings') {
+    /* Whichever whole number of rings comes nearest the size asked for. A ring
+       of this lattice is twelve cells to a unit and the rings go 1, 9, 25 units,
+       so the sizes it can take are far apart — which is why these boards are
+       better spoken of as small, medium and large than as a count. */
+    const per = Math.max(1, Math.round(t.src.density *
+      Math.abs(t.src.v1[0] * t.src.v2[1] - t.src.v1[1] * t.src.v2[0])));
+    let best = 1;
+    for (let r = 1; r <= 8; r++)
+      if (Math.abs((2 * r + 1) ** 2 * per - want) < Math.abs((2 * best + 1) ** 2 * per - want)) best = r;
+    poly = ringBoard(t, best);
+    n = poly.length;
+  } else if (kind === 'rows') {
     poly = rowBoard(t, across, down);
     n = poly.length;
   } else if (kind === 'para') {
@@ -1024,7 +1073,13 @@ let startTime = 0, endTime = 0;
 function newGame(across, down, m) {
   buildBoard(tiling, across, down);
   useCorners(document.getElementById('cbCorners').checked);
-  mines = Math.max(1, Math.min(m, n - 9));
+
+  /* Some tilings can only come in the sizes their own repeat allows, so a board
+     may hold rather more or fewer cells than were asked for. The mine count
+     follows it, keeping the density the slider was set to — ten mines meant one
+     cell in six, and it should stay one cell in six on whatever board arrives. */
+  const asked = across * down;
+  mines = Math.max(1, Math.min(Math.round(m * n / asked), n - 9));
 
   mine = new Uint8Array(n);
   state = new Uint8Array(n);
