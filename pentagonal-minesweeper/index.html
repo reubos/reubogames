@@ -2193,8 +2193,10 @@ function buildPuzzle() {
   const structured = ruleset !== 'none';
   // dominoes come in twos, a ring needs four cells at the very least, and a
   // snake or a loop may prove a cell or two too long to lay
+  // the cap has to be taken before the rounding to twos, or it can hand back
+  // an odd number and no pair will ever fit it
   if (ruleset === 'dual' || ruleset === 'dual2')
-    mines = Math.min(n - 9, Math.max(2, 2 * Math.round(mines / 2)));
+    mines = Math.max(2, 2 * Math.floor(Math.min(n - 9, mines) / 2));
   if (ruleset === 'loop') mines = Math.max(4, mines);
   const target = (n - mines) * d.open;
   // hard gets longer to search, and so do the laws: what they ask for is rarer
@@ -2202,12 +2204,17 @@ function buildPuzzle() {
     (n > 300 ? 300 : 120) * ((difficulty === 'hard' ? 2 : 1) + (structured ? 1 : 0));
   let best = null, spare = null;
 
-  for (let attempt = 0; attempt < 500; attempt++) {
-    if (!structured) layMines(new Set());
-    else if (!layByRule()) {
-      if ((ruleset === 'snake' || ruleset === 'loop') && mines > 4) mines--;
-      continue;
-    }
+  /* A law the mines cannot obey at the count asked for is answered by asking
+     for fewer, not by giving up — a board of 106 mines that must all chain to
+     the border may simply not exist, while one of 70 does. Each law has a
+     floor of its own: a pair needs two cells to be a pair, a ring four to be
+     a ring. */
+  const floor = ruleset === 'loop' ? 4 : (ruleset === 'dual' || ruleset === 'dual2') ? 2 : 1;
+  const step = (ruleset === 'dual' || ruleset === 'dual2') ? 2 : 1;
+  const easeOff = () => { if (mines - step >= floor) { mines -= step; return true; } return false; };
+
+  // Cells handed over one at a time until the mines laid can all be reasoned out.
+  const handOut = () => {
     const known = new Uint8Array(n);
     const list = [];
     while (true) {
@@ -2217,6 +2224,13 @@ function buildPuzzle() {
       markOpen(known, g);
       if (deduce(known) === n - mines) break;
     }
+    return list;
+  };
+
+  for (let attempt = 0; attempt < 500; attempt++) {
+    if (!structured) layMines(new Set());
+    else if (!layByRule()) { easeOff(); continue; }
+    const list = handOut();
 
     /* Solvable is not the whole promise: the board must also not resist
        counting beyond what this level allows, and no amount of searching for
@@ -2262,8 +2276,26 @@ function buildPuzzle() {
         (best || performance.now() > deadline + 500)) break;
   }
 
-  /* The snake shrink can lower `mines` on attempts after the kept one was
-     laid, so the kept board carries its own count and puts it back. */
+  /* Nothing came back at all: the law would not lay at any count the search
+     had time to try. A board with no opening is not a board — it is a board
+     that can only be guessed at — so the count comes down here without a
+     clock on it until a laying takes. The floors are low enough that one
+     always does; the ordinary laying below is the belt to that pair of
+     braces, and never yet reached. */
+  if (!best && !spare) {
+    let laid = structured && layByRule();
+    while (!laid && easeOff()) laid = layByRule();
+    /* A law can also want a shape the board has nowhere to put at the small
+       end — a floret tiling holds no ring of four pentagons anywhere in it —
+       so when coming down has not helped, go back up and take the first
+       count that will lay. */
+    while (!laid && mines + step <= n - 9) { mines += step; laid = layByRule(); }
+    if (!laid) layMines(new Set());
+    return handOut();
+  }
+
+  /* The shrink can lower `mines` on attempts after the kept one was laid,
+     so the kept board carries its own count and puts it back. */
   const kept = best || spare;
   mine.set(kept.mine);
   count.set(kept.count);
