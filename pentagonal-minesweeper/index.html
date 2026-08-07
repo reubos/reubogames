@@ -106,11 +106,6 @@
 
   <a class="backlink" href="../index.html">&larr; back to reubo's website</a>
   <h1>Pentagonal Minesweeper</h1>
-  <p class="sub">Minesweeper on the pentagonal tilings &mdash; the ones whose every tile is a pentagon.
-    A cell's neighbours are the cells it touches, by an edge or merely at a corner, and how many that
-    comes to is a property of the tiling rather than something the game gets to choose. On the square
-    grid it is always eight. Here it is seven, or on the floret eight &mdash; but a count is not a
-    shape, and seven neighbours arranged five ways make five different games.</p>
 
   <div class="layout">
 
@@ -131,8 +126,6 @@
       <div class="panel">
         <p class="label">Tiling</p>
         <select id="selTiling"></select>
-        <p class="note" id="noteTiling"></p>
-        <p class="note" id="noteDegree"></p>
       </div>
 
       <div class="panel">
@@ -141,20 +134,14 @@
         </div>
         <p class="note">Click to uncover. Right-click to plant a flag. Clicking a number that already
           has its full quota of flags beside it uncovers everything else it touches.</p>
-        <label class="check" style="margin-top: 12px">
-          <input type="checkbox" id="cbFair" checked> Never need to guess</label>
-        <p class="note" id="noteGiven"></p>
-        <p class="note">With that on, the board opens with enough cells already showing that counting,
-          subsets and the mine total settle every last square. Turn it off for the plain game, where
-          mines fall where they fall and the end can come down to a coin.</p>
       </div>
 
       <div class="panel">
         <p class="label">Board</p>
         <div class="btn-row">
-          <button data-preset="8|8|10">8 &times; 8 &middot; 10</button>
-          <button data-preset="16|16|40">16 &times; 16 &middot; 40</button>
-          <button class="full" data-preset="30|16|99">30 &times; 16 &middot; 99</button>
+          <button data-preset="8|8|10">Small</button>
+          <button data-preset="16|16|40">Medium</button>
+          <button class="full" data-preset="30|16|99">Large</button>
         </div>
         <div class="field">
           <div class="rowlab"><p class="label">Cells across</p><span class="val" id="valAcross"></span></div>
@@ -168,17 +155,6 @@
           <div class="rowlab"><p class="label">Mines</p><span class="val" id="valMines"></span></div>
           <input type="range" id="rngMines" min="1" max="55" value="10">
         </div>
-        <p class="note">Only the square grid can be counted off exactly in rows, so across and down
-          are a size asked for rather than a promise. The board comes out as near it as the tiling
-          allows.</p>
-      </div>
-
-      <div class="panel">
-        <p class="label">Display</p>
-        <label class="check"><input type="checkbox" id="cbCorners" checked> Corners count as touching</label>
-        <label class="check"><input type="checkbox" id="cbShapes"> Tell the pentagons apart</label>
-        <p class="note">Turn corners off and a cell keeps only the neighbours it shares an edge with,
-          which is a gentler game and a different one. Either way it starts afresh.</p>
       </div>
 
     </div>
@@ -1185,7 +1161,7 @@ let startTime = 0, endTime = 0;
 
 function newGame(across, down, m) {
   buildBoard(tiling, across, down);
-  useCorners(document.getElementById('cbCorners').checked);
+  useCorners(true);          // cells touching at a corner count as neighbours
 
   /* Some tilings can only come in the sizes their own repeat allows, so a board
      may hold rather more or fewer cells than were asked for. The mine count
@@ -1206,11 +1182,9 @@ function newGame(across, down, m) {
 
   /* A board that needs no guessing has to be worked out before it is shown,
      since what it starts with showing is part of the answer. */
-  if (document.getElementById('cbFair').checked) {
-    seeded = true;
-    for (const g of buildPuzzle()) reveal(g);
-    given = opened;
-  }
+  seeded = true;
+  for (const g of buildPuzzle()) reveal(g);
+  given = opened;
 
   paintStatus();
 }
@@ -1602,8 +1576,6 @@ function draw() {
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-  const byShape = document.getElementById('cbShapes').checked && shapeCount > 1;
-
   // the tiling first, one cell at a time, in board units
   ctx.setTransform(view.s, 0, 0, view.s, view.ox, view.oy);
   ctx.lineJoin = 'round';
@@ -1613,7 +1585,7 @@ function draw() {
     if (open && mine[i]) ctx.fillStyle = i === exploded ? BOOM : MINED;
     else if (open) ctx.fillStyle = DUG;
     else if (i === hover && !over) ctx.fillStyle = COVER_HI;
-    else ctx.fillStyle = COVERS[byShape ? shapeOf[i] % COVERS.length : 0];
+    else ctx.fillStyle = COVERS[0];
     ctx.fill(cellPath[i]);
     ctx.strokeStyle = open ? LINE : RIM;
     ctx.stroke(cellPath[i]);
@@ -1682,27 +1654,6 @@ function paintStatus() {
   const v = el('verdict');
   v.className = 'verdict' + (over ? (won ? ' won' : ' lost') : '');
   v.textContent = over ? (won ? 'Swept — ' + fmtTime(endTime - startTime) : 'Boom.') : '';
-  el('noteGiven').textContent = given
-    ? given + ' of the ' + (n - mines) + ' safe cells were given away to start.'
-    : 'Mines are laid on your first click, so it is always a safe one.';
-}
-
-/* How many neighbours the cells of this board actually have. Cells on the rim
-   have fewer, so only the fully surrounded ones are counted — they are the ones
-   the tiling itself is speaking for. */
-function paintTilingNote() {
-  el('noteTiling').textContent = tiling.note;
-  const inside = [];
-  for (let i = 0; i < n; i++) if (interior[i]) inside.push(nbOf(i).length);
-  if (!inside.length) { el('noteDegree').textContent = ''; return; }
-  const hi = Math.max(...inside), lo = Math.min(...inside);
-  const tally = new Map();
-  for (const d of inside) tally.set(d, (tally.get(d) || 0) + 1);
-  const spread = [...tally.entries()].sort((a, b) => a[0] - b[0])
-    .map(([d, c]) => d + ' (' + Math.round(c / inside.length * 100) + '%)').join(', ');
-  el('noteDegree').innerHTML = lo === hi
-    ? 'Every cell away from the rim touches <b>' + hi + '</b> others, so the numbers run 1 to ' + hi + '.'
-    : 'Neighbours away from the rim: <b>' + spread + '</b> — so the numbers run 1 to ' + hi + '.';
 }
 
 // The clock is the only thing that moves on its own, so the loop only redraws
@@ -1786,7 +1737,6 @@ function paintSizeLabels(actual) {
 function startFromControls() {
   newGame(+rngAcross.value, +rngDown.value, +rngMines.value);
   paintSizeLabels(n);
-  paintTilingNote();
   draw();
 }
 
@@ -1808,9 +1758,6 @@ selTiling.innerHTML = TILINGS.map((t, i) => '<option value="' + i + '">' + t.nam
 selTiling.onchange = () => { tiling = TILINGS[+selTiling.value]; startFromControls(); };
 
 el('btnNew').onclick = startFromControls;
-el('cbCorners').onchange = startFromControls;
-el('cbFair').onchange = startFromControls;
-el('cbShapes').onchange = draw;
 
 /* The canvas follows its panel rather than the window, since the panel also
    changes width when the sidebar drops below it. Only a width change is acted
