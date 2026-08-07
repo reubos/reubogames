@@ -169,6 +169,7 @@
           <button data-rule="connected">Connected</button>
           <button data-rule="outside">Outside</button>
           <button data-rule="dual">Dual</button>
+          <button data-rule="dual2">Dual 2</button>
           <button data-rule="snake">Snake</button>
         </div>
         <p class="note" id="noteRule"></p>
@@ -1219,6 +1220,8 @@ const RULENOTES = {
   outside: 'All safe cells connect edge to edge, and every mine chains edge ' +
            'to edge to the border.',
   dual: 'Mines come in edge-joined pairs, and no two pairs touch, even at a corner.',
+  dual2: 'Mines come in edge-joined pairs; pairs may meet at a corner, but never ' +
+         'along an edge.',
   snake: 'Mines form one edge-joined path that never runs alongside itself.'
 };
 let mines = 10, opened = 0, flags = 0, given = 0;
@@ -1355,8 +1358,10 @@ function placeConnected(k) {
   return placed === k;
 }
 
-// Dominoes laid where nothing already stands within a corner's reach.
-function placeDual(k) {
+/* Dominoes laid where nothing already stands within the blocking reach —
+   a corner's for dual, where pairs may not touch at all, an edge's for
+   dual 2, where a corner between pairs is allowed. */
+function placeDual(k, blockAdj) {
   const blocked = new Uint8Array(n);
   let placed = 0;
   const order = [...Array(n).keys()];
@@ -1371,7 +1376,7 @@ function placeDual(k) {
     if (!mates.length) continue;
     const b = mates[Math.floor(Math.random() * mates.length)];
     mine[a] = mine[b] = 1; placed += 2;
-    for (const c of [a, b]) { blocked[c] = 1; for (const j of corOf(c)) blocked[j] = 1; }
+    for (const c of [a, b]) { blocked[c] = 1; for (const j of blockAdj(c)) blocked[j] = 1; }
   }
   return placed === k;
 }
@@ -1444,11 +1449,12 @@ function validRuleset() {
   const isMine = i => mine[i] === 1;
   if (ruleset === 'connected')
     return compsOver(isMine, corOf).comps.length === 1;
-  if (ruleset === 'dual') {
+  if (ruleset === 'dual' || ruleset === 'dual2') {
     const { id, comps } = compsOver(isMine, edgOf);
     if (!comps.every(g => g.length === 2)) return false;
-    for (let i = 0; i < n; i++) if (mine[i])
-      for (const j of corOf(i)) if (mine[j] && id[j] !== id[i]) return false;
+    if (ruleset === 'dual')
+      for (let i = 0; i < n; i++) if (mine[i])
+        for (const j of corOf(i)) if (mine[j] && id[j] !== id[i]) return false;
     return true;
   }
   if (ruleset === 'snake') {
@@ -1473,7 +1479,8 @@ function validRuleset() {
 function layByRule() {
   mine.fill(0);
   const ok = ruleset === 'connected' ? placeConnected(mines)
-           : ruleset === 'dual' ? placeDual(mines)
+           : ruleset === 'dual' ? placeDual(mines, corOf)
+           : ruleset === 'dual2' ? placeDual(mines, edgOf)
            : ruleset === 'snake' ? placeSnake(mines)
            : placeOutside(mines);
   if (!ok || !validRuleset()) return false;
@@ -1549,26 +1556,33 @@ function rulesetMoves(known) {
   // the ground a mine could still pass through
   const open = i => known[i] === UNKNOWN || known[i] === KNOWN_MINE;
 
-  if (ruleset === 'dual') {
+  if (ruleset === 'dual' || ruleset === 'dual2') {
+    // in dual, pairs may not even meet at a corner; in dual 2 they may,
+    // so a pair only ever clears the ground along its edges
+    const strict = ruleset === 'dual';
     for (let i = 0; i < n; i++) {
       if (!isM(i)) continue;
       const partners = [...edgOf(i)].filter(isM);
       if (partners.length === 1) {
-        // paired: nothing else may touch either half, even at a corner
-        for (const j of corOf(i)) if (j !== partners[0]) setSafe(j);
-        for (const j of corOf(partners[0])) if (j !== i) setSafe(j);
+        const around = strict ? corOf : edgOf;
+        for (const j of around(i)) if (j !== partners[0]) setSafe(j);
+        for (const j of around(partners[0])) if (j !== i) setSafe(j);
       } else if (!partners.length) {
-        // unpaired: its partner lies across an edge, so mere corner
-        // neighbours are safe, and a lone candidate is the partner itself
-        const es = new Set(edgOf(i));
-        for (const j of corOf(i)) if (!es.has(j)) setSafe(j);
+        // unpaired: the partner lies across an edge, so a lone candidate
+        // is the partner itself
+        if (strict) {
+          const es = new Set(edgOf(i));
+          for (const j of corOf(i)) if (!es.has(j)) setSafe(j);
+        }
         const cand = [...edgOf(i)].filter(j => known[j] === UNKNOWN);
         if (cand.length === 1) setMine(cand[0]);
       }
     }
-    // a cell with no room left for a partner cannot be a mine
     for (let i = 0; i < n; i++) {
       if (known[i] !== UNKNOWN) continue;
+      // a cell against two mines would swell some pair into three
+      if ([...edgOf(i)].filter(isM).length >= 2) { setSafe(i); continue; }
+      // and one with no room left for a partner cannot be a mine
       const can = [...edgOf(i)].some(j => known[j] === UNKNOWN ||
         (isM(j) && ![...edgOf(j)].some(isM)));
       if (!can) setSafe(i);
@@ -1918,7 +1932,8 @@ function buildPuzzle() {
   const d = DIFF[difficulty];
   const structured = ruleset !== 'none';
   // dominoes come in twos, and a snake may prove a cell or two too long to lay
-  if (ruleset === 'dual') mines = Math.min(n - 9, Math.max(2, 2 * Math.round(mines / 2)));
+  if (ruleset === 'dual' || ruleset === 'dual2')
+    mines = Math.min(n - 9, Math.max(2, 2 * Math.round(mines / 2)));
   const target = (n - mines) * d.open;
   // hard gets longer to search, and so do the laws: what they ask for is rarer
   const deadline = performance.now() +
