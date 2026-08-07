@@ -135,7 +135,10 @@
       <div class="panel">
         <div class="btn-row">
           <button class="primary full" id="btnNew">New game</button>
+          <button class="full" id="btnHint">Hint</button>
         </div>
+        <p class="note" id="noteHint">Asking once marks what to look at; asking again
+          names the reasoning.</p>
         <p class="note">Click to uncover. Right-click to plant a flag. Clicking a number that already
           has its full quota of flags beside it uncovers everything else it touches.</p>
       </div>
@@ -171,6 +174,7 @@
           <button data-rule="dual">Dual</button>
           <button data-rule="dual2">Dual 2</button>
           <button data-rule="snake">Snake</button>
+          <button data-rule="loop">Loop</button>
         </div>
         <p class="note" id="noteRule"></p>
       </div>
@@ -1222,7 +1226,9 @@ const RULENOTES = {
   dual: 'Mines come in edge-joined pairs, and no two pairs touch, even at a corner.',
   dual2: 'Mines come in edge-joined pairs; pairs may meet at a corner, but never ' +
          'along an edge.',
-  snake: 'Mines form one edge-joined path that never runs alongside itself.'
+  snake: 'Mines form one edge-joined path that never runs alongside itself.',
+  loop: 'Mines form one edge-joined loop that never runs alongside itself — ' +
+        'every mine has exactly two mines beside it.'
 };
 let mines = 10, opened = 0, flags = 0, given = 0;
 let seeded = false, over = false, won = false, exploded = -1;
@@ -1408,6 +1414,40 @@ function placeSnake(k) {
   return false;
 }
 
+/* A loop is grown as a snake is, but with the way home kept in mind: the
+   walk is only let onto ground it could still get back from in the steps it
+   has left, and the cell laid last is the one that closes the ring. */
+function placeLoop(k) {
+  if (k < 4) return false;
+  const dist = new Int32Array(n);
+  for (let t = 0; t < 400; t++) {
+    mine.fill(0);
+    const s = Math.floor(Math.random() * n);
+    dist.fill(-1); dist[s] = 0;
+    const q = [s];
+    for (let a = 0; a < q.length; a++)
+      for (const j of edgOf(q[a])) if (dist[j] < 0) { dist[j] = dist[q[a]] + 1; q.push(j); }
+    mine[s] = 1;
+    let head = s, len = 1;
+    while (len < k) {
+      const closing = len === k - 1;
+      const cand = [...edgOf(head)].filter(j => {
+        if (mine[j]) return false;
+        const d = [...edgOf(j)].filter(z => mine[z]);
+        // the last cell touches both ends; every other touches only the head,
+        // and must be near enough to s to still get home afterwards
+        return closing ? d.length === 2 && d.includes(s) && d.includes(head)
+                       : d.length === 1 && d[0] === head && dist[j] >= 0 && dist[j] <= k - len;
+      });
+      if (!cand.length) break;
+      head = cand[Math.floor(Math.random() * cand.length)];
+      mine[head] = 1; len++;
+    }
+    if (len === k && validRuleset()) return true;
+  }
+  return false;
+}
+
 // Lumps grown inward from the border, then the safe ground checked whole.
 function placeOutside(k) {
   const rim = [];
@@ -1468,6 +1508,12 @@ function validRuleset() {
     }
     return comps[0].length === 1 || ends === 2;
   }
+  if (ruleset === 'loop') {
+    const { comps } = compsOver(isMine, edgOf);
+    if (comps.length !== 1 || comps[0].length < 4) return false;
+    // one piece with every cell of degree two is a ring and nothing else
+    return comps[0].every(c => [...edgOf(c)].filter(j => mine[j]).length === 2);
+  }
   if (ruleset === 'outside') {
     if (compsOver(i => !mine[i], edgOf).comps.length !== 1) return false;
     return compsOver(isMine, edgOf).comps.every(g => g.some(i => !interior[i]));
@@ -1482,6 +1528,7 @@ function layByRule() {
            : ruleset === 'dual' ? placeDual(mines, corOf)
            : ruleset === 'dual2' ? placeDual(mines, edgOf)
            : ruleset === 'snake' ? placeSnake(mines)
+           : ruleset === 'loop' ? placeLoop(mines)
            : placeOutside(mines);
   if (!ok || !validRuleset()) return false;
   countFromMines();
@@ -1548,13 +1595,29 @@ function cutCells(known, nodes, keep, adjOf, isA, isB, mode) {
   return forced;
 }
 
-function rulesetMoves(known) {
+/* Every deduction a law hands over goes through `mark`, which carries not
+   only what it settles but the rule it leaned on and the cells a player
+   would have to look at to see it. That attribution is dead weight to the
+   solver and the whole point to the hint system: in find mode nothing is
+   settled at all, the first deduction is written down and the search is
+   abandoned where it stands. */
+let hintHit = null;
+const HINT_STOP = {};
+
+function rulesetMoves(known, find) {
   let moved = false;
-  const setSafe = j => { if (known[j] === UNKNOWN) { markOpen(known, j); moved = true; } };
-  const setMine = j => { if (known[j] === UNKNOWN) { known[j] = KNOWN_MINE; moved = true; } };
   const isM = i => known[i] === KNOWN_MINE;
   // the ground a mine could still pass through
   const open = i => known[i] === UNKNOWN || known[i] === KNOWN_MINE;
+  const mark = (j, kind, rule, clues) => {
+    if (known[j] !== UNKNOWN) return;
+    if (find) {
+      hintHit = { cells: [j], kind, rule, clues: clues.filter(c => c !== j) };
+      throw HINT_STOP;
+    }
+    if (kind === 'safe') markOpen(known, j); else known[j] = KNOWN_MINE;
+    moved = true;
+  };
 
   if (ruleset === 'dual' || ruleset === 'dual2') {
     // in dual, pairs may not even meet at a corner; in dual 2 they may,
@@ -1565,66 +1628,109 @@ function rulesetMoves(known) {
       const partners = [...edgOf(i)].filter(isM);
       if (partners.length === 1) {
         const around = strict ? corOf : edgOf;
-        for (const j of around(i)) if (j !== partners[0]) setSafe(j);
-        for (const j of around(partners[0])) if (j !== i) setSafe(j);
+        const pair = [i, partners[0]];
+        for (const j of around(i)) if (j !== partners[0]) mark(j, 'safe', 'dual-pair', pair);
+        for (const j of around(partners[0])) if (j !== i) mark(j, 'safe', 'dual-pair', pair);
       } else if (!partners.length) {
         // unpaired: the partner lies across an edge, so a lone candidate
         // is the partner itself
         if (strict) {
           const es = new Set(edgOf(i));
-          for (const j of corOf(i)) if (!es.has(j)) setSafe(j);
+          for (const j of corOf(i)) if (!es.has(j)) mark(j, 'safe', 'dual-corner', [i]);
         }
         const cand = [...edgOf(i)].filter(j => known[j] === UNKNOWN);
-        if (cand.length === 1) setMine(cand[0]);
+        if (cand.length === 1) mark(cand[0], 'mine', 'dual-partner', [i]);
       }
     }
     for (let i = 0; i < n; i++) {
       if (known[i] !== UNKNOWN) continue;
       // a cell against two mines would swell some pair into three
-      if ([...edgOf(i)].filter(isM).length >= 2) { setSafe(i); continue; }
+      const two = [...edgOf(i)].filter(isM);
+      if (two.length >= 2) { mark(i, 'safe', 'dual-three', two); continue; }
       // and one with no room left for a partner cannot be a mine
       const can = [...edgOf(i)].some(j => known[j] === UNKNOWN ||
         (isM(j) && ![...edgOf(j)].some(isM)));
-      if (!can) setSafe(i);
+      if (!can) mark(i, 'safe', 'dual-noroom', [...edgOf(i)]);
     }
   }
 
-  if (ruleset === 'connected' || ruleset === 'snake') {
-    const adj = ruleset === 'snake' ? edgOf : corOf;
-    if (ruleset === 'snake') {
+  if (ruleset === 'connected' || ruleset === 'snake' || ruleset === 'loop') {
+    const adj = ruleset === 'connected' ? corOf : edgOf;
+
+    if (ruleset === 'snake' || ruleset === 'loop') {
+      /* How many mines a mine must have beside it: a snake's have one or
+         two, a loop's have two exactly — which turns every known mine into
+         a little counting problem of its own. */
+      const ring = ruleset === 'loop';
       for (let i = 0; i < n; i++) {
         if (!isM(i)) continue;
         const mn = [...edgOf(i)].filter(isM);
-        if (mn.length >= 2) {
+        const cand = [...edgOf(i)].filter(j => known[j] === UNKNOWN);
+        if (ring) {
+          if (mn.length >= 2) for (const j of cand) mark(j, 'safe', 'loop-degree', [i, ...mn]);
+          else if (cand.length && 2 - mn.length === cand.length)
+            for (const j of cand) mark(j, 'mine', 'loop-degree', [i, ...mn]);
+        } else if (mn.length >= 2) {
           // a full body cell: everything else beside it is safe
-          for (const j of edgOf(i)) if (!mn.includes(j)) setSafe(j);
-        } else if (!mn.length && mines >= 2) {
-          const cand = [...edgOf(i)].filter(j => known[j] === UNKNOWN);
-          if (cand.length === 1) setMine(cand[0]);
+          for (const j of cand) mark(j, 'safe', 'snake-body', [i, ...mn]);
+        } else if (!mn.length && mines >= 2 && cand.length === 1) {
+          mark(cand[0], 'mine', 'snake-end', [i]);
         }
       }
-      /* A cell against three mines would give one of them three neighbours;
-         a cell against two joined mines would fold a bend onto itself; and a
-         cell against two ends of the same piece would close it into a ring.
-         All three are the snake touching itself, so all three are safe. */
-      const { id: segId } = compsOver(isM, edgOf);
+
+      /* A cell against three mines would give one of them three neighbours,
+         and a cell against two mines already joined would fold a bend onto
+         itself: both are the line touching itself, either way. A cell against
+         the two ends of one piece closes it into a ring — which is what a
+         snake must never do, and what a loop must do exactly once, with every
+         mine on the board and not a cell fewer. */
+      const { id: segId, comps: segs } = compsOver(isM, edgOf);
+      const touch = ring ? 'loop-degree' : 'snake-touch';
       for (let i = 0; i < n; i++) {
         if (known[i] !== UNKNOWN) continue;
         const km = [...edgOf(i)].filter(isM);
-        if (km.length >= 3) setSafe(i);
-        else if (km.length === 2 &&
-                 ([...edgOf(km[0])].includes(km[1]) || segId[km[0]] === segId[km[1]]))
-          setSafe(i);
+        if (km.length >= 3) { mark(i, 'safe', touch, km); continue; }
+        if (km.length !== 2) continue;
+        if ([...edgOf(km[0])].includes(km[1])) mark(i, 'safe', touch, km);
+        else if (segId[km[0]] === segId[km[1]]) {
+          if (!ring) mark(i, 'safe', 'snake-touch', km);
+          else if (segs[segId[km[0]]].length + 1 !== mines)
+            mark(i, 'safe', 'loop-short', segs[segId[km[0]]]);
+        }
+      }
+
+      /* One mine left to place and the rest of it lying in a single open
+         piece: that mine can only be a cell joining the piece's two ends, so
+         every cell that does not touch both of them is safe. */
+      let placed = 0;
+      for (let i = 0; i < n; i++) if (isM(i)) placed++;
+      if (ring && mines - placed === 1 && segs.length === 1) {
+        const ends = segs[0].filter(c => [...edgOf(c)].filter(isM).length < 2);
+        if (ends.length === 2) {
+          const shuts = [];
+          for (let i = 0; i < n; i++) {
+            if (known[i] !== UNKNOWN) continue;
+            const e = edgOf(i);
+            if (e.includes(ends[0]) && e.includes(ends[1])) shuts.push(i);
+          }
+          if (shuts.length) {
+            if (shuts.length === 1) mark(shuts[0], 'mine', 'loop-close', ends);
+            for (let i = 0; i < n; i++)
+              if (!shuts.includes(i)) mark(i, 'safe', 'loop-close', ends);
+          }
+        }
       }
     }
+
     // a mine can only reach the rest through covered ground
     const { id, comps } = compsOver(open, adj);
     const withM = comps.filter(g => g.some(isM));
     if (withM.length) {
-      for (const g of comps) if (!g.some(isM)) for (const c of g) setSafe(c);
+      for (const g of comps) if (!g.some(isM))
+        for (const c of g) mark(c, 'safe', 'reach-pocket', g);
       for (const g of withM)
         for (const u of cutCells(known, g, x => id[x] === id[g[0]], adj, isM, isM, 'split'))
-          setMine(u);
+          mark(u, 'mine', 'reach-cut', [...adj(u)]);
     }
   }
 
@@ -1634,10 +1740,10 @@ function rulesetMoves(known) {
     {
       const { id, comps } = compsOver(open, edgOf);
       for (const g of comps) {
-        if (!g.some(rimC)) { for (const c of g) setSafe(c); continue; }
+        if (!g.some(rimC)) { for (const c of g) mark(c, 'safe', 'outside-pocket', g); continue; }
         if (g.some(isM))
           for (const u of cutCells(known, g, x => id[x] === id[g[0]], edgOf, rimC, isM, 'strand'))
-            setMine(u);
+            mark(u, 'mine', 'outside-cut', [...edgOf(u)]);
       }
     }
     // the safe side: every safe cell must reach the others
@@ -1650,16 +1756,24 @@ function rulesetMoves(known) {
         for (const g of comps) {
           if (g.some(isS)) {
             for (const u of cutCells(known, g, x => id[x] === id[g[0]], edgOf, isS, isS, 'split'))
-              setSafe(u);
+              mark(u, 'safe', 'safe-cut', [...edgOf(u)]);
           } else {
             // a pocket no safe cell could ever reach must be all mine
-            for (const c of g) setMine(c);
+            for (const c of g) mark(c, 'mine', 'safe-pocket', g);
           }
         }
       }
     }
   }
   return moved;
+}
+
+// The same sweep, run for its findings rather than its effects.
+function rulesetHint(known) {
+  hintHit = null;
+  try { rulesetMoves(known, true); }
+  catch (e) { if (e !== HINT_STOP) throw e; }
+  return hintHit;
 }
 
 function reveal(i) {
@@ -1782,7 +1896,7 @@ function constraintsOf(known) {
       if (known[j] === UNKNOWN) cells.push(j);
       else if (known[j] === KNOWN_MINE) left--;
     }
-    if (cells.length) cons.push({ cells, left });
+    if (cells.length) cons.push({ from: i, cells, left });
   }
   return cons;
 }
@@ -1859,6 +1973,152 @@ function deduce(known, mode) {
   return safe;
 }
 
+/* =====================================================================
+   6a. HINTS
+
+   A hint is the solver stopped at the first thing it finds, and then asked
+   where that came from. The escalation is the solver's own — counting,
+   then the law, then subsets, then the mine counter — so a hint never
+   reaches for a harder tool than the position actually calls for.
+
+   A flag is the player's opinion, and an opinion is not evidence: a hint
+   worked out around a misplaced flag would be a falsehood told with a
+   straight face. So every flag is checked against the board first, and a
+   wrong one is reported in place of the hint — that one is wrong, never
+   which. Once they have all been checked they are true, and the hint may
+   then stand on them and carry on from where the player really is.
+   ===================================================================== */
+
+function findHint(known) {
+  const cons = constraintsOf(known);
+
+  for (const c of cons) {
+    if (c.left === 0)
+      return { cells: c.cells.slice(), kind: 'safe', rule: 'counting-clear', clues: [c.from] };
+    if (c.left === c.cells.length)
+      return { cells: c.cells.slice(), kind: 'mine', rule: 'counting-full', clues: [c.from] };
+  }
+
+  if (ruleset !== 'none') {
+    const h = rulesetHint(known);
+    if (h) return h;
+  }
+
+  const owner = new Map();                 // cell -> the numbers watching it
+  for (const c of cons) for (const x of c.cells) {
+    let w = owner.get(x); if (!w) owner.set(x, w = []); w.push(c);
+  }
+  for (const a of cons) {
+    const seen = new Set();
+    for (const x of a.cells) for (const b of owner.get(x)) {
+      if (b === a || seen.has(b) || b.cells.length <= a.cells.length) continue;
+      seen.add(b);
+      if (!a.cells.every(y => b.cells.includes(y))) continue;
+      const diff = b.cells.filter(y => !a.cells.includes(y));
+      const d = b.left - a.left;
+      if (d === 0) return { cells: diff, kind: 'safe', rule: 'subset', clues: [a.from, b.from] };
+      if (d === diff.length) return { cells: diff, kind: 'mine', rule: 'subset', clues: [a.from, b.from] };
+    }
+  }
+
+  const covered = [];
+  let found = 0;
+  for (let i = 0; i < n; i++) {
+    if (known[i] === UNKNOWN) covered.push(i);
+    else if (known[i] === KNOWN_MINE) found++;
+  }
+  if (!covered.length) return null;
+  const left = mines - found;
+  if (left === 0) return { cells: covered, kind: 'safe', rule: 'total-none', clues: [] };
+  if (left === covered.length) return { cells: covered, kind: 'mine', rule: 'total-all', clues: [] };
+  for (const a of cons) {
+    const inA = new Set(a.cells);
+    const rest = covered.filter(j => !inA.has(j));
+    if (!rest.length) continue;
+    if (a.left === left)
+      return { cells: rest, kind: 'safe', rule: 'total-holds', clues: [a.from] };
+    if (left - a.left === covered.length - a.cells.length)
+      return { cells: rest, kind: 'mine', rule: 'total-holds', clues: [a.from] };
+  }
+  return null;
+}
+
+// The second tier: what kind of reasoning the marked cells are asking for.
+const HINTWORDS = {
+  'counting-clear': 'Counting. A number here already has all its mines accounted for, so the rest of what it touches is clear.',
+  'counting-full': 'Counting. A number here has only just enough covered cells left to hold its mines.',
+  'subset': "Overlap. One number's covered cells lie wholly inside another's, and the difference between the two numbers settles the cells only the larger one touches.",
+  'total-none': 'The mine counter. Every mine is already accounted for.',
+  'total-all': 'The mine counter. There is one covered cell left for every mine still out there.',
+  'total-holds': 'The mine counter. One number holds every mine still unaccounted for, so the rest of the board follows.',
+  'dual-pair': 'Pairs. This pair is complete, so nothing else may lie against it.',
+  'dual-corner': 'Pairs. This mine has no partner yet, and no other pair may reach around it.',
+  'dual-partner': 'Pairs. This mine has only one place left for its partner.',
+  'dual-three': 'Pairs. A mine here would swell a pair into a run of three.',
+  'dual-noroom': 'Pairs. A mine here would have nowhere left to put its partner.',
+  'snake-body': 'The path. This mine already has both its neighbours, so the path passes it by.',
+  'snake-end': 'The path. This end has only one way left to carry on.',
+  'snake-touch': 'The path. A mine here would make the path run alongside itself or close into a ring.',
+  'loop-degree': 'The loop. Every mine has exactly two mines beside it — count the ones around this one.',
+  'loop-short': 'The loop. A mine here would close a ring too small to hold every mine on the board.',
+  'loop-close': 'The loop. One mine is left, and it can only be the cell joining the two loose ends.',
+  'reach-pocket': 'Connectedness. No mine could reach this ground without leaving the group behind.',
+  'reach-cut': 'Connectedness. This is the only cell the group has to pass through.',
+  'outside-pocket': 'The border. No chain of mines could reach this ground from outside.',
+  'outside-cut': 'The border. This is the only way left from here out to the border.',
+  'safe-cut': 'The border. A mine here would cut the safe ground in two.',
+  'safe-pocket': 'The border. No safe cell could ever reach this ground.'
+};
+
+const HINTIDLE = 'Asking once marks what to look at; asking again names the reasoning.';
+
+/* What is lit and what has been said. Asking twice about the same position
+   says more; touching the board puts the marks out again. */
+let hintClues = [], hintLevel = 0, hintAt = '', hintNote = false;
+
+function clearHint() {
+  hintAt = '';
+  hintClues = [];
+  if (hintNote) { hintNote = false; el('noteHint').textContent = HINTIDLE; }
+}
+
+function askHint() {
+  if (over || !n) return;
+  hintNote = true;
+  const say = t => { hintClues = []; hintLevel = 0; hintAt = ''; el('noteHint').textContent = t; draw(); };
+
+  let wrong = 0;
+  for (let i = 0; i < n; i++) if (state[i] === FLAG && !mine[i]) wrong++;
+  if (wrong) {
+    say(wrong === 1
+      ? 'One of your flags is on a cell that holds no mine. Take it back before asking again.'
+      : wrong + ' of your flags are on cells that hold no mine. Take them back before asking again.');
+    return;
+  }
+
+  /* Every flag has just been checked, so the flags can be leaned on: the
+     hint then carries on from where the player actually is, rather than
+     re-finding mines they marked ten moves ago. */
+  const known = new Uint8Array(n);
+  for (let i = 0; i < n; i++) {
+    if (state[i] === OPEN) known[i] = SAFE;
+    else if (state[i] === FLAG) known[i] = KNOWN_MINE;
+  }
+
+  const h = findHint(known);
+  if (!h) { say('Everything left is already settled by what is on the board.'); return; }
+
+  const sig = opened + ':' + flags + ':' + h.rule + ':' + h.cells.join(',');
+  hintLevel = sig === hintAt ? Math.min(2, hintLevel + 1) : 1;
+  hintAt = sig;
+  // the clues if the rule named any, and otherwise the ground it is talking about
+  hintClues = (h.clues.length ? h.clues : h.cells).slice();
+  el('noteHint').textContent = hintLevel >= 2
+    ? HINTWORDS[h.rule] || HINTIDLE
+    : 'Marked in gold: the next move can be settled here. Ask again to be told how.';
+  draw();
+}
+
 /* Which cell to hand over. The first is the opening, and wants to be a blank,
    since a blank cascades and gives the player a region to work from. Every
    handout after that wants the opposite: a bare number, touching ground that
@@ -1931,9 +2191,11 @@ function countingReach(list) {
 function buildPuzzle() {
   const d = DIFF[difficulty];
   const structured = ruleset !== 'none';
-  // dominoes come in twos, and a snake may prove a cell or two too long to lay
+  // dominoes come in twos, a ring needs four cells at the very least, and a
+  // snake or a loop may prove a cell or two too long to lay
   if (ruleset === 'dual' || ruleset === 'dual2')
     mines = Math.min(n - 9, Math.max(2, 2 * Math.round(mines / 2)));
+  if (ruleset === 'loop') mines = Math.max(4, mines);
   const target = (n - mines) * d.open;
   // hard gets longer to search, and so do the laws: what they ask for is rarer
   const deadline = performance.now() +
@@ -1943,7 +2205,7 @@ function buildPuzzle() {
   for (let attempt = 0; attempt < 500; attempt++) {
     if (!structured) layMines(new Set());
     else if (!layByRule()) {
-      if (ruleset === 'snake' && mines > 4) mines--;
+      if ((ruleset === 'snake' || ruleset === 'loop') && mines > 4) mines--;
       continue;
     }
     const known = new Uint8Array(n);
@@ -2066,6 +2328,7 @@ let hover = -1;
 const DUG = '#1b3620', LINE = '#16301b', RIM = '#4a7d55';
 const BOOM = '#b91c1c', MINED = '#7f1d1d';
 const MUTE = '#6f8c74';        // a question mark, dimmer than any number
+const HINT = '#facc15';        // the gold a hint marks its cells with
 // one green per pentagon shape, used only when asked for
 const COVERS = ['#35603d', '#2c5a4c', '#3d5f33', '#2f5560'];
 const COVER_HI = '#4b8557';
@@ -2179,6 +2442,14 @@ function draw() {
     ctx.stroke(cellPath[i]);
   }
 
+  // whatever the last hint pointed at, ringed over the top
+  if (hintClues.length) {
+    ctx.strokeStyle = HINT;
+    ctx.lineWidth = cellPitch * 0.14;
+    for (const i of hintClues) ctx.stroke(cellPath[i]);
+    ctx.lineWidth = cellPitch * 0.06;
+  }
+
   // then the glyphs, in screen pixels, so the type stays crisp
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.textAlign = 'center';
@@ -2280,6 +2551,7 @@ canvas.addEventListener('contextmenu', e => e.preventDefault());
 // its flags in place; the right button plants a flag instead.
 function dig(i, chording) {
   if (i < 0) return;
+  clearHint();
   startClock();
   if (chording || state[i] === OPEN) chord(i); else reveal(i);
   paintStatus();
@@ -2291,7 +2563,7 @@ canvas.addEventListener('pointerdown', e => {
   if (e.pointerType === 'touch') return;
   const i = cellAt(e.clientX, e.clientY);
   if (i < 0) return;
-  if (e.button === 2) { startClock(); flag(i); paintStatus(); draw(); }
+  if (e.button === 2) { clearHint(); startClock(); flag(i); paintStatus(); draw(); }
   else dig(i, e.button === 1);
 });
 
@@ -2314,6 +2586,7 @@ canvas.addEventListener('touchstart', e => {
   if (holdCell < 0) return;
   holdTimer = setTimeout(() => {
     holdTimer = 0;
+    clearHint();
     startClock();
     flag(holdCell);
     holdCell = -1;
@@ -2349,6 +2622,7 @@ function paintSizeLabels(actual, placed) {
 }
 
 function startFromControls() {
+  clearHint();
   newGame(+rngAcross.value, +rngDown.value, +rngMines.value);
   paintSizeLabels(n, mines);
   draw();
@@ -2406,6 +2680,7 @@ selTiling.innerHTML = TILINGS.map((t, i) => '<option value="' + i + '">' + t.nam
 selTiling.onchange = () => { tiling = TILINGS[+selTiling.value]; startFromControls(); };
 
 el('btnNew').onclick = startFromControls;
+el('btnHint').onclick = askHint;
 
 /* The canvas follows its panel rather than the window, since the panel also
    changes width when the sidebar drops below it. Only a width change is acted
