@@ -163,6 +163,15 @@
         <p class="note">With this on, uncovering a mine shows it for a moment and
           then covers it again, and the game goes on. Boards finished this way
           set no best time.</p>
+        <p class="label" style="margin-top: 14px">Ruleset</p>
+        <div class="btn-row three">
+          <button data-rule="none" class="on">None</button>
+          <button data-rule="connected">Connected</button>
+          <button data-rule="outside">Outside</button>
+          <button data-rule="dual">Dual</button>
+          <button data-rule="snake">Snake</button>
+        </div>
+        <p class="note" id="noteRule"></p>
       </div>
 
       <div class="panel">
@@ -1177,6 +1186,11 @@ function useCorners(on) {
   nbAll = on ? nbAllC : nbAllE;
 }
 
+// The two neighbourhoods by name, whatever the game is currently using —
+// the rulesets speak of edges and corners each in their own right.
+const corOf = i => nbAllC.subarray(nbOffC[i], nbOffC[i + 1]);
+const edgOf = i => nbAllE.subarray(nbOffE[i], nbOffE[i + 1]);
+
 /* =====================================================================
    5. THE GAME
    ===================================================================== */
@@ -1194,6 +1208,19 @@ let muteOn = false;
    covered over again, leaving the board as it was and the game running. */
 let relaxed = false;
 let flashCell = -1, flashUntil = 0;
+
+/* An optional law the mines must obey, over and above the numbers. The
+   boards built under one are made so that the law is needed: a solver
+   kept ignorant of it must get stuck on them. */
+let ruleset = 'none';
+const RULENOTES = {
+  none: '',
+  connected: 'All mines form a single group, touching by edge or corner.',
+  outside: 'All safe cells connect edge to edge, and every mine chains edge ' +
+           'to edge to the border.',
+  dual: 'Mines come in edge-joined pairs, and no two pairs touch, even at a corner.',
+  snake: 'Mines form one edge-joined path that never runs alongside itself.'
+};
 let mines = 10, opened = 0, flags = 0, given = 0;
 let seeded = false, over = false, won = false, exploded = -1;
 let startTime = 0, endTime = 0;
@@ -1223,7 +1250,8 @@ let sizeName = 'Small';       // the standard size this board came from, if any
 let newBest = false;
 let bests = {};
 try { bests = JSON.parse(localStorage.getItem('pentagonal-minesweeper-bests') || '{}'); } catch (e) {}
-const bestKey = () => sizeName && (tiling.id + '|' + sizeName + '|' + difficulty);
+const bestKey = () => sizeName && (tiling.id + '|' + sizeName + '|' + difficulty +
+  (ruleset === 'none' ? '' : '|' + ruleset));
 function saveBests() {
   try { localStorage.setItem('pentagonal-minesweeper-bests', JSON.stringify(bests)); } catch (e) {}
 }
@@ -1275,6 +1303,11 @@ function layMines(banned) {
     const tmp = pool[m]; pool[m] = pool[p]; pool[p] = tmp;
     mine[pool[m]] = 1;
   }
+  countFromMines();
+}
+
+// The numbers, read off wherever the mines have ended up.
+function countFromMines() {
   for (let j = 0; j < n; j++) {
     let c = 0;
     for (const i of nbOf(j)) if (mine[i]) c++;
@@ -1294,6 +1327,326 @@ function seed(first) {
 
 // The clock does not start until the player does something.
 function startClock() { if (!startTime) startTime = performance.now(); }
+
+/* =====================================================================
+   5a. THE RULESETS
+
+   Each optional law needs three things. A way of laying mines that obeys
+   it — scattering and checking is hopeless, since a random scatter obeys
+   these laws about once in many thousands. A check that the laying really
+   did obey it, because the laying is written down rather than trusted.
+   And the deductions the law hands the player, which is the point of
+   having one: those live in rulesetMoves further down, and the generator
+   only accepts a board when the ordinary rules get stuck without them.
+   ===================================================================== */
+
+// One blob, grown a cell at a time from a random seed, corner-joined.
+function placeConnected(k) {
+  let placed = 0;
+  const frontier = [Math.floor(Math.random() * n)];
+  while (placed < k && frontier.length) {
+    const at = Math.floor(Math.random() * frontier.length);
+    const c = frontier[at];
+    frontier[at] = frontier[frontier.length - 1]; frontier.pop();
+    if (mine[c]) continue;
+    mine[c] = 1; placed++;
+    for (const j of corOf(c)) if (!mine[j]) frontier.push(j);
+  }
+  return placed === k;
+}
+
+// Dominoes laid where nothing already stands within a corner's reach.
+function placeDual(k) {
+  const blocked = new Uint8Array(n);
+  let placed = 0;
+  const order = [...Array(n).keys()];
+  for (let i = order.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const t = order[i]; order[i] = order[j]; order[j] = t;
+  }
+  for (const a of order) {
+    if (placed === k) break;
+    if (blocked[a]) continue;
+    const mates = [...edgOf(a)].filter(b => !blocked[b]);
+    if (!mates.length) continue;
+    const b = mates[Math.floor(Math.random() * mates.length)];
+    mine[a] = mine[b] = 1; placed += 2;
+    for (const c of [a, b]) { blocked[c] = 1; for (const j of corOf(c)) blocked[j] = 1; }
+  }
+  return placed === k;
+}
+
+/* A walk grown from both ends, only ever stepping onto ground that touches
+   the walk at the end it grows from and nowhere else — which is exactly the
+   promise the snake makes about itself. */
+function placeSnake(k) {
+  for (let t = 0; t < 80; t++) {
+    mine.fill(0);
+    let a = Math.floor(Math.random() * n), b = a, len = 1;
+    mine[a] = 1;
+    while (len < k) {
+      let grown = false;
+      for (const end of (Math.random() < 0.5 ? [a, b] : [b, a])) {
+        const cand = [...edgOf(end)].filter(j => !mine[j] &&
+          [...edgOf(j)].filter(z => mine[z]).length === 1);
+        if (!cand.length) continue;
+        const c = cand[Math.floor(Math.random() * cand.length)];
+        mine[c] = 1; len++;
+        if (end === a) a = c; else b = c;
+        grown = true;
+        break;
+      }
+      if (!grown) break;
+    }
+    if (len === k) return true;
+  }
+  return false;
+}
+
+// Lumps grown inward from the border, then the safe ground checked whole.
+function placeOutside(k) {
+  const rim = [];
+  for (let i = 0; i < n; i++) if (!interior[i]) rim.push(i);
+  for (let t = 0; t < 40; t++) {
+    mine.fill(0);
+    let placed = 0, guard = 0;
+    while (placed < k && guard++ < 400) {
+      let c = rim[Math.floor(Math.random() * rim.length)];
+      const lump = 1 + Math.floor(Math.random() * Math.min(4, k - placed));
+      for (let s = 0; s < lump && placed < k; s++) {
+        if (!mine[c]) { mine[c] = 1; placed++; }
+        const step = edgOf(c);
+        c = step[Math.floor(Math.random() * step.length)];
+      }
+    }
+    if (placed === k && validRuleset()) return true;
+  }
+  return false;
+}
+
+// Components of the cells that pass `keep`, under the given adjacency.
+function compsOver(keep, adjOf) {
+  const id = new Int32Array(n).fill(-1);
+  const comps = [];
+  for (let i = 0; i < n; i++) {
+    if (id[i] >= 0 || !keep(i)) continue;
+    const grp = [i]; id[i] = comps.length;
+    for (let a = 0; a < grp.length; a++)
+      for (const j of adjOf(grp[a]))
+        if (id[j] < 0 && keep(j)) { id[j] = comps.length; grp.push(j); }
+    comps.push(grp);
+  }
+  return { id, comps };
+}
+
+// The laying is written down rather than trusted: check the law holds.
+function validRuleset() {
+  const isMine = i => mine[i] === 1;
+  if (ruleset === 'connected')
+    return compsOver(isMine, corOf).comps.length === 1;
+  if (ruleset === 'dual') {
+    const { id, comps } = compsOver(isMine, edgOf);
+    if (!comps.every(g => g.length === 2)) return false;
+    for (let i = 0; i < n; i++) if (mine[i])
+      for (const j of corOf(i)) if (mine[j] && id[j] !== id[i]) return false;
+    return true;
+  }
+  if (ruleset === 'snake') {
+    const { comps } = compsOver(isMine, edgOf);
+    if (comps.length !== 1) return false;
+    let ends = 0;
+    for (const c of comps[0]) {
+      const d = [...edgOf(c)].filter(j => mine[j]).length;
+      if (d > 2) return false;
+      if (d === 1) ends++;
+    }
+    return comps[0].length === 1 || ends === 2;
+  }
+  if (ruleset === 'outside') {
+    if (compsOver(i => !mine[i], edgOf).comps.length !== 1) return false;
+    return compsOver(isMine, edgOf).comps.every(g => g.some(i => !interior[i]));
+  }
+  return true;
+}
+
+// Lay by whichever law is on, and never take the laying on trust.
+function layByRule() {
+  mine.fill(0);
+  const ok = ruleset === 'connected' ? placeConnected(mines)
+           : ruleset === 'dual' ? placeDual(mines)
+           : ruleset === 'snake' ? placeSnake(mines)
+           : placeOutside(mines);
+  if (!ok || !validRuleset()) return false;
+  countFromMines();
+  return true;
+}
+
+/* =====================================================================
+   5b. WHAT A RULESET LETS THE PLAYER CONCLUDE
+
+   Every rule here is sound: it leans only on "the mines lie among the
+   covered cells" and on the law itself, so nothing it marks safe or mine
+   is ever a guess. The two heavy tools are shared. compsOver answers
+   which covered ground a mine could reach at all; cutCells answers which
+   single covered cell is the only way through — take it out, and some
+   piece is left holding what it must not be cut off from. mode 'split'
+   objects to a piece holding one anchor severed from another; 'strand'
+   to a piece holding a B-cell but not one A-cell.
+   ===================================================================== */
+
+function cutCells(known, nodes, keep, adjOf, isA, isB, mode) {
+  const disc = new Int32Array(n).fill(-1), low = new Int32Array(n);
+  const subA = new Int32Array(n), subB = new Int32Array(n);
+  const forced = [];
+  let totalA = 0, totalB = 0, timer = 0;
+  for (const v of nodes) { if (isA(v)) totalA++; if (isB(v)) totalB++; }
+  if (mode === 'split' && totalA < 2) return forced;
+  if (mode === 'strand' && (!totalA || !totalB)) return forced;
+
+  const consider = (u, aIn, bIn) => {
+    if (known[u] !== UNKNOWN) return;
+    const aOut = totalA - aIn - (isA(u) ? 1 : 0);
+    const bOut = totalB - bIn - (isB(u) ? 1 : 0);
+    if (mode === 'split') { if (aIn > 0 && aOut > 0) forced.push(u); }
+    else if ((bIn > 0 && !aIn) || (bOut > 0 && !aOut)) forced.push(u);
+  };
+
+  const root = nodes[0];
+  disc[root] = low[root] = timer++;
+  subA[root] = isA(root) ? 1 : 0; subB[root] = isB(root) ? 1 : 0;
+  const stack = [[root, -1, 0]];
+  const rootParts = [];
+  while (stack.length) {
+    const fr = stack[stack.length - 1], v = fr[0], adj = adjOf(v);
+    if (fr[2] < adj.length) {
+      const w = adj[fr[2]++];
+      if (!keep(w)) continue;
+      if (disc[w] < 0) {
+        disc[w] = low[w] = timer++;
+        subA[w] = isA(w) ? 1 : 0; subB[w] = isB(w) ? 1 : 0;
+        stack.push([w, v, 0]);
+      } else if (w !== fr[1]) low[v] = Math.min(low[v], disc[w]);
+    } else {
+      stack.pop();
+      const p = fr[1];
+      if (p < 0) break;
+      low[p] = Math.min(low[p], low[v]);
+      if (p === root) rootParts.push([subA[v], subB[v]]);
+      else if (low[v] >= disc[p]) consider(p, subA[v], subB[v]);
+      subA[p] += subA[v]; subB[p] += subB[v];
+    }
+  }
+  if (rootParts.length >= 2)
+    for (const [a, b] of rootParts) consider(root, a, b);
+  return forced;
+}
+
+function rulesetMoves(known) {
+  let moved = false;
+  const setSafe = j => { if (known[j] === UNKNOWN) { markOpen(known, j); moved = true; } };
+  const setMine = j => { if (known[j] === UNKNOWN) { known[j] = KNOWN_MINE; moved = true; } };
+  const isM = i => known[i] === KNOWN_MINE;
+  // the ground a mine could still pass through
+  const open = i => known[i] === UNKNOWN || known[i] === KNOWN_MINE;
+
+  if (ruleset === 'dual') {
+    for (let i = 0; i < n; i++) {
+      if (!isM(i)) continue;
+      const partners = [...edgOf(i)].filter(isM);
+      if (partners.length === 1) {
+        // paired: nothing else may touch either half, even at a corner
+        for (const j of corOf(i)) if (j !== partners[0]) setSafe(j);
+        for (const j of corOf(partners[0])) if (j !== i) setSafe(j);
+      } else if (!partners.length) {
+        // unpaired: its partner lies across an edge, so mere corner
+        // neighbours are safe, and a lone candidate is the partner itself
+        const es = new Set(edgOf(i));
+        for (const j of corOf(i)) if (!es.has(j)) setSafe(j);
+        const cand = [...edgOf(i)].filter(j => known[j] === UNKNOWN);
+        if (cand.length === 1) setMine(cand[0]);
+      }
+    }
+    // a cell with no room left for a partner cannot be a mine
+    for (let i = 0; i < n; i++) {
+      if (known[i] !== UNKNOWN) continue;
+      const can = [...edgOf(i)].some(j => known[j] === UNKNOWN ||
+        (isM(j) && ![...edgOf(j)].some(isM)));
+      if (!can) setSafe(i);
+    }
+  }
+
+  if (ruleset === 'connected' || ruleset === 'snake') {
+    const adj = ruleset === 'snake' ? edgOf : corOf;
+    if (ruleset === 'snake') {
+      for (let i = 0; i < n; i++) {
+        if (!isM(i)) continue;
+        const mn = [...edgOf(i)].filter(isM);
+        if (mn.length >= 2) {
+          // a full body cell: everything else beside it is safe
+          for (const j of edgOf(i)) if (!mn.includes(j)) setSafe(j);
+        } else if (!mn.length && mines >= 2) {
+          const cand = [...edgOf(i)].filter(j => known[j] === UNKNOWN);
+          if (cand.length === 1) setMine(cand[0]);
+        }
+      }
+      /* A cell against three mines would give one of them three neighbours;
+         a cell against two joined mines would fold a bend onto itself; and a
+         cell against two ends of the same piece would close it into a ring.
+         All three are the snake touching itself, so all three are safe. */
+      const { id: segId } = compsOver(isM, edgOf);
+      for (let i = 0; i < n; i++) {
+        if (known[i] !== UNKNOWN) continue;
+        const km = [...edgOf(i)].filter(isM);
+        if (km.length >= 3) setSafe(i);
+        else if (km.length === 2 &&
+                 ([...edgOf(km[0])].includes(km[1]) || segId[km[0]] === segId[km[1]]))
+          setSafe(i);
+      }
+    }
+    // a mine can only reach the rest through covered ground
+    const { id, comps } = compsOver(open, adj);
+    const withM = comps.filter(g => g.some(isM));
+    if (withM.length) {
+      for (const g of comps) if (!g.some(isM)) for (const c of g) setSafe(c);
+      for (const g of withM)
+        for (const u of cutCells(known, g, x => id[x] === id[g[0]], adj, isM, isM, 'split'))
+          setMine(u);
+    }
+  }
+
+  if (ruleset === 'outside') {
+    const rimC = i => !interior[i];
+    // the mines' side: every mine must reach the border through covered ground
+    {
+      const { id, comps } = compsOver(open, edgOf);
+      for (const g of comps) {
+        if (!g.some(rimC)) { for (const c of g) setSafe(c); continue; }
+        if (g.some(isM))
+          for (const u of cutCells(known, g, x => id[x] === id[g[0]], edgOf, rimC, isM, 'strand'))
+            setMine(u);
+      }
+    }
+    // the safe side: every safe cell must reach the others
+    {
+      const isS = i => known[i] === SAFE;
+      const ground = i => known[i] !== KNOWN_MINE;
+      const { id, comps } = compsOver(ground, edgOf);
+      const anchored = comps.some(g => g.some(isS));
+      if (anchored) {
+        for (const g of comps) {
+          if (g.some(isS)) {
+            for (const u of cutCells(known, g, x => id[x] === id[g[0]], edgOf, isS, isS, 'split'))
+              setSafe(u);
+          } else {
+            // a pocket no safe cell could ever reach must be all mine
+            for (const c of g) setMine(c);
+          }
+        }
+      }
+    }
+  }
+  return moved;
+}
 
 function reveal(i) {
   if (over || state[i] !== COVERED) return;
@@ -1420,8 +1773,10 @@ function constraintsOf(known) {
   return cons;
 }
 
-// Follow the three rules as far as they go. Returns how many cells came out safe.
-function deduce(known) {
+/* Follow the rules as far as they go. Returns how many cells came out safe.
+   With a ruleset on, its logic joins in; mode 'base' keeps it out, which is
+   how the generator proves a board cannot be solved while ignoring the law. */
+function deduce(known, mode) {
   const setSafe = j => { if (known[j] !== UNKNOWN) return false; markOpen(known, j); return true; };
   const setMine = j => { if (known[j] !== UNKNOWN) return false; known[j] = KNOWN_MINE; return true; };
 
@@ -1479,8 +1834,11 @@ function deduce(known) {
     return moved;
   };
 
+  const structural = () =>
+    ruleset !== 'none' && mode !== 'base' && rulesetMoves(known);
+
   // cheapest reasoning first, and back to it the moment anything gives way
-  while (counting() || subsets() || total()) { /* keep going */ }
+  while (counting() || structural() || subsets() || total()) { /* keep going */ }
 
   let safe = 0;
   for (let i = 0; i < n; i++) if (known[i] === SAFE) safe++;
@@ -1542,6 +1900,8 @@ function countingFix(known) {
         for (const j of c.cells) if (known[j] === UNKNOWN) { known[j] = KNOWN_MINE; moved = true; }
       }
     }
+    // once a law is on, its logic counts as plain sight, not as a subtler rule
+    if (!moved && ruleset !== 'none') moved = rulesetMoves(known);
   }
   let done = 0;
   for (let i = 0; i < n; i++) if (known[i] !== UNKNOWN) done++;
@@ -1556,14 +1916,21 @@ function countingReach(list) {
 
 function buildPuzzle() {
   const d = DIFF[difficulty];
+  const structured = ruleset !== 'none';
+  // dominoes come in twos, and a snake may prove a cell or two too long to lay
+  if (ruleset === 'dual') mines = Math.min(n - 9, Math.max(2, 2 * Math.round(mines / 2)));
   const target = (n - mines) * d.open;
-  // hard gets longer to search: stubborn layouts are rarer than easy ones
+  // hard gets longer to search, and so do the laws: what they ask for is rarer
   const deadline = performance.now() +
-    (n > 300 ? 300 : 120) * (difficulty === 'hard' ? 2 : 1);
-  let best = null;
+    (n > 300 ? 300 : 120) * ((difficulty === 'hard' ? 2 : 1) + (structured ? 1 : 0));
+  let best = null, spare = null;
 
   for (let attempt = 0; attempt < 500; attempt++) {
-    layMines(new Set());
+    if (!structured) layMines(new Set());
+    else if (!layByRule()) {
+      if (ruleset === 'snake' && mines > 4) mines--;
+      continue;
+    }
     const known = new Uint8Array(n);
     const list = [];
     while (true) {
@@ -1599,14 +1966,32 @@ function buildPuzzle() {
     const stubborn = n - countingReach(list);
     const score = (list.length - 1) * 1e6 + Math.abs(stubborn - d.res * n) * 100 +
                   Math.abs(cells - target);
-    if (!best || score < best.score)
-      best = { mine: mine.slice(), count: count.slice(), list, score };
-    if (performance.now() > deadline) break;
+
+    /* Under a law, a board only counts if the law is load-bearing: a solver
+       kept ignorant of it must stall short of finishing. Boards that fall to
+       the ordinary rules alone are kept only as a spare, for the rare day
+       the search finds nothing better. */
+    let qualifies = true;
+    if (structured) {
+      const kb = new Uint8Array(n);
+      for (const g of list) markOpen(kb, g);
+      qualifies = deduce(kb, 'base') < n - mines;
+    }
+    if (qualifies && (!best || score < best.score))
+      best = { mine: mine.slice(), count: count.slice(), list, score, mines };
+    if (!spare || score < spare.score)
+      spare = { mine: mine.slice(), count: count.slice(), list, score, mines };
+    if (performance.now() > deadline &&
+        (best || performance.now() > deadline + 500)) break;
   }
 
-  mine.set(best.mine);
-  count.set(best.count);
-  return best.list;
+  /* The snake shrink can lower `mines` on attempts after the kept one was
+     laid, so the kept board carries its own count and puts it back. */
+  const kept = best || spare;
+  mine.set(kept.mine);
+  count.set(kept.count);
+  mines = kept.mines;
+  return kept.list;
 }
 
 /* Muting happens once the board is already known to be solvable, and every
@@ -1990,6 +2375,15 @@ for (const b of document.querySelectorAll('[data-relax]'))
     relaxed = !!b.dataset.relax;
     for (const x of document.querySelectorAll('[data-relax]')) x.classList.toggle('on', x === b);
     paintStatus();
+  };
+
+for (const b of document.querySelectorAll('[data-rule]'))
+  b.onclick = () => {
+    ruleset = b.dataset.rule;
+    for (const x of document.querySelectorAll('[data-rule]')) x.classList.toggle('on', x === b);
+    el('noteRule').textContent = RULENOTES[ruleset] &&
+      RULENOTES[ruleset] + ' Boards are built so the rule is needed to solve them.';
+    startFromControls();
   };
 
 const selTiling = el('selTiling');
