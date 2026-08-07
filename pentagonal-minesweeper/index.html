@@ -78,7 +78,7 @@
   .btn-row.three { grid-template-columns: repeat(3, 1fr); }
   .btn-row button.on { background: #2c6b3c; border-color: #3d8a51; color: #fff; }
 
-  .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .stat-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
   .stat { background: var(--panel); border: 1px solid var(--line); border-radius: 7px; padding: 8px 10px; }
   .stat .v { font-size: 1.25rem; color: #fff; font-weight: 600; line-height: 1.2; font-variant-numeric: tabular-nums; }
   .stat .k { font-size: 0.7rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
@@ -120,8 +120,9 @@
 
       <div class="panel">
         <div class="stat-grid">
-          <div class="stat"><div class="v" id="statMines">10</div><div class="k">Mines left</div></div>
+          <div class="stat"><div class="v" id="statMines">10</div><div class="k">Mines</div></div>
           <div class="stat"><div class="v" id="statTime">0:00</div><div class="k">Time</div></div>
+          <div class="stat"><div class="v" id="statBest">&mdash;</div><div class="k">Best</div></div>
         </div>
         <div class="verdict" id="verdict"></div>
       </div>
@@ -1189,6 +1190,18 @@ const DIFF = {
   hard:   { mines: 1.3,  open: 0.07, res: 1 }
 };
 
+/* Best times, one for each tiling at each standard size and difficulty,
+   kept in the browser's storage. A board made on the sliders is its own
+   thing and sets no records. */
+let sizeName = 'Small';       // the standard size this board came from, if any
+let newBest = false;
+let bests = {};
+try { bests = JSON.parse(localStorage.getItem('pentagonal-minesweeper-bests') || '{}'); } catch (e) {}
+const bestKey = () => sizeName && (tiling.id + '|' + sizeName + '|' + difficulty);
+function saveBests() {
+  try { localStorage.setItem('pentagonal-minesweeper-bests', JSON.stringify(bests)); } catch (e) {}
+}
+
 function newGame(across, down, m) {
   buildBoard(tiling, across, down);
   useCorners(true);          // cells touching at a corner count as neighbours
@@ -1207,7 +1220,7 @@ function newGame(across, down, m) {
   state = new Uint8Array(n);
   count = new Uint8Array(n);
 
-  opened = 0; flags = 0; given = 0;
+  opened = 0; flags = 0; given = 0; newBest = false;
   seeded = false; over = false; won = false; exploded = -1;
   startTime = 0; endTime = 0; hover = -1;
 
@@ -1299,6 +1312,13 @@ function lose(i) {
 function win() {
   over = true; won = true;
   endTime = performance.now();
+  /* A record needs a clock that was really running — startTime is only set by
+     the player's own first move — and a board from a standard size. */
+  const key = startTime && bestKey();
+  if (key) {
+    const t = endTime - startTime;
+    if (!(key in bests) || t < bests[key]) { bests[key] = t; newBest = true; saveBests(); }
+  }
   for (let j = 0; j < n; j++) if (mine[j] && state[j] !== FLAG) { state[j] = FLAG; flags++; }
 }
 
@@ -1738,9 +1758,16 @@ function paintStatus() {
   el('statMines').textContent = mines - flags;
   const ms = !startTime ? 0 : (over ? endTime : performance.now()) - startTime;
   el('statTime').textContent = fmtTime(ms);
+  const key = bestKey();
+  el('statBest').textContent = key && bests[key] ? fmtTime(bests[key]) : '—';
   const v = el('verdict');
   v.className = 'verdict' + (over ? (won ? ' won' : ' lost') : '');
-  v.textContent = over ? (won ? 'Swept — ' + fmtTime(endTime - startTime) : 'Boom.') : '';
+  // with no clock there is no time to report: subtracting a startTime of nought
+  // would quote how long the page had been open
+  v.textContent = over
+    ? (won ? 'Swept' + (startTime ? ' — ' + fmtTime(endTime - startTime) : '') +
+             (newBest ? ' · a new best!' : '') : 'Boom.')
+    : '';
 }
 
 // The clock is the only thing that moves on its own, so the loop only redraws
@@ -1831,7 +1858,9 @@ function startFromControls() {
 }
 
 for (const r of [rngAcross, rngDown, rngMines]) r.oninput = () => paintSizeLabels();
-rngAcross.onchange = rngDown.onchange = rngMines.onchange = startFromControls;
+// a board built off the sliders is nobody's standard, so it keeps no record
+rngAcross.onchange = rngDown.onchange = rngMines.onchange =
+  () => { sizeName = ''; startFromControls(); };
 
 for (const b of document.querySelectorAll('[data-preset]'))
   b.onclick = () => {
@@ -1840,6 +1869,7 @@ for (const b of document.querySelectorAll('[data-preset]'))
     paintSizeLabels();
     rngMines.value = m;
     paintSizeLabels();
+    sizeName = b.textContent;
     startFromControls();
   };
 
