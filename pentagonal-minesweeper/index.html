@@ -75,6 +75,8 @@
 
   .btn-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
   .btn-row .full { grid-column: 1 / -1; }
+  .btn-row.three { grid-template-columns: repeat(3, 1fr); }
+  .btn-row button.on { background: #2c6b3c; border-color: #3d8a51; color: #fff; }
 
   .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   .stat { background: var(--panel); border: 1px solid var(--line); border-radius: 7px; padding: 8px 10px; }
@@ -137,11 +139,20 @@
       </div>
 
       <div class="panel">
+        <p class="label">Difficulty</p>
+        <div class="btn-row three">
+          <button data-diff="easy" class="on">Easy</button>
+          <button data-diff="medium">Medium</button>
+          <button data-diff="hard">Hard</button>
+        </div>
+      </div>
+
+      <div class="panel">
         <p class="label">Board</p>
-        <div class="btn-row">
+        <div class="btn-row three">
           <button data-preset="8|8|10">Small</button>
           <button data-preset="16|16|40">Medium</button>
-          <button class="full" data-preset="30|16|99">Large</button>
+          <button data-preset="30|16|99">Large</button>
         </div>
         <div class="field">
           <div class="rowlab"><p class="label">Cells across</p><span class="val" id="valAcross"></span></div>
@@ -1159,6 +1170,24 @@ let mines = 10, opened = 0, flags = 0, given = 0;
 let seeded = false, over = false, won = false, exploded = -1;
 let startTime = 0, endTime = 0;
 
+/* Difficulty turns three dials at once: how many mines land for a given
+   setting of the slider, how much of the board the opening gives away, and
+   which layouts the generator keeps — easy prefers the ones that fall to
+   counting alone, hard the stubborn ones that make the player earn the
+   subtler rules. None of it touches the guarantee: every board can still
+   be finished without guessing. */
+let difficulty = 'easy';
+/* mines scales the slider's density; open is the share of safe cells the
+   opening aims to give away; res is the most of the board allowed to
+   resist counting alone — none of it on easy, where counting is made
+   sufficient outright; two-fifths on medium; everything on hard, where
+   the generator hunts for as much resistance as it can find. */
+const DIFF = {
+  easy:   { mines: 1.0,  open: 0.25, res: 0 },
+  medium: { mines: 1.15, open: 0.14, res: 0.4 },
+  hard:   { mines: 1.3,  open: 0.07, res: 1 }
+};
+
 function newGame(across, down, m) {
   buildBoard(tiling, across, down);
   useCorners(true);          // cells touching at a corner count as neighbours
@@ -1166,9 +1195,12 @@ function newGame(across, down, m) {
   /* Some tilings can only come in the sizes their own repeat allows, so a board
      may hold rather more or fewer cells than were asked for. The mine count
      follows it, keeping the density the slider was set to — ten mines meant one
-     cell in six, and it should stay one cell in six on whatever board arrives. */
+     cell in six, and it should stay one cell in six on whatever board arrives.
+     Difficulty then scales that density: a crowded board leans harder on the
+     subtler rules, and the generator hands out hints wherever the crowding
+     would otherwise leave a genuine guess. */
   const asked = across * down;
-  mines = Math.max(1, Math.min(Math.round(m * n / asked), n - 9));
+  mines = Math.max(1, Math.min(Math.round(m * (n / asked) * DIFF[difficulty].mines), n - 9));
 
   mine = new Uint8Array(n);
   state = new Uint8Array(n);
@@ -1440,9 +1472,39 @@ function shownBy(list) {
    layouts asking for the same number of hints the tie goes to the one whose
    opening is nearest a quarter of the board — big enough to work from, small
    enough to leave a game. */
+/* How much of a board yields to counting alone. What is left over is the work
+   the subtler rules must do, and that remainder is what difficulty means here:
+   an easy board falls to counting, a hard one keeps its secrets until the
+   player brings out subsets and the mine total. */
+function countingFix(known) {
+  let moved = true;
+  while (moved) {
+    moved = false;
+    for (const c of constraintsOf(known)) {
+      if (c.left === 0) {
+        for (const j of c.cells) if (known[j] === UNKNOWN) { markOpen(known, j); moved = true; }
+      } else if (c.left === c.cells.length) {
+        for (const j of c.cells) if (known[j] === UNKNOWN) { known[j] = KNOWN_MINE; moved = true; }
+      }
+    }
+  }
+  let done = 0;
+  for (let i = 0; i < n; i++) if (known[i] !== UNKNOWN) done++;
+  return done;
+}
+
+function countingReach(list) {
+  const known = new Uint8Array(n);
+  for (const g of list) markOpen(known, g);
+  return countingFix(known);
+}
+
 function buildPuzzle() {
-  const target = (n - mines) * 0.25;
-  const deadline = performance.now() + (n > 300 ? 300 : 120);
+  const d = DIFF[difficulty];
+  const target = (n - mines) * d.open;
+  // hard gets longer to search: stubborn layouts are rarer than easy ones
+  const deadline = performance.now() +
+    (n > 300 ? 300 : 120) * (difficulty === 'hard' ? 2 : 1);
   let best = null;
 
   for (let attempt = 0; attempt < 500; attempt++) {
@@ -1456,8 +1518,32 @@ function buildPuzzle() {
       markOpen(known, g);
       if (deduce(known) === n - mines) break;
     }
+
+    /* Solvable is not the whole promise: the board must also not resist
+       counting beyond what this level allows, and no amount of searching for
+       lucky layouts keeps that promise on the big boards. Wherever counting
+       still falls short of the ceiling, more hints go down along counting's
+       own frontier — until it finishes everything on easy, until at most
+       two-fifths withstands it on medium, and not at all on hard. */
+    if (d.res < 1) {
+      const ck = new Uint8Array(n);
+      for (const g of list) markOpen(ck, g);
+      let done = countingFix(ck);
+      while (n - done > d.res * n) {
+        const g = pickGiven(ck, false);
+        if (g < 0) break;
+        list.push(g);
+        markOpen(ck, g);
+        done = countingFix(ck);
+      }
+    }
     const cells = shownBy(list);
-    const score = (list.length - 1) * 1e5 + Math.abs(cells - target);
+    /* Judged in strict order: fewest hints first, then how near the board's
+       resistance to counting comes to what this level wants of it, and last,
+       an opening near the size this level grants. */
+    const stubborn = n - countingReach(list);
+    const score = (list.length - 1) * 1e6 + Math.abs(stubborn - d.res * n) * 100 +
+                  Math.abs(cells - target);
     if (!best || score < best.score)
       best = { mine: mine.slice(), count: count.slice(), list, score };
     if (performance.now() > deadline) break;
@@ -1724,19 +1810,22 @@ const rngAcross = el('rngAcross'), rngDown = el('rngDown'), rngMines = el('rngMi
 
 // Before a board is built the cell count can only be guessed at, and after one
 // is built it is simply known.
-function paintSizeLabels(actual) {
+// Once a board is built the label reports the mines actually laid, which
+// difficulty and board size may both have moved from the slider's ask.
+function paintSizeLabels(actual, placed) {
   const total = actual || Math.round(+rngAcross.value * +rngDown.value);
   rngMines.max = Math.max(1, total - 9);
   if (+rngMines.value > +rngMines.max) rngMines.value = rngMines.max;
+  const shown = placed || +rngMines.value;
   el('valAcross').textContent = rngAcross.value;
   el('valDown').textContent = rngDown.value;
-  el('valMines').textContent = rngMines.value + ' of ' + total +
-    ' (' + Math.round(rngMines.value / total * 100) + '%)';
+  el('valMines').textContent = shown + ' of ' + total +
+    ' (' + Math.round(shown / total * 100) + '%)';
 }
 
 function startFromControls() {
   newGame(+rngAcross.value, +rngDown.value, +rngMines.value);
-  paintSizeLabels(n);
+  paintSizeLabels(n, mines);
   draw();
 }
 
@@ -1750,6 +1839,13 @@ for (const b of document.querySelectorAll('[data-preset]'))
     paintSizeLabels();
     rngMines.value = m;
     paintSizeLabels();
+    startFromControls();
+  };
+
+for (const b of document.querySelectorAll('[data-diff]'))
+  b.onclick = () => {
+    difficulty = b.dataset.diff;
+    for (const x of document.querySelectorAll('[data-diff]')) x.classList.toggle('on', x === b);
     startFromControls();
   };
 
