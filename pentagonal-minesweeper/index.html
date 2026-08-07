@@ -155,6 +155,14 @@
         <p class="note">With these on, some cells never show their count when
           uncovered &mdash; they only prove themselves safe. Every board is still
           one that can be finished without guessing.</p>
+        <p class="label" style="margin-top: 14px">Relaxed</p>
+        <div class="btn-row">
+          <button data-relax="" class="on">Off</button>
+          <button data-relax="1">On</button>
+        </div>
+        <p class="note">With this on, uncovering a mine shows it for a moment and
+          then covers it again, and the game goes on. Boards finished this way
+          set no best time.</p>
       </div>
 
       <div class="panel">
@@ -1182,6 +1190,10 @@ let mine, state, count;
    the cascade would give the blank away. */
 let muted = new Uint8Array(0);
 let muteOn = false;
+/* Relaxed play forgives a mine: it shows itself for a moment and is then
+   covered over again, leaving the board as it was and the game running. */
+let relaxed = false;
+let flashCell = -1, flashUntil = 0;
 let mines = 10, opened = 0, flags = 0, given = 0;
 let seeded = false, over = false, won = false, exploded = -1;
 let startTime = 0, endTime = 0;
@@ -1236,7 +1248,7 @@ function newGame(across, down, m) {
   muted = new Uint8Array(n);
 
   opened = 0; flags = 0; given = 0; newBest = false;
-  seeded = false; over = false; won = false; exploded = -1;
+  seeded = false; over = false; won = false; exploded = -1; flashCell = -1;
   startTime = 0; endTime = 0; hover = -1;
 
   buildPaths();
@@ -1286,7 +1298,11 @@ function startClock() { if (!startTime) startTime = performance.now(); }
 function reveal(i) {
   if (over || state[i] !== COVERED) return;
   if (!seeded) seed(i);
-  if (mine[i]) { lose(i); return; }
+  if (mine[i]) {
+    if (!relaxed) { lose(i); return; }
+    flashCell = i; flashUntil = performance.now() + 550;
+    return;                        // the cell stays covered, the game stays on
+  }
 
   const stack = [i];
   while (stack.length) {
@@ -1330,8 +1346,9 @@ function win() {
   over = true; won = true;
   endTime = performance.now();
   /* A record needs a clock that was really running — startTime is only set by
-     the player's own first move — and a board from a standard size. */
-  const key = startTime && bestKey();
+     the player's own first move — a board from a standard size, and a game
+     where a mine would have ended it. */
+  const key = startTime && !relaxed && bestKey();
   if (key) {
     const t = endTime - startTime;
     if (!(key in bests) || t < bests[key]) { bests[key] = t; newBest = true; saveBests(); }
@@ -1744,13 +1761,16 @@ function draw() {
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
+  const flashing = flashCell >= 0 && performance.now() < flashUntil;
+
   // the tiling first, one cell at a time, in board units
   ctx.setTransform(view.s, 0, 0, view.s, view.ox, view.oy);
   ctx.lineJoin = 'round';
   ctx.lineWidth = cellPitch * 0.06;
   for (let i = 0; i < n; i++) {
     const open = state[i] === OPEN;
-    if (open && mine[i]) ctx.fillStyle = i === exploded ? BOOM : MINED;
+    if (flashing && i === flashCell) ctx.fillStyle = BOOM;
+    else if (open && mine[i]) ctx.fillStyle = i === exploded ? BOOM : MINED;
     else if (open) ctx.fillStyle = DUG;
     else if (i === hover && !over) ctx.fillStyle = COVER_HI;
     else ctx.fillStyle = COVERS[0];
@@ -1783,6 +1803,12 @@ function draw() {
       ctx.fillText(count[i], x, y);
     }
   }
+
+  // the forgiven mine, shown on its covered cell for as long as the flash lasts
+  if (flashing)
+    drawMine(mids[flashCell][0] * view.s + view.ox,
+             mids[flashCell][1] * view.s + view.oy,
+             inr[flashCell] * view.s * 0.34);
 }
 
 /* =====================================================================
@@ -1831,7 +1857,8 @@ function paintStatus() {
   // would quote how long the page had been open
   v.textContent = over
     ? (won ? 'Swept' + (startTime ? ' — ' + fmtTime(endTime - startTime) : '') +
-             (newBest ? ' · a new best!' : '') : 'Boom.')
+             (newBest ? ' · a new best!' : relaxed ? ' · relaxed, not recorded' : '')
+           : 'Boom.')
     : '';
 }
 
@@ -1840,6 +1867,11 @@ function paintStatus() {
 (function tick() {
   requestAnimationFrame(tick);
   if (startTime && !over) paintStatus();
+  // a flash has to be painted while it lasts, and painted out once it is over
+  if (flashCell >= 0) {
+    if (performance.now() >= flashUntil) flashCell = -1;
+    draw();
+  }
 })();
 
 canvas.addEventListener('contextmenu', e => e.preventDefault());
@@ -1950,6 +1982,14 @@ for (const b of document.querySelectorAll('[data-mute]'))
     muteOn = !!b.dataset.mute;
     for (const x of document.querySelectorAll('[data-mute]')) x.classList.toggle('on', x === b);
     startFromControls();
+  };
+
+// forgiveness changes only what a mine costs, so the board in play can stay
+for (const b of document.querySelectorAll('[data-relax]'))
+  b.onclick = () => {
+    relaxed = !!b.dataset.relax;
+    for (const x of document.querySelectorAll('[data-relax]')) x.classList.toggle('on', x === b);
+    paintStatus();
   };
 
 const selTiling = el('selTiling');
