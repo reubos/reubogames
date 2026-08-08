@@ -1401,6 +1401,9 @@ const RULENOTES = {
   boxed1: '', boxed2: '', boxed3: ''      // written out by paintRuleNote
 };
 let mines = 10, opened = 0, flags = 0, given = 0;
+// the size the board in play was actually built from, which is what a saved
+// game must be rebuilt with — the sliders are only where it came from
+let builtAcross = 0, builtDown = 0;
 let seeded = false, over = false, won = false, exploded = -1;
 let startTime = 0, endTime = 0;
 
@@ -1438,11 +1441,92 @@ let bests = {};
 try { bests = JSON.parse(localStorage.getItem('pentagonal-minesweeper-bests') || '{}'); } catch (e) {}
 const bestKey = () => sizeName && (tiling.id + '|' + sizeName + '|' + difficulty +
   (ruleset === 'none' ? '' : '|' + ruleset));
+/* The game in play, kept in the browser so that closing the page does not
+   throw it away. What is written down is the settings, where the mines are,
+   and what the player has done about them. The geometry is not: it follows
+   from the tiling and the size and is rebuilt the same way every time. If it
+   ever does not — the tiling having been changed under it — the cell count
+   will not agree and the saved game is dropped rather than patched onto a
+   board it was never played on. */
+const BOARDKEY = 'pentagonal-minesweeper-board';
+
+function saveBoard() {
+  if (!n || !mine || mine.length !== n) return;
+  // one character a cell; counts can reach eight, so they go in base thirty-six
+  const pack = a => { let out = ''; for (let i = 0; i < n; i++) out += a[i].toString(36); return out; };
+  try {
+    localStorage.setItem(BOARDKEY, JSON.stringify({
+      v: 1, tiling: tiling.id,
+      across: builtAcross, down: builtDown, ask: +rngMines.value,
+      size: sizeName, diff: difficulty, rule: ruleset,
+      mute: muteOn, relax: relaxed, strict: strict, adj: adjOn,
+      n: n, mines: mines, given: given, exploded: exploded, over: over, won: won,
+      /* opened and flags are kept rather than counted back, and so are the
+         numbers: losing opens the mines without counting them, and the strict
+         law plants one where there was none, so neither follows from the board
+         as it now stands. What was on the screen is what should come back. */
+      opened: opened, flags: flags, count: pack(count),
+      elapsed: startTime ? Math.round((over ? endTime : performance.now()) - startTime) : 0,
+      mine: pack(mine), state: pack(state), muted: pack(muted)
+    }));
+  } catch (e) {}
+}
+
+function restoreBoard() {
+  let s = null;
+  try { s = JSON.parse(localStorage.getItem(BOARDKEY) || 'null'); } catch (e) {}
+  if (!s || s.v !== 1) return false;
+  const t = TILINGS.find(x => x.id === s.tiling);
+  if (!t) return false;
+
+  // the settings go back first, since the board is built out of them
+  tiling = t;
+  difficulty = s.diff; ruleset = s.rule; muteOn = s.mute;
+  relaxed = s.relax; strict = s.strict; adjOn = s.adj; sizeName = s.size;
+  rngAcross.value = s.across; rngDown.value = s.down; rngMines.value = s.ask;
+
+  builtAcross = s.across; builtDown = s.down;
+  buildBoard(t, s.across, s.down);
+  useCorners(true);
+  if (n !== s.n || s.mine.length !== n) return false;
+
+  if (typeof s.count !== 'string' || s.count.length !== n) return false;
+  mine = new Uint8Array(n); state = new Uint8Array(n);
+  count = new Uint8Array(n); muted = new Uint8Array(n);
+  for (let i = 0; i < n; i++) {
+    mine[i] = +s.mine[i]; state[i] = +s.state[i]; muted[i] = +s.muted[i];
+    count[i] = parseInt(s.count[i], 36);
+  }
+  mines = s.mines; given = s.given; exploded = s.exploded;
+  over = s.over; won = s.won; opened = s.opened; flags = s.flags;
+  newBest = false; flashCell = -1; hover = -1; seeded = true;
+  // the clock is put back to where it stood rather than restarted
+  startTime = s.elapsed ? performance.now() - s.elapsed : 0;
+  endTime = over ? performance.now() : 0;
+  buildPaths();
+  return true;
+}
+
+// the panel has to agree with whatever was restored
+function paintToggles() {
+  const mark = (sel, is) => {
+    for (const x of document.querySelectorAll(sel)) x.classList.toggle('on', is(x));
+  };
+  mark('[data-diff]', x => x.dataset.diff === difficulty);
+  mark('[data-rule]', x => x.dataset.rule === ruleset);
+  mark('[data-mute]', x => !!x.dataset.mute === muteOn);
+  mark('[data-relax]', x => !!x.dataset.relax === relaxed);
+  mark('[data-strict]', x => !!x.dataset.strict === strict);
+  mark('[data-adj]', x => !!x.dataset.adj === adjOn);
+  selTiling.value = TILINGS.indexOf(tiling);
+}
+
 function saveBests() {
   try { localStorage.setItem('pentagonal-minesweeper-bests', JSON.stringify(bests)); } catch (e) {}
 }
 
 function newGame(across, down, m) {
+  builtAcross = across; builtDown = down;
   buildBoard(tiling, across, down);
   useCorners(true);          // cells touching at a corner count as neighbours
 
@@ -2994,6 +3078,11 @@ function paintStatus() {
   }
 })();
 
+/* A running clock is only saved correctly if it is saved on the way out, so
+   the game is written down again whenever the page is hidden or closed. */
+addEventListener('pagehide', saveBoard);
+addEventListener('visibilitychange', () => { if (document.hidden) saveBoard(); });
+
 canvas.addEventListener('contextmenu', e => e.preventDefault());
 
 // A cell is uncovered by clicking it, or by clicking an open number that has
@@ -3004,6 +3093,7 @@ function dig(i, chording) {
   startClock();
   if (chording || state[i] === OPEN) chord(i); else reveal(i);
   paintStatus();
+  saveBoard();
   draw();
 }
 
@@ -3012,7 +3102,7 @@ canvas.addEventListener('pointerdown', e => {
   if (e.pointerType === 'touch') return;
   const i = cellAt(e.clientX, e.clientY);
   if (i < 0) return;
-  if (e.button === 2) { clearHint(); startClock(); flag(i); paintStatus(); draw(); }
+  if (e.button === 2) { clearHint(); startClock(); flag(i); paintStatus(); saveBoard(); draw(); }
   else dig(i, e.button === 1);
 });
 
@@ -3040,6 +3130,7 @@ canvas.addEventListener('touchstart', e => {
     flag(holdCell);
     holdCell = -1;
     paintStatus();
+    saveBoard();
     draw();
   }, 450);
 }, { passive: true });
@@ -3093,6 +3184,7 @@ function startFromControls() {
   newGame(+rngAcross.value, +rngDown.value, +rngMines.value);
   paintSizeLabels(n, mines);
   paintRuleNote();
+  saveBoard();
   draw();
 }
 
@@ -3131,12 +3223,14 @@ for (const b of document.querySelectorAll('[data-strict]'))
     strict = !!b.dataset.strict;
     for (const x of document.querySelectorAll('[data-strict]')) x.classList.toggle('on', x === b);
     paintStatus();
+    saveBoard();
   };
 
 for (const b of document.querySelectorAll('[data-adj]'))
   b.onclick = () => {
     adjOn = !!b.dataset.adj;
     for (const x of document.querySelectorAll('[data-adj]')) x.classList.toggle('on', x === b);
+    saveBoard();
     draw();
   };
 
@@ -3146,6 +3240,7 @@ for (const b of document.querySelectorAll('[data-relax]'))
     relaxed = !!b.dataset.relax;
     for (const x of document.querySelectorAll('[data-relax]')) x.classList.toggle('on', x === b);
     paintStatus();
+    saveBoard();
   };
 
 for (const b of document.querySelectorAll('[data-rule]'))
@@ -3246,7 +3341,19 @@ function verify() {
 // game afterwards is what puts a real one back.
 paintSizeLabels();
 verify();
-startFromControls();
+
+/* Whatever was last being played, if it can still be rebuilt. Failing that —
+   nothing saved, or a tiling that has changed shape since — a new board. */
+if (restoreBoard()) {
+  paintToggles();
+  paintSizeLabels(n, mines);
+  paintRuleNote();
+  paintStatus();
+  layout();
+  draw();
+} else {
+  startFromControls();
+}
 </script>
 </body>
 </html>
