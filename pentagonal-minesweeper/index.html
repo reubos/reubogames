@@ -175,6 +175,7 @@
           <button data-rule="dual2">Dual 2</button>
           <button data-rule="snake">Snake</button>
           <button data-rule="loop">Loop</button>
+          <button data-rule="boxed">Boxed</button>
         </div>
         <p class="note" id="noteRule"></p>
       </div>
@@ -465,6 +466,7 @@ const TILINGS = [
           'number of those pinwheels across by a whole number down.' },
   { id: 'prismatic', name: 'Prismatic Pentagonal', src: dualOf(T_elongTri),
     region: { kind: 'rows' },
+    boxMul: [2, 1],          // its repeat is two tiles, so a box of four is two of them
     note: 'The dual of the elongated triangular tiling: rows of pentagons standing on a flat ' +
           'course, each row facing the opposite way to the last. The rows fall into pairs — two ' +
           'level with each other, then two starting half a cell further right — and the board is ' +
@@ -481,14 +483,14 @@ const TILINGS = [
        rows to a fencepost-step is eight, which is what the repeat holds. */
     region: { kind: 'walk', start: 'prismatic',
               step: [0.7, 1.15, -0.25, 0.7], drop: [-0.7, 0.15, 0.65, 1.25],
-              open: [-0.7, -0.25, 0.65, 0.95], period: 2 },
+              open: [-0.7, -0.25, 0.65, 0.95], period: 2, units: true },
     note: 'Both pentagons at once, one of each, and the smaller of the two ways that can be done ' +
           '— the dual of a 2-uniform tiling of 3³.4² and 3².4.3.4 vertices. Its rows run ' +
           'prismatic, Cairo, prismatic and so on, sloping gently down as they go; each row starts ' +
           'one place further down the chain of prismatic fenceposts, so the board leans left as ' +
           'it descends.' },
   { id: 'cp21', name: 'Cairo and Prismatic 2', src: dualOf(T_n16),
-    region: { kind: 'boxCentre', anchor: 'prismaticPair' },
+    region: { kind: 'boxCentre', anchor: 'prismaticPair', units: true },
     note: 'The same two pentagons on a larger repeat, with two Cairo pentagons to each prismatic ' +
           'one instead of one apiece. Its rows run flat across, nine cells with a prismatic in ' +
           'the middle, then eight, with pairs of prismatic pentagons between; the board is a ' +
@@ -505,7 +507,8 @@ const TILINGS = [
        which is what settles which way up the whole board stands. */
     region: { kind: 'walk', start: 'Cairo',
               step: [-0.2, 0.65, 0.75, 1.15], drop: [0.7, 1.15, -0.7, 0.2],
-              open: [0.7, 0.95, -0.7, -0.3], first: [0.35, 0.65, 0.75, 0.95], period: 3 },
+              open: [0.7, 0.95, -0.7, -0.3], first: [0.35, 0.65, 0.75, 0.95],
+              period: 3, units: true },
     note: 'Two prismatic pentagons to each Cairo one, from a 3-uniform parent — the prismatic ' +
           'pentagons here fall into two families that sit differently among their neighbours. Its ' +
           'rows run Cairo, prismatic, prismatic down the page, and each row stands a cell right ' +
@@ -695,6 +698,75 @@ function latticeCoords(src) {
   const [ax, ay] = src.v1, [bx, by] = src.v2;
   const det = ax * by - ay * bx;
   return (x, y) => [(x * by - y * bx) / det, (ax * y - ay * x) / det];
+}
+
+/* The tiling's own repeating unit, as a grouping of tiles. Which unit a tile
+   belongs to is settled by where its middle falls in the lattice — but the
+   lattice has no preferred origin, and the wrong one slices every unit in
+   two, so the origin is searched for: the one that leaves the most units
+   whole is the one the tiling meant. Some boxes are asked to be more than
+   one unit across, which is what mul is for.
+
+   A box is measured in whole tiles, so this is also what the boxed law will
+   want when it comes to be written. */
+const cellKey = p => {
+  const c = centroidOf(p);
+  return Math.round(c[0] * 200) + ',' + Math.round(c[1] * 200);
+};
+
+function tilesPerUnit(src, mul) {
+  const area = Math.abs(src.v1[0] * src.v2[1] - src.v1[1] * src.v2[0]);
+  return Math.max(1, Math.round(src.density * area)) * (mul ? mul[0] * mul[1] : 1);
+}
+
+function unitCellsOf(polys, src, per, mul) {
+  const [m1, m2] = mul || [1, 1];
+  const toAB = latticeCoords(src);
+  const ab = polys.map(p => {
+    const c = centroidOf(p);
+    const [a, b] = toAB(c[0], c[1]);
+    return [a / m1, b / m2];
+  });
+  let best = null;
+  for (let oa = 0; oa < 8; oa++) for (let ob = 0; ob < 8; ob++) {
+    const g = new Map();
+    for (let i = 0; i < ab.length; i++) {
+      const k = Math.floor(ab[i][0] + oa / 8 + 1e-6) + ':' + Math.floor(ab[i][1] + ob / 8 + 1e-6);
+      let v = g.get(k); if (!v) g.set(k, v = []);
+      v.push(i);
+    }
+    let whole = 0;
+    for (const v of g.values()) if (v.length === per) whole++;
+    if (!best || whole > best.whole) best = { whole, groups: g };
+  }
+  return best.groups;
+}
+
+/* A board drawn to look right will cut some units in half, because the units
+   were there first. A unit that kept half its tiles or more is taken entire
+   and one that kept fewer is let go — which holds the size near the one asked
+   for, rather than always growing the board or always trimming it. */
+function unitsOver(t, patch, per) {
+  const groups = unitCellsOf(patch, t.src, per);
+  const home = new Map();
+  for (const [k, g] of groups) for (const i of g) home.set(cellKey(patch[i]), k);
+  return { groups, home, patch, per };
+}
+
+function wholeUnits(u, kept, need) {
+  const want = need || Math.ceil(u.per / 2);
+  const count = new Map();
+  for (const p of kept) {
+    const k = u.home.get(cellKey(p));
+    if (k !== undefined) count.set(k, (count.get(k) || 0) + 1);
+  }
+  const out = [];
+  for (const [k, c] of count) {
+    const g = u.groups.get(k);
+    // a unit the patch itself ran out before finishing is no use to anyone
+    if (g.length === u.per && c >= want) for (const i of g) out.push(u.patch[i]);
+  }
+  return out;
 }
 
 function regionOf(t) {
@@ -1013,7 +1085,34 @@ function buildBoard(t, across, down) {
   const kind = (t.region || {}).kind || 'rect';
 
   if (kind === 'walk') {
-    poly = walkBoard(t, across, down, t.region);
+    /* A walked board counts cells along its rows, which knows nothing of where
+       the tiling's units begin and end, so it is snapped to whole ones after
+       the fact. The patch has to reach past the board, since a unit the walk
+       cut short is completed out of it.
+
+       Snapping only ever takes or leaves whole units, so a board asked for in
+       rows and columns lands where it lands. A few sizes about the one asked
+       for are walked and the nearest kept, which stops a board of sixty-four
+       coming back half as big again. */
+    const snap = raw => {
+      if (!(t.region || {}).units || !raw.length) return raw;
+      let span = 0;
+      for (const p of raw) for (const q of p)
+        span = Math.max(span, Math.abs(q[0]), Math.abs(q[1]));
+      const u = unitsOver(t, t.src.raw(span + 3 * cellPitch), tilesPerUnit(t.src));
+      /* How much of a unit the walk had to cover for it to be taken decides
+         how far the rim reaches, so it is swept from a single tile up to the
+         whole unit and whichever setting lands nearest the size asked for is
+         kept. One walk, and the sizing costs only a regrouping apiece. */
+      let out = [];
+      for (let need = 1; need <= u.per; need++) {
+        const got = wholeUnits(u, raw, need);
+        if (got.length && (!out.length ||
+            Math.abs(got.length - want) < Math.abs(out.length - want))) out = got;
+      }
+      return out;
+    };
+    poly = snap(walkBoard(t, across, down, t.region));
     n = poly.length;
   } else if (kind === 'rings') {
     /* Whichever whole number of rings comes nearest the size asked for. A ring
@@ -1099,11 +1198,19 @@ function buildBoard(t, across, down) {
     return out;
   };
 
+  /* Snapping to whole units is folded into the sizing rather than done after
+     it, so that the search for a size lands on what the board will really
+     hold. The units are worked out once, since the patch does not change. */
+  const units = (t.region || {}).units ? unitsOver(t, all, per) : null;
   const keptAt = k => {
-    if (!blocks) return symmetrise(all.filter(p => fits(p, k)));
-    const keep = new Set();
-    for (const g of blocks) if (g.every(i => fits(all[i], k))) for (const i of g) keep.add(i);
-    return symmetrise([...keep].sort((a, b) => a - b).map(i => all[i]));
+    let kept;
+    if (!blocks) kept = symmetrise(all.filter(p => fits(p, k)));
+    else {
+      const keep = new Set();
+      for (const g of blocks) if (g.every(i => fits(all[i], k))) for (const i of g) keep.add(i);
+      kept = symmetrise([...keep].sort((a, b) => a - b).map(i => all[i]));
+    }
+    return units ? wholeUnits(units, kept) : kept;
   };
   const countAt = k => keptAt(k).length;
 
@@ -1119,10 +1226,13 @@ function buildBoard(t, across, down) {
      of flowers is thirty-six cells, and always rounding up would hand back a
      board half as big again as the one asked for. A plain rectangle keeps the
      old rule, which is to take the first size that holds enough. */
-  poly = keptAt(blocks && Math.abs(countAt(lo) - want) < Math.abs(countAt(hi) - want) ? lo : hi);
+  poly = keptAt((blocks || units) &&
+    Math.abs(countAt(lo) - want) < Math.abs(countAt(hi) - want) ? lo : hi);
   n = poly.length;
 
   }
+
+  boxSeg = null;                 // a new board wants its boxes worked out afresh
 
   // who touches whom
   const { topo, byEdge, byCorner } = adjacencyOf(poly);
@@ -1228,7 +1338,9 @@ const RULENOTES = {
          'along an edge.',
   snake: 'Mines form one edge-joined path that never runs alongside itself.',
   loop: 'Mines form one edge-joined loop that never runs alongside itself — ' +
-        'every mine has exactly two mines beside it.'
+        'every mine has exactly two mines beside it.',
+  boxed: 'The tiling repeats in the boxes drawn. Shown for now; the rule that ' +
+         'goes with them is not in play yet.'
 };
 let mines = 10, opened = 0, flags = 0, given = 0;
 let seeded = false, over = false, won = false, exploded = -1;
@@ -2278,7 +2390,8 @@ function countingReach(list) {
 
 function buildPuzzle() {
   const d = DIFF[difficulty];
-  const structured = ruleset !== 'none';
+  // boxed only draws its boxes so far, so the generator has nothing to obey
+  const structured = ruleset !== 'none' && ruleset !== 'boxed';
   // dominoes come in twos, a ring needs four cells at the very least, and a
   // snake or a loop may prove a cell or two too long to lay
   // the cap has to be taken before the rounding to twos, or it can hand back
@@ -2456,11 +2569,38 @@ const DUG = '#1b3620', LINE = '#16301b', RIM = '#4a7d55';
 const BOOM = '#b91c1c', MINED = '#7f1d1d';
 const MUTE = '#6f8c74';        // a question mark, dimmer than any number
 const HINT = '#facc15';        // the gold a hint marks its cells with
+const BOXLINE = '#cfe7d6';     // the pale line drawn round a box of the repeat
 // one green per pentagon shape, used only when asked for
 const COVERS = ['#35603d', '#2c5a4c', '#3d5f33', '#2f5560'];
 const COVER_HI = '#4b8557';
 const NUMS = ['', '#60a5fa', '#4ade80', '#f87171', '#c084fc', '#fbbf24',
               '#22d3ee', '#f9a8d4', '#fb923c', '#a3e635', '#e879f9', '#94a3b8', '#fca5a5'];
+
+/* The line round each box: every edge of the tiles in it, less the ones two
+   of them share. Worked out when a board first asks for it and thrown away
+   with the board, since nothing else needs it. */
+let boxSeg = null;
+
+function boxSegments() {
+  if (boxSeg) return boxSeg;
+  const per = tilesPerUnit(tiling.src, tiling.boxMul);
+  const groups = unitCellsOf(poly, tiling.src, per, tiling.boxMul);
+  const at = q => Math.round(q[0] * 2000) + ',' + Math.round(q[1] * 2000);
+  boxSeg = [];
+  for (const g of groups.values()) {
+    const rim = new Map();
+    for (const i of g) {
+      const p = poly[i];
+      for (let k = 0, m = p.length - 1; k < p.length; m = k++) {
+        const u = at(p[m]), v = at(p[k]);
+        const e = u < v ? u + '|' + v : v + '|' + u;
+        if (rim.has(e)) rim.delete(e); else rim.set(e, [p[m], p[k]]);
+      }
+    }
+    for (const seg of rim.values()) boxSeg.push(seg);
+  }
+  return boxSeg;
+}
 
 function buildPaths() {
   cellPath = new Array(n);
@@ -2567,6 +2707,17 @@ function draw() {
     ctx.fill(cellPath[i]);
     ctx.strokeStyle = open ? LINE : RIM;
     ctx.stroke(cellPath[i]);
+  }
+
+  // the boxes of the tiling's repeat, when they are being shown
+  if (ruleset === 'boxed') {
+    ctx.strokeStyle = BOXLINE;
+    ctx.lineWidth = cellPitch * 0.11;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    for (const [u, v] of boxSegments()) { ctx.moveTo(u[0], u[1]); ctx.lineTo(v[0], v[1]); }
+    ctx.stroke();
+    ctx.lineWidth = cellPitch * 0.06;
   }
 
   // whatever the last hint pointed at, ringed over the top
@@ -2798,7 +2949,8 @@ for (const b of document.querySelectorAll('[data-rule]'))
     ruleset = b.dataset.rule;
     for (const x of document.querySelectorAll('[data-rule]')) x.classList.toggle('on', x === b);
     el('noteRule').textContent = RULENOTES[ruleset] &&
-      RULENOTES[ruleset] + ' Boards are built so the rule is needed to solve them.';
+      RULENOTES[ruleset] + (ruleset === 'boxed' ? '' :
+        ' Boards are built so the rule is needed to solve them.');
     startFromControls();
   };
 
