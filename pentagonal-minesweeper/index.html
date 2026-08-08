@@ -158,6 +158,14 @@
         <p class="note">With these on, some cells never show their count when
           uncovered &mdash; they only prove themselves safe. Every board is still
           one that can be finished without guessing.</p>
+        <p class="label" style="margin-top: 14px">Show neighbours</p>
+        <div class="btn-row">
+          <button data-adj="" class="on">Off</button>
+          <button data-adj="1">On</button>
+        </div>
+        <p class="note">With this on, resting the pointer on a cell lights the
+          cells its number counts &mdash; which a tiling of pentagons does not
+          make obvious by looking.</p>
         <p class="label" style="margin-top: 14px">Relaxed</p>
         <div class="btn-row">
           <button data-relax="" class="on">Off</button>
@@ -1349,6 +1357,11 @@ let mine, state, count;
    the cascade would give the blank away. */
 let muted = new Uint8Array(0);
 let muteOn = false;
+/* Which cells a number counts is plain on a square grid and anything but on
+   these, so the pointer can be made to light them. It changes nothing about
+   the board, only what is drawn. */
+let adjOn = false;
+
 /* Relaxed play forgives a mine: it shows itself for a moment and is then
    covered over again, leaving the board as it was and the game running. */
 let relaxed = false;
@@ -2663,6 +2676,7 @@ const BOOM = '#b91c1c', MINED = '#7f1d1d';
 const MUTE = '#6f8c74';        // a question mark, dimmer than any number
 const HINT = '#facc15';        // the gold a hint marks its cells with
 const BOXLINE = '#cfe7d6';     // the pale line drawn round a box of the repeat
+const ADJ = '#bfe3ff';         // the wash over the cells a hovered number counts
 // one green per pentagon shape, used only when asked for
 const COVERS = ['#35603d', '#2c5a4c', '#3d5f33', '#2f5560'];
 const COVER_HI = '#4b8557';
@@ -2798,6 +2812,20 @@ function draw() {
     ctx.fill(cellPath[i]);
     ctx.strokeStyle = open ? LINE : RIM;
     ctx.stroke(cellPath[i]);
+  }
+
+  /* The neighbourhood under the pointer, washed over lightly enough to read
+     the cells through it, with the cell itself ringed. */
+  if (adjOn && hover >= 0 && !over) {
+    ctx.save();
+    ctx.globalAlpha = 0.22;
+    ctx.fillStyle = ADJ;
+    for (const j of nbOf(hover)) ctx.fill(cellPath[j]);
+    ctx.restore();
+    ctx.strokeStyle = ADJ;
+    ctx.lineWidth = cellPitch * 0.08;
+    ctx.stroke(cellPath[hover]);
+    ctx.lineWidth = cellPitch * 0.06;
   }
 
   // the boxes of the tiling's repeat, when they are being shown
@@ -3044,6 +3072,13 @@ for (const b of document.querySelectorAll('[data-mute]'))
     muteOn = !!b.dataset.mute;
     for (const x of document.querySelectorAll('[data-mute]')) x.classList.toggle('on', x === b);
     startFromControls();
+  };
+
+for (const b of document.querySelectorAll('[data-adj]'))
+  b.onclick = () => {
+    adjOn = !!b.dataset.adj;
+    for (const x of document.querySelectorAll('[data-adj]')) x.classList.toggle('on', x === b);
+    draw();
   };
 
 // forgiveness changes only what a mine costs, so the board in play can stay
