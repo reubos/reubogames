@@ -2086,10 +2086,13 @@ function findHint(known) {
     const inA = new Set(a.cells);
     const rest = covered.filter(j => !inA.has(j));
     if (!rest.length) continue;
+    /* Two different readings, and they deserve to be told apart: one number
+       wanting every mine that is left says nothing about its own neighbours
+       and everything about the rest of the board. */
     if (a.left === left)
-      return { cells: rest, kind: 'safe', rule: 'total-holds', clues: [a.from] };
+      return { cells: rest, kind: 'safe', rule: 'total-elsewhere-clear', clues: [a.from] };
     if (left - a.left === covered.length - a.cells.length)
-      return { cells: rest, kind: 'mine', rule: 'total-holds', clues: [a.from] };
+      return { cells: rest, kind: 'mine', rule: 'total-elsewhere-mined', clues: [a.from] };
   }
   return null;
 }
@@ -2099,9 +2102,10 @@ const HINTWORDS = {
   'counting-clear': 'Counting. A number here already has all its mines accounted for, so the rest of what it touches is clear.',
   'counting-full': 'Counting. A number here has only just enough covered cells left to hold its mines.',
   'subset': "Overlap. One number's covered cells lie wholly inside another's, and the difference between the two numbers settles the cells only the larger one touches.",
-  'total-none': 'The mine counter. Every mine is already accounted for.',
-  'total-all': 'The mine counter. There is one covered cell left for every mine still out there.',
-  'total-holds': 'The mine counter. One number holds every mine still unaccounted for, so the rest of the board follows.',
+  'total-none': 'The mine counter. Every mine has been found, so all the covered ground left is clear.',
+  'total-all': 'The mine counter. One covered cell is left for every mine still out there, so all of them are mines.',
+  'total-elsewhere-clear': 'The mine counter, against one number. That number still wants every mine the counter says is left, which leaves none for anywhere else — so the covered cells it does NOT touch are clear. Which of its own neighbours hold the mines is still open.',
+  'total-elsewhere-mined': 'The mine counter, against one number. Set that number aside and the mines still out there exactly fill the covered cells it does NOT touch — so all of those are mines. Its own neighbours are still open.',
   'dual-pair': 'Pairs. This pair is complete, so nothing else may lie against it.',
   'dual-corner': 'Pairs. This mine has no partner yet, and no other pair may reach around it.',
   'dual-partner': 'Pairs. This mine has only one place left for its partner.',
@@ -2115,10 +2119,11 @@ const HINTWORDS = {
   'loop-close': 'The loop. One mine is left, and it can only be the cell joining the two loose ends.',
   'reach-pocket': 'Connectedness. No mine could reach this ground without leaving the group behind.',
   'reach-cut': 'Connectedness. This is the only cell the group has to pass through.',
-  'outside-pocket': 'The border. No chain of mines could reach this ground from outside.',
-  'outside-cut': 'The border. This is the only way left from here out to the border.',
-  'safe-cut': 'The border. A mine here would cut the safe ground in two.',
-  'safe-pocket': 'The border. No safe cell could ever reach this ground.'
+  'outside-pocket': 'The border. Every mine must chain edge to edge out to the rim, and no chain could reach this ground.',
+  'outside-cut': 'The border. This is the only way left from here out to the rim, so the chain must come through it.',
+  // the other half of the outside law, and not about the border at all
+  'safe-cut': 'Connected ground. Every safe cell must reach every other one edge to edge, and a mine here would cut the safe ground in two.',
+  'safe-pocket': 'Connected ground. No safe cell could reach this ground edge to edge without crossing a mine, so all of it is mine.'
 };
 
 const HINTIDLE = 'Asking once marks what to look at; asking again names the reasoning.';
@@ -2184,7 +2189,8 @@ function askHint() {
   hintClues = (h.clues.length ? h.clues : h.cells).slice();
   el('noteHint').textContent = hintLevel >= 2
     ? HINTWORDS[h.rule] || HINTIDLE
-    : 'Marked in gold: the next move can be settled here. Ask again to be told how.';
+    : 'Marked in gold: the clues to work from — the cells they settle may lie ' +
+      'elsewhere. Ask again to be told how.';
   draw();
 }
 
