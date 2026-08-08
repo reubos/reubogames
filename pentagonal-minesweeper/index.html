@@ -158,6 +158,15 @@
         <p class="note">With these on, some cells never show their count when
           uncovered &mdash; they only prove themselves safe. Every board is still
           one that can be finished without guessing.</p>
+        <p class="label" style="margin-top: 14px">Strict</p>
+        <div class="btn-row">
+          <button data-strict="" class="on">Off</button>
+          <button data-strict="1">On</button>
+        </div>
+        <p class="note">With this on, uncovering a cell that the board does not
+          yet rule out as a mine finds a mine there. Only cells you can actually
+          prove safe are safe, so guessing never pays. Every board can still be
+          finished, and boards played this way set no best time.</p>
         <p class="label" style="margin-top: 14px">Show neighbours</p>
         <div class="btn-row">
           <button data-adj="" class="on">Off</button>
@@ -1357,6 +1366,13 @@ let mine, state, count;
    the cascade would give the blank away. */
 let muted = new Uint8Array(0);
 let muteOn = false;
+/* Under the strict law a cell may only be uncovered when nothing on the board
+   allows it to hold a mine. Click one that merely happens to be empty and it
+   turns out to hold one after all — so a lucky guess is no longer lucky. */
+let strict = false;
+// the opening is dealt, not clicked, so the strict law has nothing to say to it
+let dealing = false;
+
 /* Which cells a number counts is plain on a square grid and anything but on
    these, so the pointer can be made to light them. It changes nothing about
    the board, only what is drawn. */
@@ -1460,7 +1476,9 @@ function newGame(across, down, m) {
   /* A board that needs no guessing has to be worked out before it is shown,
      since what it starts with showing is part of the answer. */
   seeded = true;
+  dealing = true;
   for (const g of buildPuzzle()) reveal(g);
+  dealing = false;
   given = opened;
   if (muteOn) muteNumbers();
 
@@ -2051,9 +2069,31 @@ function rulesetHint(known) {
   return hintHit;
 }
 
+/* Everything that is true of every board consistent with what is on show.
+   Sound and nothing but: each rule it uses is a valid inference from the
+   numbers uncovered, the mine counter and the law, so a cell it marks safe
+   is safe whatever the rest of the board turns out to be. */
+function visibleClosure() {
+  const known = new Uint8Array(n);
+  for (let i = 0; i < n; i++) if (state[i] === OPEN) known[i] = SAFE;
+  visibleOnly = true;
+  try { deduce(known); } finally { visibleOnly = false; }
+  return known;
+}
+
 function reveal(i) {
   if (over || state[i] !== COVERED) return;
   if (!seeded) seed(i);
+
+  /* The strict law, applied before the board is consulted at all: if what is
+     on show leaves any room for this cell to hold a mine, then it holds one. */
+  if (strict && !dealing && visibleClosure()[i] !== SAFE) {
+    if (relaxed) { flashCell = i; flashUntil = performance.now() + 550; return; }
+    mine[i] = 1;                 // it was possible, so it is so
+    lose(i);
+    return;
+  }
+
   if (mine[i]) {
     if (!relaxed) { lose(i); return; }
     flashCell = i; flashUntil = performance.now() + 550;
@@ -2104,7 +2144,7 @@ function win() {
   /* A record needs a clock that was really running — startTime is only set by
      the player's own first move — a board from a standard size, and a game
      where a mine would have ended it. */
-  const key = startTime && !relaxed && bestKey();
+  const key = startTime && !relaxed && !strict && bestKey();
   if (key) {
     const t = endTime - startTime;
     if (!(key in bests) || t < bests[key]) { bests[key] = t; newBest = true; saveBests(); }
@@ -2152,7 +2192,7 @@ function markOpen(known, i) {
     const j = stack.pop();
     if (known[j] !== UNKNOWN) continue;
     known[j] = SAFE;
-    if (count[j] === 0 && !muted[j])
+    if (count[j] === 0 && !muted[j] && !visibleOnly)
       for (const m of nbOf(j)) if (known[m] === UNKNOWN) stack.push(m);
   }
 }
@@ -2161,10 +2201,17 @@ function markOpen(known, i) {
    how many mines are left among them. Each is a true statement about the
    board, so it stays true as other cells are worked out — which is why a
    whole sweep of them can be used before any of them is rebuilt. */
+/* Ordinarily the solver may read the number on a cell it has only proved safe,
+   because the player could uncover it for nothing and would then see it. Asking
+   what the board shows *now* is a different question, and for that the solver
+   must be held to the cells actually uncovered. */
+let visibleOnly = false;
+
 function constraintsOf(known) {
   const cons = [];
   for (let i = 0; i < n; i++) {
     if (known[i] !== SAFE || muted[i]) continue;    // a muted cell states nothing
+    if (visibleOnly && state[i] !== OPEN) continue;  // nor does one still covered
     const cells = [];
     let left = count[i];
     for (const j of nbOf(i)) {
@@ -2925,7 +2972,8 @@ function paintStatus() {
   // would quote how long the page had been open
   v.textContent = over
     ? (won ? 'Swept' + (startTime ? ' — ' + fmtTime(endTime - startTime) : '') +
-             (newBest ? ' · a new best!' : relaxed ? ' · relaxed, not recorded' : '')
+             (newBest ? ' · a new best!' : relaxed ? ' · relaxed, not recorded'
+             : strict ? ' · strict, not recorded' : '')
            : 'Boom.')
     : '';
 }
@@ -3072,6 +3120,13 @@ for (const b of document.querySelectorAll('[data-mute]'))
     muteOn = !!b.dataset.mute;
     for (const x of document.querySelectorAll('[data-mute]')) x.classList.toggle('on', x === b);
     startFromControls();
+  };
+
+for (const b of document.querySelectorAll('[data-strict]'))
+  b.onclick = () => {
+    strict = !!b.dataset.strict;
+    for (const x of document.querySelectorAll('[data-strict]')) x.classList.toggle('on', x === b);
+    paintStatus();
   };
 
 for (const b of document.querySelectorAll('[data-adj]'))
