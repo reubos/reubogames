@@ -136,6 +136,7 @@
         <div class="btn-row">
           <button class="primary full" id="btnNew">New game</button>
           <button class="full" id="btnHint">Hint</button>
+          <button class="full" id="btnCheck">Check flags</button>
         </div>
         <p class="note" id="noteHint">Asking once marks what to look at; asking again
           names the reasoning.</p>
@@ -2076,12 +2077,30 @@ function rulesetMoves(known, find) {
         }
       }
 
+      let placed = 0;
+      for (let i = 0; i < n; i++) if (isM(i)) placed++;
+      const spare = mines - placed;
+
+      /* Pieces, against the mines left to join them. Every mine ends up in
+         one piece, and none may have three neighbours, so a new mine can
+         bring at most two pieces together — joining S pieces therefore costs
+         at least S-1 mines. A cell that would leave more pieces behind than
+         there are mines to join them cannot hold one. */
+      if (segs.length) {
+        const pieces = segs.flat();
+        for (let i = 0; i < n; i++) {
+          if (known[i] !== UNKNOWN) continue;
+          const near = new Set();
+          for (const j of edgOf(i)) if (isM(j)) near.add(segId[j]);
+          if (spare - 1 < segs.length - near.size)
+            mark(i, 'safe', 'piece-budget', pieces);
+        }
+      }
+
       /* One mine left to place and the rest of it lying in a single open
          piece: that mine can only be a cell joining the piece's two ends, so
          every cell that does not touch both of them is safe. */
-      let placed = 0;
-      for (let i = 0; i < n; i++) if (isM(i)) placed++;
-      if (ring && mines - placed === 1 && segs.length === 1) {
+      if (ring && spare === 1 && segs.length === 1) {
         const ends = segs[0].filter(c => [...edgOf(c)].filter(isM).length < 2);
         if (ends.length === 2) {
           const shuts = [];
@@ -2108,6 +2127,25 @@ function rulesetMoves(known, find) {
       for (const g of withM)
         for (const u of cutCells(known, g, x => id[x] === id[g[0]], adj, isM, isM, 'split'))
           mark(u, 'mine', 'reach-cut', [...adj(u)]);
+    }
+
+    /* How far the group can still stretch. Reaching a cell d steps off
+       through ground not yet known safe costs d mines — the cells passed
+       through and the cell itself — so anything standing further away than
+       the mines that remain is out of the group's reach altogether. */
+    const held = [];
+    for (let i = 0; i < n; i++) if (isM(i)) held.push(i);
+    if (held.length) {
+      const budget = mines - held.length;
+      const dist = new Int32Array(n).fill(-1);
+      const queue = held.slice();
+      for (const i of held) dist[i] = 0;
+      for (let a = 0; a < queue.length; a++)
+        for (const j of adj(queue[a]))
+          if (dist[j] < 0 && known[j] !== SAFE) { dist[j] = dist[queue[a]] + 1; queue.push(j); }
+      for (let i = 0; i < n; i++)
+        if (known[i] === UNKNOWN && (dist[i] < 0 || dist[i] > budget))
+          mark(i, 'safe', 'reach-budget', held);
     }
   }
 
@@ -2177,7 +2215,10 @@ function visibleClosure() {
    that search small. A search too large to finish gives the player the
    benefit of the doubt, since killing them on a maybe is the failure that
    matters. */
+let strictWitness = null;              // the board the last search turned up
+
 function couldBeMine(cell) {
+  strictWitness = null;
   const sure = visibleClosure();
   if (sure[cell] === SAFE) return false;
   if (sure[cell] === KNOWN_MINE) return true;
@@ -2238,10 +2279,17 @@ function couldBeMine(cell) {
     let best = -1, bf = Infinity;
     for (let k = 0; k < cons.length; k++) if (free[k] > 0 && free[k] < bf) { bf = free[k]; best = k; }
     if (best < 0) {
-      if (ruleset === 'none') { hit = true; return; }
-      for (let i = 0; i < n; i++) mine[i] = state[i] === OPEN ? 0 : fixed[i];
-      vars.forEach((c, v) => { mine[c] = val[v]; });
-      if (validRuleset()) hit = true;
+      const board = new Uint8Array(n);
+      for (let i = 0; i < n; i++) board[i] = state[i] === OPEN ? 0 : fixed[i];
+      vars.forEach((c, v) => { board[c] = val[v]; });
+      if (ruleset !== 'none') {
+        mine.set(board);
+        const ok = validRuleset();
+        mine.set(truth);
+        if (!ok) return;
+      }
+      strictWitness = board;             // an entire board this could have been
+      hit = true;
       return;
     }
     const v = cons[best].cells.find(c => val[c] < 0);
@@ -2250,7 +2298,10 @@ function couldBeMine(cell) {
   set(vi[cell], 1);                      // insist on a mine there, then look
   rec();
   mine.set(truth);
-  return blown ? true : hit;
+  /* A search too large to finish lets the player through. The ordinary rule
+     still applies underneath, so a real mine kills them anyway; what this
+     avoids is killing them over a cell nobody could settle either way. */
+  return blown ? false : hit;
 }
 
 function reveal(i) {
@@ -2261,7 +2312,12 @@ function reveal(i) {
      on show leaves any room for this cell to hold a mine, then it holds one. */
   if (strict && !dealing && couldBeMine(i)) {
     if (relaxed) { flashCell = i; flashUntil = performance.now() + 550; return; }
-    mine[i] = 1;                 // it was possible, so it is so
+    /* Show a board it really could have been: the one the search turned up,
+       with a mine where the click landed, every number still on show reading
+       true and the law still kept. Planting a mine on the board as it stood
+       would have shown an arrangement that could not exist. */
+    if (strictWitness) { mine.set(strictWitness); countFromMines(); }
+    else mine[i] = 1;            // the solver had already settled it as a mine
     lose(i);
     return;
   }
@@ -2563,6 +2619,8 @@ const HINTWORDS = {
   'loop-close': 'The loop. One mine is left, and it can only be the cell joining the two loose ends.',
   'box-short': 'The boxes. This box is short of the mines it must hold, and has only just enough covered cells left to make them up.',
   'box-full': 'The boxes. This box already holds every mine it is allowed, so the rest of it is clear.',
+  'piece-budget': 'The pieces. The mines end up in one piece, and joining the pieces already showing would take more mines than are left — a mine here would leave one piece too many.',
+  'reach-budget': 'The pieces. Reaching this far from the mines already found would cost more mines than remain, so the group cannot stretch to it.',
   'reach-pocket': 'Connectedness. No mine could reach this ground without leaving the group behind.',
   'reach-cut': 'Connectedness. This is the only cell the group has to pass through.',
   'outside-pocket': 'The border. Every mine must chain edge to edge out to the rim, and no chain could reach this ground.',
@@ -2584,37 +2642,61 @@ function clearHint() {
   if (hintNote) { hintNote = false; el('noteHint').textContent = HINTIDLE; }
 }
 
+/* Which flags sit on cells holding no mine, told the way a hint is told: the
+   first ask says only that one of them is wrong, the second says which.
+
+   `clean` decides what happens when they are all right — the hint button has
+   a hint to get on with and says nothing, while the check button has nothing
+   else to offer and so says so. Returns whether it spoke. */
+function reportFlags(clean) {
+  const wrong = [];
+  for (let i = 0; i < n; i++) if (state[i] === FLAG && !mine[i]) wrong.push(i);
+
+  if (!wrong.length) {
+    if (!clean) return false;
+    hintClues = []; hintLevel = 0; hintAt = '';
+    el('noteHint').textContent = !flags
+      ? 'No flags planted yet, so nothing to check.'
+      : flags === 1 ? 'Your flag is on a mine.'
+      : 'All ' + flags + ' of your flags are on mines.';
+    draw();
+    return true;
+  }
+
+  const sig = 'flags:' + opened + ':' + flags + ':' + wrong.join(',');
+  hintLevel = sig === hintAt ? Math.min(2, hintLevel + 1) : 1;
+  hintAt = sig;
+  const one = wrong.length === 1;
+  if (hintLevel >= 2) {
+    hintClues = wrong.slice();
+    el('noteHint').textContent = one
+      ? 'Marked in gold: that flag is on a cell that holds no mine.'
+      : 'Marked in gold: those flags are on cells that hold no mine.';
+  } else {
+    hintClues = [];
+    el('noteHint').textContent = (one
+      ? 'One of your flags is on a cell that holds no mine.'
+      : wrong.length + ' of your flags are on cells that hold no mine.') +
+      ' Ask again to be shown where.';
+  }
+  draw();
+  return true;
+}
+
+// The flags and nothing else: no deduction is offered either way.
+function checkFlags() {
+  if (over || !n) return;
+  hintNote = true;
+  reportFlags(true);
+}
+
 function askHint() {
   if (over || !n) return;
   hintNote = true;
   const say = t => { hintClues = []; hintLevel = 0; hintAt = ''; el('noteHint').textContent = t; draw(); };
 
-  /* A wrong flag is reported before any hint is worked out. Asking again
-     gives up where it is, the same way asking again about a deduction gives
-     up its name — the first ask says there is something to find, the second
-     stops making the player hunt for it. */
-  const wrong = [];
-  for (let i = 0; i < n; i++) if (state[i] === FLAG && !mine[i]) wrong.push(i);
-  if (wrong.length) {
-    const sig = 'flags:' + opened + ':' + flags + ':' + wrong.join(',');
-    hintLevel = sig === hintAt ? Math.min(2, hintLevel + 1) : 1;
-    hintAt = sig;
-    const one = wrong.length === 1;
-    if (hintLevel >= 2) {
-      hintClues = wrong.slice();
-      el('noteHint').textContent = one
-        ? 'Marked in gold: that flag is on a cell that holds no mine.'
-        : 'Marked in gold: those flags are on cells that hold no mine.';
-    } else {
-      hintClues = [];
-      el('noteHint').textContent = (one
-        ? 'One of your flags is on a cell that holds no mine.'
-        : wrong.length + ' of your flags are on cells that hold no mine.') +
-        ' Ask again to be shown where.';
-    }
-    draw();
-    return;
-  }
+  // a wrong flag is reported before any hint is worked out
+  if (reportFlags(false)) return;
 
   /* Every flag has just been checked, so the flags can be leaned on: the
      hint then carries on from where the player actually is, rather than
@@ -3344,6 +3426,7 @@ selTiling.onchange = () => { tiling = TILINGS[+selTiling.value]; startFromContro
 
 el('btnNew').onclick = startFromControls;
 el('btnHint').onclick = askHint;
+el('btnCheck').onclick = checkFlags;
 
 /* The canvas follows its panel rather than the window, since the panel also
    changes width when the sidebar drops below it. Only a width change is acted
