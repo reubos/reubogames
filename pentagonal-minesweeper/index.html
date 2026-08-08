@@ -2165,13 +2165,101 @@ function visibleClosure() {
   return known;
 }
 
+/* Could a mine be here at all? The closure settles most cells outright and
+   cheaply, and where it does the answer is already in hand. Where it does
+   not, the question has to be put properly, because "my rules cannot show
+   this empty" is not the same as "this could hold a mine" — and a player who
+   reasons better than the solver was being punished for the difference.
+
+   So: hold everything the closure did settle, and search the rest for any
+   arrangement fitting every number on show, the mine counter and the law,
+   with a mine on the cell in question. Fixing what is already known keeps
+   that search small. A search too large to finish gives the player the
+   benefit of the doubt, since killing them on a maybe is the failure that
+   matters. */
+function couldBeMine(cell) {
+  const sure = visibleClosure();
+  if (sure[cell] === SAFE) return false;
+  if (sure[cell] === KNOWN_MINE) return true;
+
+  const vi = new Int32Array(n).fill(-1);
+  const fixed = new Uint8Array(n);
+  const vars = [];
+  for (let i = 0; i < n; i++) {
+    if (state[i] === OPEN) continue;
+    if (sure[i] === UNKNOWN) { vi[i] = vars.length; vars.push(i); }
+    else if (sure[i] === KNOWN_MINE) fixed[i] = 1;
+  }
+
+  const cons = [];
+  const add = (cells, need) => { if (cells.length) cons.push({ cells, need }); };
+  for (let i = 0; i < n; i++) {
+    if (state[i] !== OPEN || muted[i]) continue;
+    const cells = [];
+    let need = count[i];
+    for (const j of nbOf(i)) {
+      if (state[j] === OPEN) continue;
+      if (vi[j] >= 0) cells.push(vi[j]); else need -= fixed[j];
+    }
+    add(cells, need);
+  }
+  {
+    const cells = [];
+    let need = mines;
+    for (let i = 0; i < n; i++) {
+      if (state[i] === OPEN) continue;
+      if (vi[i] >= 0) cells.push(vi[i]); else need -= fixed[i];
+    }
+    add(cells, need);
+  }
+
+  const val = new Int8Array(vars.length).fill(-1);
+  const ones = new Int32Array(cons.length), free = new Int32Array(cons.length);
+  cons.forEach((c, k) => { free[k] = c.cells.length; });
+  const inCons = vars.map(() => []);
+  cons.forEach((c, k) => { for (const v of c.cells) inCons[v].push(k); });
+
+  const feasible = () => {
+    for (let k = 0; k < cons.length; k++) {
+      const left = cons[k].need - ones[k];
+      if (left < 0 || left > free[k]) return false;
+    }
+    return true;
+  };
+  const set = (v, b) => { val[v] = b; for (const k of inCons[v]) { free[k]--; if (b) ones[k]++; } };
+  const drop = (v, b) => { val[v] = -1; for (const k of inCons[v]) { free[k]++; if (b) ones[k]--; } };
+
+  const truth = mine.slice();
+  let hit = false, blown = false, nodes = 0;
+  const rec = () => {
+    if (hit || blown) return;
+    if (++nodes > 300000) { blown = true; return; }
+    if (!feasible()) return;
+    let best = -1, bf = Infinity;
+    for (let k = 0; k < cons.length; k++) if (free[k] > 0 && free[k] < bf) { bf = free[k]; best = k; }
+    if (best < 0) {
+      if (ruleset === 'none') { hit = true; return; }
+      for (let i = 0; i < n; i++) mine[i] = state[i] === OPEN ? 0 : fixed[i];
+      vars.forEach((c, v) => { mine[c] = val[v]; });
+      if (validRuleset()) hit = true;
+      return;
+    }
+    const v = cons[best].cells.find(c => val[c] < 0);
+    for (const b of [1, 0]) { set(v, b); rec(); drop(v, b); if (hit || blown) return; }
+  };
+  set(vi[cell], 1);                      // insist on a mine there, then look
+  rec();
+  mine.set(truth);
+  return blown ? true : hit;
+}
+
 function reveal(i) {
   if (over || state[i] !== COVERED) return;
   if (!seeded) seed(i);
 
   /* The strict law, applied before the board is consulted at all: if what is
      on show leaves any room for this cell to hold a mine, then it holds one. */
-  if (strict && !dealing && visibleClosure()[i] !== SAFE) {
+  if (strict && !dealing && couldBeMine(i)) {
     if (relaxed) { flashCell = i; flashUntil = performance.now() + 550; return; }
     mine[i] = 1;                 // it was possible, so it is so
     lose(i);
