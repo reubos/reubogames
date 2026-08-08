@@ -2034,9 +2034,10 @@ function deduce(known, mode) {
    A flag is the player's opinion, and an opinion is not evidence: a hint
    worked out around a misplaced flag would be a falsehood told with a
    straight face. So every flag is checked against the board first, and a
-   wrong one is reported in place of the hint — that one is wrong, never
-   which. Once they have all been checked they are true, and the hint may
-   then stand on them and carry on from where the player really is.
+   wrong one is reported in place of the hint: asking once says only that
+   one of them is wrong, asking again says which. Once they have all been
+   checked they are true, and the hint may then stand on them and carry on
+   from where the player really is.
    ===================================================================== */
 
 function findHint(known) {
@@ -2137,12 +2138,30 @@ function askHint() {
   hintNote = true;
   const say = t => { hintClues = []; hintLevel = 0; hintAt = ''; el('noteHint').textContent = t; draw(); };
 
-  let wrong = 0;
-  for (let i = 0; i < n; i++) if (state[i] === FLAG && !mine[i]) wrong++;
-  if (wrong) {
-    say(wrong === 1
-      ? 'One of your flags is on a cell that holds no mine. Take it back before asking again.'
-      : wrong + ' of your flags are on cells that hold no mine. Take them back before asking again.');
+  /* A wrong flag is reported before any hint is worked out. Asking again
+     gives up where it is, the same way asking again about a deduction gives
+     up its name — the first ask says there is something to find, the second
+     stops making the player hunt for it. */
+  const wrong = [];
+  for (let i = 0; i < n; i++) if (state[i] === FLAG && !mine[i]) wrong.push(i);
+  if (wrong.length) {
+    const sig = 'flags:' + opened + ':' + flags + ':' + wrong.join(',');
+    hintLevel = sig === hintAt ? Math.min(2, hintLevel + 1) : 1;
+    hintAt = sig;
+    const one = wrong.length === 1;
+    if (hintLevel >= 2) {
+      hintClues = wrong.slice();
+      el('noteHint').textContent = one
+        ? 'Marked in gold: that flag is on a cell that holds no mine.'
+        : 'Marked in gold: those flags are on cells that hold no mine.';
+    } else {
+      hintClues = [];
+      el('noteHint').textContent = (one
+        ? 'One of your flags is on a cell that holds no mine.'
+        : wrong.length + ' of your flags are on cells that hold no mine.') +
+        ' Ask again to be shown where.';
+    }
+    draw();
     return;
   }
 
