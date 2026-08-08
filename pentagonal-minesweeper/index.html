@@ -172,9 +172,9 @@
           <button data-adj="" class="on">Off</button>
           <button data-adj="1">On</button>
         </div>
-        <p class="note">With this on, resting the pointer on a cell lights the
-          cells its number counts &mdash; which a tiling of pentagons does not
-          make obvious by looking.</p>
+        <p class="note">With this on, resting the pointer on a number lights the
+          cells it counts &mdash; which a tiling of pentagons does not make
+          obvious by looking.</p>
         <p class="label" style="margin-top: 14px">Relaxed</p>
         <div class="btn-row">
           <button data-relax="" class="on">Off</button>
@@ -2862,8 +2862,12 @@ function draw() {
   }
 
   /* The neighbourhood under the pointer, washed over lightly enough to read
-     the cells through it, with the cell itself ringed. */
-  if (adjOn && hover >= 0 && !over) {
+     the cells through it, with the cell itself ringed. Only a number is worth
+     asking this of: a covered cell counts nothing yet, a blank has already
+     opened everything it touches, and a muted one is keeping its number to
+     itself. */
+  if (adjOn && hover >= 0 && !over &&
+      state[hover] === OPEN && !muted[hover] && count[hover]) {
     ctx.save();
     ctx.globalAlpha = 0.22;
     ctx.fillStyle = ADJ;
