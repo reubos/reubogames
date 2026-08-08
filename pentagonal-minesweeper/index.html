@@ -1349,17 +1349,40 @@ function startClock() { if (!startTime) startTime = performance.now(); }
    only accepts a board when the ordinary rules get stuck without them.
    ===================================================================== */
 
-// One blob, grown a cell at a time from a random seed, corner-joined.
+/* One group is not the same as one lump. The law asks only that the mines
+   hold together, and a sprawling tree holds together as well as a blob
+   while touching far more of the board — which is the difference between a
+   board of numbers and a board of blanks with a clot in one corner.
+
+   So the group is grown towards whatever cell currently stands furthest
+   from it, over and over: each pass throws a branch out into the emptiest
+   ground left, and the emptiest ground is never empty for long. */
 function placeConnected(k) {
+  mine.fill(0);
+  const dist = new Int32Array(n), prev = new Int32Array(n), q = new Int32Array(n);
   let placed = 0;
-  const frontier = [Math.floor(Math.random() * n)];
-  while (placed < k && frontier.length) {
-    const at = Math.floor(Math.random() * frontier.length);
-    const c = frontier[at];
-    frontier[at] = frontier[frontier.length - 1]; frontier.pop();
-    if (mine[c]) continue;
-    mine[c] = 1; placed++;
-    for (const j of corOf(c)) if (!mine[j]) frontier.push(j);
+  mine[Math.floor(Math.random() * n)] = 1; placed++;
+
+  while (placed < k) {
+    // how far off every cell stands from the group as it presently is
+    dist.fill(-1);
+    let head = 0, tail = 0, far = -1;
+    for (let i = 0; i < n; i++) if (mine[i]) { dist[i] = 0; prev[i] = -1; q[tail++] = i; }
+    while (head < tail) {
+      const v = q[head++];
+      for (const j of corOf(v)) if (dist[j] < 0) {
+        dist[j] = dist[v] + 1; prev[j] = v; q[tail++] = j; far = j;
+      }
+    }
+    if (far < 0) break;                       // the group already fills the board
+    // one of the furthest cells at random, so the same board is not grown twice
+    const picks = [];
+    for (let i = 0; i < n; i++) if (dist[i] === dist[far]) picks.push(i);
+    let v = picks[Math.floor(Math.random() * picks.length)];
+    const path = [];
+    while (v >= 0 && !mine[v]) { path.push(v); v = prev[v]; }
+    // laid from the group outwards, so it is joined on at every step
+    for (let a = path.length - 1; a >= 0 && placed < k; a--) { mine[path[a]] = 1; placed++; }
   }
   return placed === k;
 }
@@ -1448,21 +1471,48 @@ function placeLoop(k) {
   return false;
 }
 
-// Lumps grown inward from the border, then the safe ground checked whole.
+/* Lumps against the border make a thick ring round a hollow middle. Fingers
+   make a comb, and a comb reaches everywhere a ring cannot — so the mines
+   are grown the same way as a connected group, but rooted at the border and
+   stepping by edges, since that is the reach this law is written in.
+
+   Every mine already laid counts as a place to grow from, and so does every
+   border cell, which is what lets a fresh finger start anywhere along the
+   rim. A finger that seals off a pocket of safe ground is drawn back a cell
+   at a time until the safe ground is whole again. */
 function placeOutside(k) {
-  const rim = [];
-  for (let i = 0; i < n; i++) if (!interior[i]) rim.push(i);
-  for (let t = 0; t < 40; t++) {
+  const dist = new Int32Array(n), prev = new Int32Array(n), q = new Int32Array(n);
+  const whole = () => compsOver(i => !mine[i], edgOf).comps.length === 1;
+
+  for (let attempt = 0; attempt < 12; attempt++) {
     mine.fill(0);
-    let placed = 0, guard = 0;
-    while (placed < k && guard++ < 400) {
-      let c = rim[Math.floor(Math.random() * rim.length)];
-      const lump = 1 + Math.floor(Math.random() * Math.min(4, k - placed));
-      for (let s = 0; s < lump && placed < k; s++) {
-        if (!mine[c]) { mine[c] = 1; placed++; }
-        const step = edgOf(c);
-        c = step[Math.floor(Math.random() * step.length)];
+    let placed = 0, stuck = 0;
+    while (placed < k && stuck < 24) {
+      dist.fill(-1);
+      let head = 0, tail = 0, far = -1;
+      for (let i = 0; i < n; i++)
+        if (mine[i] || !interior[i]) { dist[i] = 0; prev[i] = -1; q[tail++] = i; }
+      while (head < tail) {
+        const v = q[head++];
+        for (const j of edgOf(v)) if (dist[j] < 0 && !mine[j]) {
+          dist[j] = dist[v] + 1; prev[j] = v; q[tail++] = j; far = j;
+        }
       }
+      if (far < 0 || !dist[far]) break;
+      const picks = [];
+      for (let i = 0; i < n; i++) if (dist[i] === dist[far]) picks.push(i);
+      let v = picks[Math.floor(Math.random() * picks.length)];
+      /* Back to whatever it grew from. A run that ends on bare border lays
+         that border cell too, since a chain of mines must reach the rim
+         itself and not merely lie against it. */
+      const path = [];
+      while (v >= 0 && !mine[v]) { path.push(v); v = prev[v]; }
+      let laid = 0;
+      for (let a = path.length - 1; a >= 0 && placed < k; a--) {
+        mine[path[a]] = 1; placed++; laid++;
+      }
+      while (laid && !whole()) { mine[path[path.length - laid]] = 0; placed--; laid--; }
+      if (laid) stuck = 0; else stuck++;
     }
     if (placed === k && validRuleset()) return true;
   }
