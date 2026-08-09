@@ -3266,7 +3266,24 @@ function draw() {
     ctx.lineWidth = cellPitch * 0.06;
   }
 
-  // the boxes of the tiling's repeat, when they are being shown
+  /* Whatever the last hint pointed at, ringed — but ringed on the inside of
+     the cell rather than along its edge. The line round a box runs along cell
+     edges too, and a ring drawn there would bury it just when the boxes are
+     most worth seeing. Clipping to the cell and stroking at twice the width
+     leaves only the inner half, which keeps the edge itself clear. */
+  if (hintClues.length) {
+    ctx.strokeStyle = HINT;
+    ctx.lineWidth = cellPitch * 0.24;
+    for (const i of hintClues) {
+      ctx.save();
+      ctx.clip(cellPath[i]);
+      ctx.stroke(cellPath[i]);
+      ctx.restore();
+    }
+    ctx.lineWidth = cellPitch * 0.06;
+  }
+
+  // and the boxes over the top of everything, since they are the ground plan
   if (boxLaw()) {
     ctx.strokeStyle = BOXLINE;
     ctx.lineWidth = cellPitch * 0.11;
@@ -3274,14 +3291,6 @@ function draw() {
     ctx.beginPath();
     for (const [u, v] of boxSegments()) { ctx.moveTo(u[0], u[1]); ctx.lineTo(v[0], v[1]); }
     ctx.stroke();
-    ctx.lineWidth = cellPitch * 0.06;
-  }
-
-  // whatever the last hint pointed at, ringed over the top
-  if (hintClues.length) {
-    ctx.strokeStyle = HINT;
-    ctx.lineWidth = cellPitch * 0.14;
-    for (const i of hintClues) ctx.stroke(cellPath[i]);
     ctx.lineWidth = cellPitch * 0.06;
   }
 
