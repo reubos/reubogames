@@ -796,7 +796,7 @@ function wholeUnits(u, kept, need) {
 /* The boxes of the board in play: which cells make up each copy of the repeat,
    and which box a cell belongs to. Worked out once when the board is built,
    since the laying, the checking, the deducing and the drawing all want it. */
-let boxes = [], boxOf = null, boxMid = [], boxShown = null;
+let boxes = [], boxOf = null, boxMid = [], boxTop = [], boxShown = null;
 
 function findBoxes() {
   const per = tilesPerUnit(tiling.src, tiling.boxMul);
@@ -809,6 +809,17 @@ function findBoxes() {
     let x = 0, y = 0;
     for (const i of g) { const c = centroidOf(poly[i]); x += c[0]; y += c[1]; }
     return [x / g.length, y / g.length];
+  });
+  /* A box wears its number at its highest corner rather than in its middle.
+     A corner is where cells meet, so it is about as far from any cell's own
+     number as a point can be — measured across the six tilings it keeps three
+     fifths of a cell's width clear, where the middle of a twelve-cell box can
+     come within a third. Drawing it downwards from there puts the figure
+     inside the box it belongs to. */
+  boxTop = boxes.map(g => {
+    let top = null;
+    for (const i of g) for (const q of poly[i]) if (!top || q[1] < top[1]) top = q;
+    return top;
   });
   boxShown = null;
 }
@@ -3098,7 +3109,7 @@ const BOOM = '#b91c1c', MINED = '#7f1d1d';
 const MUTE = '#6f8c74';        // a question mark, dimmer than any number
 const HINT = '#facc15';        // the gold a hint marks its cells with
 const BOXLINE = '#cfe7d6';     // the pale line drawn round a box of the repeat
-const BOXFILL = '#12291a';     // and the disc its number sits on
+const BOXNUM = '#9dbca5';      // and the quieter tone its number is written in
 const ADJ = '#bfe3ff';         // the wash over the cells a hovered number counts
 // one green per pentagon shape, used only when asked for
 const COVERS = ['#35603d', '#2c5a4c', '#3d5f33', '#2f5560'];
@@ -3299,21 +3310,24 @@ function draw() {
     }
   }
 
-  /* A box that carries its own number wears it in the middle, on a disc, so
-     that it reads as the box's and not as any one cell's. */
-  if (boxLaw() === 'exact' && boxShown && boxMid.length === boxes.length) {
-    const rad = cellPitch * view.s * 0.30;
-    ctx.lineWidth = Math.max(1, rad * 0.12);
-    ctx.font = '700 ' + (rad * 1.45).toFixed(1) + 'px "Segoe UI", sans-serif';
+  /* A box that carries its own number wears it high up and quietly, in a
+     lighter weight than a cell's number and a duller colour, with a dark halo
+     so that it stays legible over whatever it happens to lie on. It is meant
+     to be found when looked for, not to compete with the clues. */
+  if (boxLaw() === 'exact' && boxShown && boxTop.length === boxes.length) {
+    const size = cellPitch * view.s * 0.34;
+    ctx.font = '600 ' + size.toFixed(1) + 'px "Segoe UI", sans-serif';
+    ctx.textBaseline = 'top';            // hung below the corner, inside the box
+    ctx.lineJoin = 'round';
+    ctx.lineWidth = Math.max(2, size * 0.34);
+    ctx.strokeStyle = LINE;
+    ctx.fillStyle = BOXNUM;
     for (let b = 0; b < boxes.length; b++) {
-      const x = boxMid[b][0] * view.s + view.ox, y = boxMid[b][1] * view.s + view.oy;
-      ctx.beginPath();
-      ctx.arc(x, y, rad, 0, Math.PI * 2);
-      ctx.fillStyle = BOXFILL; ctx.fill();
-      ctx.strokeStyle = BOXLINE; ctx.stroke();
-      ctx.fillStyle = BOXLINE;
+      const x = boxTop[b][0] * view.s + view.ox, y = boxTop[b][1] * view.s + view.oy;
+      ctx.strokeText(boxShown[b], x, y);
       ctx.fillText(boxShown[b], x, y);
     }
+    ctx.textBaseline = 'middle';
   }
 
   // the forgiven mine, shown on its covered cell for as long as the flash lasts
