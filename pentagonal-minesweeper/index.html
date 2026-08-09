@@ -1680,32 +1680,68 @@ function placeDual(k, blockAdj) {
   return placed === k;
 }
 
-/* A walk grown from both ends, only ever stepping onto ground that touches
-   the walk at the end it grows from and nowhere else — which is exactly the
-   promise the snake makes about itself. */
-function placeSnake(k) {
-  for (let t = 0; t < 80; t++) {
-    mine.fill(0);
-    let a = Math.floor(Math.random() * n), b = a, len = 1;
-    mine[a] = 1;
-    while (len < k) {
-      let grown = false;
-      for (const end of (Math.random() < 0.5 ? [a, b] : [b, a])) {
-        const cand = [...edgOf(end)].filter(j => !mine[j] &&
-          [...edgOf(j)].filter(z => mine[z]).length === 1);
-        if (!cand.length) continue;
-        const c = cand[Math.floor(Math.random() * cand.length)];
-        mine[c] = 1; len++;
-        if (end === a) a = c; else b = c;
-        grown = true;
-        break;
-      }
-      if (!grown) break;
-    }
-    if (len === k) return true;
+/* How many ways the walk could carry on from a cell, were it taken: the
+   neighbours it would leave touching the walk at exactly one place. */
+function elbowRoom(c) {
+  let r = 0;
+  for (const j of edgOf(c)) {
+    if (mine[j]) continue;
+    let touch = 0;
+    for (const z of edgOf(j)) if (mine[z] || z === c) touch++;
+    if (touch === 1) r++;
   }
+  return r;
+}
+
+/* A walk that only ever steps onto ground touching it at one place — which
+   is exactly the promise a snake makes about itself — and that backs up when
+   it runs out of room rather than starting over.
+
+   Starting over is what a one-shot walk has to do, and the longer the walk
+   the likelier it strands itself, so the length it can reach falls away as
+   the board grows. Backing up one step and trying the next way on turns that
+   from a gamble into a search. Which way to try first still matters: the
+   tightest step, the one leaving fewest ways on from where it lands, spends
+   the cramped ground early and keeps the open ground open. */
+function walkOut(k, seed, allow) {
+  mine.fill(0);
+  mine[seed] = 1;
+  const stack = [{ cell: seed, ways: null, at: 0 }];
+  let budget = 20000 + 40 * k;
+  while (stack.length < k && budget-- > 0) {
+    const top = stack[stack.length - 1];
+    if (top.ways === null) {
+      const list = [];
+      for (const j of edgOf(top.cell)) if (!mine[j] && allow(j, top.cell, stack.length))
+        list.push([j, elbowRoom(j) + Math.random()]);
+      list.sort((x, y) => x[1] - y[1]);
+      top.ways = list.map(e => e[0]);
+    }
+    if (top.at >= top.ways.length) {
+      if (stack.length === 1) break;
+      mine[top.cell] = 0;
+      stack.pop();
+      continue;
+    }
+    const next = top.ways[top.at++];
+    if (mine[next]) continue;
+    mine[next] = 1;
+    stack.push({ cell: next, ways: null, at: 0 });
+  }
+  return stack.length === k;
+}
+
+function placeSnake(k) {
+  const allow = (j, head) => {
+    let touch = 0;
+    for (const z of edgOf(j)) if (mine[z]) touch++;
+    return touch === 1;               // the head, and nothing else
+  };
+  for (let t = 0; t < 8; t++)
+    if (walkOut(k, Math.floor(Math.random() * n), allow)) return true;
   return false;
 }
+
 
 /* A loop is grown as a snake is, but with the way home kept in mind: the
    walk is only let onto ground it could still get back from in the steps it
@@ -1713,30 +1749,27 @@ function placeSnake(k) {
 function placeLoop(k) {
   if (k < 4) return false;
   const dist = new Int32Array(n);
-  for (let t = 0; t < 400; t++) {
-    mine.fill(0);
+  for (let t = 0; t < 8; t++) {
     const s = Math.floor(Math.random() * n);
     dist.fill(-1); dist[s] = 0;
     const q = [s];
     for (let a = 0; a < q.length; a++)
       for (const j of edgOf(q[a])) if (dist[j] < 0) { dist[j] = dist[q[a]] + 1; q.push(j); }
-    mine[s] = 1;
-    let head = s, len = 1;
-    while (len < k) {
-      const closing = len === k - 1;
-      const cand = [...edgOf(head)].filter(j => {
-        if (mine[j]) return false;
-        const d = [...edgOf(j)].filter(z => mine[z]);
-        // the last cell touches both ends; every other touches only the head,
-        // and must be near enough to s to still get home afterwards
-        return closing ? d.length === 2 && d.includes(s) && d.includes(head)
-                       : d.length === 1 && d[0] === head && dist[j] >= 0 && dist[j] <= k - len;
-      });
-      if (!cand.length) break;
-      head = cand[Math.floor(Math.random() * cand.length)];
-      mine[head] = 1; len++;
-    }
-    if (len === k && validRuleset()) return true;
+    /* The last cell laid has to touch both the head and the start, closing the
+       ring; every other touches only the head, and has to stand near enough to
+       the start to still get home in the steps that are left. */
+    const allow = (j, head, len) => {
+      let touch = 0, meetsHead = false, meetsStart = false;
+      for (const z of edgOf(j)) if (mine[z]) {
+        touch++;
+        if (z === head) meetsHead = true;
+        if (z === s) meetsStart = true;
+      }
+      return len === k - 1
+        ? touch === 2 && meetsHead && meetsStart
+        : touch === 1 && meetsHead && dist[j] >= 0 && dist[j] <= k - len;
+    };
+    if (walkOut(k, s, allow) && validRuleset()) return true;
   }
   return false;
 }
