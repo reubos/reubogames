@@ -189,13 +189,17 @@
           <button data-rule="none" class="on">None</button>
           <button data-rule="connected">Connected</button>
           <button data-rule="outside">Outside</button>
-          <button data-rule="dual">Dual</button>
-          <button data-rule="dual2">Dual 2</button>
+          <button data-rule="singles">Singles</button>
+          <button data-rule="doubles">Doubles</button>
+          <button data-rule="triples">Triples</button>
           <button data-rule="snake">Snake</button>
           <button data-rule="loop">Loop</button>
           <button data-rule="boxed1">Boxed 1</button>
           <button data-rule="boxed2">Boxed 2</button>
           <button data-rule="boxed3">Boxed 3</button>
+          <button data-rule="boxed4">Boxed 4</button>
+          <button data-rule="cbox4">Connected + Boxed 4</button>
+          <button data-rule="sbox4">Snake + Boxed 4</button>
         </div>
         <p class="note" id="noteRule"></p>
       </div>
@@ -792,7 +796,7 @@ function wholeUnits(u, kept, need) {
 /* The boxes of the board in play: which cells make up each copy of the repeat,
    and which box a cell belongs to. Worked out once when the board is built,
    since the laying, the checking, the deducing and the drawing all want it. */
-let boxes = [], boxOf = null;
+let boxes = [], boxOf = null, boxMid = [], boxShown = null;
 
 function findBoxes() {
   const per = tilesPerUnit(tiling.src, tiling.boxMul);
@@ -800,6 +804,13 @@ function findBoxes() {
   boxes = [...groups.values()].filter(g => g.length === per);
   boxOf = new Int32Array(n).fill(-1);
   boxes.forEach((g, b) => { for (const i of g) boxOf[i] = b; });
+  // straight off the polygons, since the cell middles are not worked out yet
+  boxMid = boxes.map(g => {
+    let x = 0, y = 0;
+    for (const i of g) { const c = centroidOf(poly[i]); x += c[0]; y += c[1]; }
+    return [x / g.length, y / g.length];
+  });
+  boxShown = null;
 }
 
 /* How many mines a box may hold, by the number of cells in it. The floor sits
@@ -812,8 +823,8 @@ function boxBounds() {
   const per = boxes.length ? boxes[0].length : 0;
   const r = BOXRULE[per] ||
     [Math.max(1, Math.round(per * 0.25)), Math.max(1, Math.round(per * 0.45))];
-  return { per, lo: ruleset === 'boxed2' ? 0 : r[0],
-                hi: ruleset === 'boxed1' ? per : r[1] };
+  const law = boxLaw();
+  return { per, lo: law === 'ceiling' ? 0 : r[0], hi: law === 'floor' ? per : r[1] };
 }
 
 function regionOf(t) {
@@ -1388,18 +1399,45 @@ let flashCell = -1, flashUntil = 0;
    boards built under one are made so that the law is needed: a solver
    kept ignorant of it must get stuck on them. */
 let ruleset = 'none';
+
+/* A ruleset is one law, or two of them together. Naming the laws apart from
+   the rulesets means the laying, the checking and the deducing can each ask
+   what is in force rather than match on the name of a combination. */
+const LAWS = {
+  none: [], connected: ['connected'], outside: ['outside'],
+  singles: ['group'], doubles: ['group'], triples: ['group'],
+  snake: ['snake'], loop: ['loop'],
+  boxed1: ['box'], boxed2: ['box'], boxed3: ['box'], boxed4: ['box'],
+  cbox4: ['connected', 'box'], sbox4: ['snake', 'box']
+};
+const has = law => (LAWS[ruleset] || []).includes(law);
+
+// how many cells to a group, where the law speaks of groups at all
+const GROUPSIZE = { singles: 1, doubles: 2, triples: 3 };
+const groupSize = () => GROUPSIZE[ruleset] || 0;
+
+/* Which box law is in force. The first three bound how many mines a box may
+   hold; the fourth writes the number on it instead, which binds the laying
+   not at all and tells the player a great deal. */
+const BOXLAW = { boxed1: 'floor', boxed2: 'ceiling', boxed3: 'both',
+                 boxed4: 'exact', cbox4: 'exact', sbox4: 'exact' };
+const boxLaw = () => BOXLAW[ruleset] || '';
 const RULENOTES = {
   none: '',
   connected: 'All mines form a single group, touching by edge or corner.',
   outside: 'All safe cells connect edge to edge, and every mine chains edge ' +
            'to edge to the border.',
-  dual: 'Mines come in edge-joined pairs, and no two pairs touch, even at a corner.',
-  dual2: 'Mines come in edge-joined pairs; pairs may meet at a corner, but never ' +
-         'along an edge.',
+  singles: 'Every mine stands alone: no two share an edge, though they may meet ' +
+           'at a corner.',
+  doubles: 'Mines come in edge-joined pairs; pairs may meet at a corner, but never ' +
+           'along an edge.',
+  triples: 'Mines come in edge-joined threes; the threes may meet at a corner, but ' +
+           'never along an edge.',
   snake: 'Mines form one edge-joined path that never runs alongside itself.',
   loop: 'Mines form one edge-joined loop that never runs alongside itself — ' +
         'every mine has exactly two mines beside it.',
-  boxed1: '', boxed2: '', boxed3: ''      // written out by paintRuleNote
+  boxed1: '', boxed2: '', boxed3: '', boxed4: '',   // written out by paintRuleNote
+  cbox4: '', sbox4: ''
 };
 let mines = 10, opened = 0, flags = 0, given = 0;
 // the size the board in play was actually built from, which is what a saved
@@ -1431,7 +1469,7 @@ const DIFF = {
    board and the sliders were never going to land there by accident. The
    path laws want a little more: a longer path passes through more of the
    board, and their logic is worth the most where it nearly fills it. */
-const LAWDENS = { snake: 0.40, loop: 0.40 };
+const LAWDENS = { snake: 0.40, loop: 0.40, sbox4: 0.40 };
 
 /* Best times, one for each tiling at each standard size and difficulty,
    kept in the browser's storage. A board made on the sliders is its own
@@ -1478,7 +1516,7 @@ function restoreBoard() {
   try { s = JSON.parse(localStorage.getItem(BOARDKEY) || 'null'); } catch (e) {}
   if (!s || s.v !== 1) return false;
   const t = TILINGS.find(x => x.id === s.tiling);
-  if (!t) return false;
+  if (!t || !LAWS[s.rule]) return false;      // a law since dropped or renamed
 
   // the settings go back first, since the board is built out of them
   tiling = t;
@@ -1498,6 +1536,7 @@ function restoreBoard() {
     mine[i] = +s.mine[i]; state[i] = +s.state[i]; muted[i] = +s.muted[i];
     count[i] = parseInt(s.count[i], 36);
   }
+  noteBoxCounts();                       // the boxes' numbers follow from the mines
   mines = s.mines; given = s.given; exploded = s.exploded;
   over = s.over; won = s.won; opened = s.opened; flags = s.flags;
   newBest = false; flashCell = -1; hover = -1; seeded = true;
@@ -1592,6 +1631,18 @@ function countFromMines() {
     for (const i of nbOf(j)) if (mine[i]) c++;
     count[j] = c;
   }
+  noteBoxCounts();
+}
+
+// And the same for the boxes, which one of the box laws puts on show.
+function noteBoxCounts() {
+  if (!boxes.length) { boxShown = null; return; }
+  boxShown = new Int32Array(boxes.length);
+  for (let b = 0; b < boxes.length; b++) {
+    let c = 0;
+    for (const i of boxes[b]) c += mine[i];
+    boxShown[b] = c;
+  }
 }
 
 /* In the plain game mines are laid only once the first cell is asked for, and
@@ -1657,10 +1708,11 @@ function placeConnected(k) {
   return placed === k;
 }
 
-/* Dominoes laid where nothing already stands within the blocking reach —
-   a corner's for dual, where pairs may not touch at all, an edge's for
-   dual 2, where a corner between pairs is allowed. */
-function placeDual(k, blockAdj) {
+/* Groups of exactly g cells, edge-joined, each laid where nothing already
+   stands within an edge of it. Blocking an edge's reach is what stops one
+   group running into the next and making a bigger one; a corner between two
+   groups is left alone, since a corner does not join them. */
+function placeGroups(k, g) {
   const blocked = new Uint8Array(n);
   let placed = 0;
   const order = [...Array(n).keys()];
@@ -1669,13 +1721,20 @@ function placeDual(k, blockAdj) {
     const t = order[i]; order[i] = order[j]; order[j] = t;
   }
   for (const a of order) {
-    if (placed === k) break;
+    if (placed >= k) break;
     if (blocked[a]) continue;
-    const mates = [...edgOf(a)].filter(b => !blocked[b]);
-    if (!mates.length) continue;
-    const b = mates[Math.floor(Math.random() * mates.length)];
-    mine[a] = mine[b] = 1; placed += 2;
-    for (const c of [a, b]) { blocked[c] = 1; for (const j of blockAdj(c)) blocked[j] = 1; }
+    const blob = [a], seen = new Set([a]);
+    while (blob.length < g) {
+      const opts = [];
+      for (const c of blob) for (const j of edgOf(c))
+        if (!blocked[j] && !seen.has(j)) opts.push(j);
+      if (!opts.length) break;
+      const pick = opts[Math.floor(Math.random() * opts.length)];
+      blob.push(pick); seen.add(pick);
+    }
+    if (blob.length < g) continue;
+    for (const c of blob) { mine[c] = 1; placed++; }
+    for (const c of blob) { blocked[c] = 1; for (const j of edgOf(c)) blocked[j] = 1; }
   }
   return placed === k;
 }
@@ -1871,17 +1930,13 @@ function compsOver(keep, adjOf) {
 // The laying is written down rather than trusted: check the law holds.
 function validRuleset() {
   const isMine = i => mine[i] === 1;
-  if (ruleset === 'connected')
-    return compsOver(isMine, corOf).comps.length === 1;
-  if (ruleset === 'dual' || ruleset === 'dual2') {
-    const { id, comps } = compsOver(isMine, edgOf);
-    if (!comps.every(g => g.length === 2)) return false;
-    if (ruleset === 'dual')
-      for (let i = 0; i < n; i++) if (mine[i])
-        for (const j of corOf(i)) if (mine[j] && id[j] !== id[i]) return false;
-    return true;
-  }
-  if (ruleset === 'snake') {
+
+  if (has('connected') && compsOver(isMine, corOf).comps.length !== 1) return false;
+
+  const g = groupSize();
+  if (g && !compsOver(isMine, edgOf).comps.every(c => c.length === g)) return false;
+
+  if (has('snake')) {
     const { comps } = compsOver(isMine, edgOf);
     if (comps.length !== 1) return false;
     let ends = 0;
@@ -1890,41 +1945,56 @@ function validRuleset() {
       if (d > 2) return false;
       if (d === 1) ends++;
     }
-    return comps[0].length === 1 || ends === 2;
+    if (!(comps[0].length === 1 || ends === 2)) return false;
   }
-  if (ruleset === 'loop') {
+
+  if (has('loop')) {
     const { comps } = compsOver(isMine, edgOf);
     if (comps.length !== 1 || comps[0].length < 4) return false;
     // one piece with every cell of degree two is a ring and nothing else
-    return comps[0].every(c => [...edgOf(c)].filter(j => mine[j]).length === 2);
+    if (!comps[0].every(c => [...edgOf(c)].filter(j => mine[j]).length === 2)) return false;
   }
-  if (ruleset.startsWith('boxed')) {
-    const { lo, hi } = boxBounds();
-    return boxes.every(g => {
-      let c = 0; for (const i of g) c += mine[i];
-      return c >= lo && c <= hi;
-    });
-  }
-  if (ruleset === 'outside') {
+
+  if (has('outside')) {
     if (compsOver(i => !mine[i], edgOf).comps.length !== 1) return false;
-    return compsOver(isMine, edgOf).comps.every(g => g.some(i => !interior[i]));
+    if (!compsOver(isMine, edgOf).comps.every(c => c.some(i => !interior[i]))) return false;
+  }
+
+  const law = boxLaw();
+  if (law === 'exact') {
+    // the numbers on the boxes are part of the puzzle, so they must read true
+    if (boxShown) for (let b = 0; b < boxes.length; b++) {
+      let c = 0;
+      for (const i of boxes[b]) c += mine[i];
+      if (c !== boxShown[b]) return false;
+    }
+  } else if (law) {
+    const { lo, hi } = boxBounds();
+    for (const box of boxes) {
+      let c = 0;
+      for (const i of box) c += mine[i];
+      if (c < lo || c > hi) return false;
+    }
   }
   return true;
 }
 
-// Lay by whichever law is on, and never take the laying on trust.
+/* Lay by whichever law is on, and never take the laying on trust. Where two
+   laws are in force the shape one does the laying; a box law that only writes
+   the count on the box constrains nothing and so asks for nothing. */
 function layByRule() {
   mine.fill(0);
-  const ok = ruleset === 'connected' ? placeConnected(mines)
-           : ruleset === 'dual' ? placeDual(mines, corOf)
-           : ruleset === 'dual2' ? placeDual(mines, edgOf)
-           : ruleset === 'snake' ? placeSnake(mines)
-           : ruleset === 'loop' ? placeLoop(mines)
-           : ruleset.startsWith('boxed') ? placeBoxed(mines)
-           : placeOutside(mines);
-  if (!ok || !validRuleset()) return false;
-  countFromMines();
-  return true;
+  const g = groupSize();
+  const ok = has('snake') ? placeSnake(mines)
+           : has('loop') ? placeLoop(mines)
+           : has('connected') ? placeConnected(mines)
+           : g ? placeGroups(mines, g)
+           : has('outside') ? placeOutside(mines)
+           : boxLaw() === 'exact' ? (layMines(new Set()), true)
+           : placeBoxed(mines);
+  if (!ok) return false;
+  countFromMines();                    // which also writes down what the boxes hold
+  return validRuleset();
 }
 
 /* =====================================================================
@@ -2011,7 +2081,24 @@ function rulesetMoves(known, find) {
     moved = true;
   };
 
-  if (ruleset.startsWith('boxed')) {
+  const theBoxLaw = boxLaw();
+  if (theBoxLaw === 'exact' && boxShown) {
+    /* A box with its number written on it is a clue like any other, only
+       drawn round a group of cells instead of standing in one. */
+    for (let b = 0; b < boxes.length; b++) {
+      const g = boxes[b];
+      let held = 0;
+      const left = [];
+      for (const c of g) {
+        if (isM(c)) held++;
+        else if (known[c] === UNKNOWN) left.push(c);
+      }
+      if (!left.length) continue;
+      const need = boxShown[b] - held;
+      if (need === 0) for (const c of left) mark(c, 'safe', 'box-exact', g);
+      else if (need === left.length) for (const c of left) mark(c, 'mine', 'box-exact', g);
+    }
+  } else if (theBoxLaw) {
     /* A box short of its floor with only just enough covered cells left to
        make it up holds nothing but mines; a box already at its ceiling has
        nothing but safe ground left. A floor can only ever prove a mine and a
@@ -2030,49 +2117,50 @@ function rulesetMoves(known, find) {
     }
   }
 
-  if (ruleset === 'dual' || ruleset === 'dual2') {
-    // in dual, pairs may not even meet at a corner; in dual 2 they may,
-    // so a pair only ever clears the ground along its edges
-    const strict = ruleset === 'dual';
-    for (let i = 0; i < n; i++) {
-      if (!isM(i)) continue;
-      const partners = [...edgOf(i)].filter(isM);
-      if (partners.length === 1) {
-        const around = strict ? corOf : edgOf;
-        const pair = [i, partners[0]];
-        for (const j of around(i)) if (j !== partners[0]) mark(j, 'safe', 'dual-pair', pair);
-        for (const j of around(partners[0])) if (j !== i) mark(j, 'safe', 'dual-pair', pair);
-      } else if (!partners.length) {
-        // unpaired: the partner lies across an edge, so a lone candidate
-        // is the partner itself
-        if (strict) {
-          const es = new Set(edgOf(i));
-          for (const j of corOf(i)) if (!es.has(j)) mark(j, 'safe', 'dual-corner', [i]);
-        }
-        const cand = [...edgOf(i)].filter(j => known[j] === UNKNOWN);
-        if (cand.length === 1) mark(cand[0], 'mine', 'dual-partner', [i]);
+  const gSize = groupSize();
+  if (gSize) {
+    /* Every group holds the same number of cells, so a group already that big
+       has nothing but safe ground round it, one still short of it must grow,
+       and a cell that would swell a group past the number cannot hold a mine.
+       A cell with too little room left to make a whole group cannot either. */
+    for (const g of compsOver(isM, edgOf).comps) {
+      const frontier = [];
+      for (const c of g) for (const j2 of edgOf(c))
+        if (known[j2] === UNKNOWN && !frontier.includes(j2)) frontier.push(j2);
+      if (g.length === gSize) {
+        for (const j2 of frontier) mark(j2, 'safe', 'group-full', g);
+      } else if (frontier.length === 1) {
+        // short of its number, and only one way left to make it up
+        mark(frontier[0], 'mine', 'group-grow', g);
       }
     }
-    for (let i = 0; i < n; i++) {
-      if (known[i] !== UNKNOWN) continue;
-      // a cell against two mines would swell some pair into three
-      const two = [...edgOf(i)].filter(isM);
-      if (two.length >= 2) { mark(i, 'safe', 'dual-three', two); continue; }
-      // and one with no room left for a partner cannot be a mine
-      const can = [...edgOf(i)].some(j => known[j] === UNKNOWN ||
-        (isM(j) && ![...edgOf(j)].some(isM)));
-      if (!can) mark(i, 'safe', 'dual-noroom', [...edgOf(i)]);
+
+    /* Worked out afresh, since the pass above may have settled new mines and
+       the pieces they belong to would not be in an older reckoning. */
+    const { id, comps } = compsOver(isM, edgOf);
+    for (let i2 = 0; i2 < n; i2++) {
+      if (known[i2] !== UNKNOWN) continue;
+      const near = new Set();
+      for (const j2 of edgOf(i2)) if (isM(j2)) near.add(id[j2]);
+      let total = 1;
+      for (const c of near) total += comps[c].length;
+      if (total > gSize) mark(i2, 'safe', 'group-big', [...near].flatMap(c => comps[c]));
     }
+
+    // a mine's group has to fit somewhere: ground too cramped to hold one is safe
+    for (const g of compsOver(i2 => known[i2] !== SAFE, edgOf).comps)
+      if (g.length < gSize)
+        for (const c of g) if (known[c] === UNKNOWN) mark(c, 'safe', 'group-room', g);
   }
 
-  if (ruleset === 'connected' || ruleset === 'snake' || ruleset === 'loop') {
-    const adj = ruleset === 'connected' ? corOf : edgOf;
+  if (has('connected') || has('snake') || has('loop')) {
+    const adj = (has('snake') || has('loop')) ? edgOf : corOf;
 
-    if (ruleset === 'snake' || ruleset === 'loop') {
+    if (has('snake') || has('loop')) {
       /* How many mines a mine must have beside it: a snake's have one or
          two, a loop's have two exactly — which turns every known mine into
          a little counting problem of its own. */
-      const ring = ruleset === 'loop';
+      const ring = has('loop');
       for (let i = 0; i < n; i++) {
         if (!isM(i)) continue;
         const mn = [...edgOf(i)].filter(isM);
@@ -2182,7 +2270,7 @@ function rulesetMoves(known, find) {
     }
   }
 
-  if (ruleset === 'outside') {
+  if (has('outside')) {
     const rimC = i => !interior[i];
     // the mines' side: every mine must reach the border through covered ground
     {
@@ -2639,17 +2727,17 @@ const HINTWORDS = {
   'total-all': 'The mine counter. One covered cell is left for every mine still out there, so all of them are mines.',
   'total-elsewhere-clear': 'The mine counter, against one number. That number still wants every mine the counter says is left, which leaves none for anywhere else — so the covered cells it does NOT touch are clear. Which of its own neighbours hold the mines is still open.',
   'total-elsewhere-mined': 'The mine counter, against one number. Set that number aside and the mines still out there exactly fill the covered cells it does NOT touch — so all of those are mines. Its own neighbours are still open.',
-  'dual-pair': 'Pairs. This pair is complete, so nothing else may lie against it.',
-  'dual-corner': 'Pairs. This mine has no partner yet, and no other pair may reach around it.',
-  'dual-partner': 'Pairs. This mine has only one place left for its partner.',
-  'dual-three': 'Pairs. A mine here would swell a pair into a run of three.',
-  'dual-noroom': 'Pairs. A mine here would have nowhere left to put its partner.',
   'snake-body': 'The path. This mine already has both its neighbours, so the path passes it by.',
   'snake-end': 'The path. This end has only one way left to carry on.',
   'snake-touch': 'The path. A mine here would make the path run alongside itself or close into a ring.',
   'loop-degree': 'The loop. Every mine has exactly two mines beside it — count the ones around this one.',
   'loop-short': 'The loop. A mine here would close a ring too small to hold every mine on the board.',
   'loop-close': 'The loop. One mine is left, and it can only be the cell joining the two loose ends.',
+  'box-exact': 'The boxes. This box says how many mines it holds, and between what is found and what is left there is only one way to read it.',
+  'group-full': 'The groups. This group is already the size a group may be, so nothing beside it can be a mine.',
+  'group-grow': 'The groups. This group is short of its size and has only one cell left it could grow into.',
+  'group-big': 'The groups. A mine here would join what is beside it into a group larger than the law allows.',
+  'group-room': 'The groups. There is not enough ground here for a whole group to fit, so none of it can be mine.',
   'box-short': 'The boxes. This box is short of the mines it must hold, and has only just enough covered cells left to make them up.',
   'box-full': 'The boxes. This box already holds every mine it is allowed, so the rest of it is clear.',
   'piece-budget': 'The pieces. The mines end up in one piece, and joining the pieces already showing would take more mines than are left — a mine here would leave one piece too many.',
@@ -2827,14 +2915,13 @@ function countingReach(list) {
 function buildPuzzle() {
   const d = DIFF[difficulty];
   const structured = ruleset !== 'none';
-  // dominoes come in twos, a ring needs four cells at the very least, and a
-  // snake or a loop may prove a cell or two too long to lay
-  // the cap has to be taken before the rounding to twos, or it can hand back
-  // an odd number and no pair will ever fit it
-  if (ruleset === 'dual' || ruleset === 'dual2')
-    mines = Math.max(2, 2 * Math.floor(Math.min(n - 9, mines) / 2));
-  if (ruleset === 'loop') mines = Math.max(4, mines);
-  if (ruleset.startsWith('boxed')) {
+  /* Groups come in whole groups, a ring needs four cells at the very least,
+     and a snake or a loop may prove a cell or two too long to lay. */
+  const gSize = groupSize();
+  if (gSize) mines = Math.max(gSize, gSize * Math.floor(Math.min(n - 9, mines) / gSize));
+  if (has('loop')) mines = Math.max(4, mines);
+  const theBoxLaw = boxLaw();
+  if (theBoxLaw && theBoxLaw !== 'exact') {
     const { lo, hi } = boxBounds();
     mines = Math.max(boxes.length * lo, Math.min(mines, boxes.length * hi));
     mines = Math.max(1, Math.min(mines, n - 9));
@@ -2850,8 +2937,8 @@ function buildPuzzle() {
      the border may simply not exist, while one of 70 does. Each law has a
      floor of its own: a pair needs two cells to be a pair, a ring four to be
      a ring. */
-  const floor = ruleset === 'loop' ? 4 : (ruleset === 'dual' || ruleset === 'dual2') ? 2 : 1;
-  const step = (ruleset === 'dual' || ruleset === 'dual2') ? 2 : 1;
+  const floor = has('loop') ? 4 : gSize ? gSize : 1;
+  const step = gSize ? gSize : 1;
   /* Coming down one mine at a time costs a whole failed laying apiece, and on
      a big board asked for a long path that is most of the time there is. So
      the count falls by a share of itself, and only creeps at the very end. */
@@ -2948,6 +3035,7 @@ function buildPuzzle() {
   mine.set(kept.mine);
   count.set(kept.count);
   mines = kept.mines;
+  noteBoxCounts();               // the numbers on the boxes follow the board kept
   return kept.list;
 }
 
@@ -3010,6 +3098,7 @@ const BOOM = '#b91c1c', MINED = '#7f1d1d';
 const MUTE = '#6f8c74';        // a question mark, dimmer than any number
 const HINT = '#facc15';        // the gold a hint marks its cells with
 const BOXLINE = '#cfe7d6';     // the pale line drawn round a box of the repeat
+const BOXFILL = '#12291a';     // and the disc its number sits on
 const ADJ = '#bfe3ff';         // the wash over the cells a hovered number counts
 // one green per pentagon shape, used only when asked for
 const COVERS = ['#35603d', '#2c5a4c', '#3d5f33', '#2f5560'];
@@ -3167,7 +3256,7 @@ function draw() {
   }
 
   // the boxes of the tiling's repeat, when they are being shown
-  if (ruleset.startsWith('boxed')) {
+  if (boxLaw()) {
     ctx.strokeStyle = BOXLINE;
     ctx.lineWidth = cellPitch * 0.11;
     ctx.lineCap = 'round';
@@ -3207,6 +3296,23 @@ function draw() {
       ctx.font = '600 ' + (inr[i] * view.s * 1.15).toFixed(1) + 'px "Segoe UI", sans-serif';
       ctx.fillStyle = NUMS[Math.min(count[i], NUMS.length - 1)];
       ctx.fillText(count[i], x, y);
+    }
+  }
+
+  /* A box that carries its own number wears it in the middle, on a disc, so
+     that it reads as the box's and not as any one cell's. */
+  if (boxLaw() === 'exact' && boxShown && boxMid.length === boxes.length) {
+    const rad = cellPitch * view.s * 0.30;
+    ctx.lineWidth = Math.max(1, rad * 0.12);
+    ctx.font = '700 ' + (rad * 1.45).toFixed(1) + 'px "Segoe UI", sans-serif';
+    for (let b = 0; b < boxes.length; b++) {
+      const x = boxMid[b][0] * view.s + view.ox, y = boxMid[b][1] * view.s + view.oy;
+      ctx.beginPath();
+      ctx.arc(x, y, rad, 0, Math.PI * 2);
+      ctx.fillStyle = BOXFILL; ctx.fill();
+      ctx.strokeStyle = BOXLINE; ctx.stroke();
+      ctx.fillStyle = BOXLINE;
+      ctx.fillText(boxShown[b], x, y);
     }
   }
 
@@ -3369,14 +3475,18 @@ function paintSizeLabels(actual, placed) {
    cells are in one. */
 function paintRuleNote() {
   let text = RULENOTES[ruleset] || '';
-  if (ruleset.startsWith('boxed') && boxes.length) {
+  const law = boxLaw();
+  if (law && boxes.length) {
     const { per, lo, hi } = boxBounds();
-    const num = ruleset === 'boxed1' ? 'at least ' + lo
-              : ruleset === 'boxed2' ? 'at most ' + hi
-              : 'between ' + lo + ' and ' + hi;
-    const one = ruleset === 'boxed1' ? lo === 1 : false;
     text = 'The tiling repeats in the boxes drawn, ' + per + ' cells to a box, and ' +
-           'every box holds ' + num + ' mine' + (one ? '' : 's') + '.';
+      (law === 'exact'
+        ? 'each carries the number of mines it holds.'
+        : 'every box holds ' +
+          (law === 'floor' ? 'at least ' + lo + (lo === 1 ? ' mine.' : ' mines.')
+           : law === 'ceiling' ? 'at most ' + hi + ' mines.'
+           : 'between ' + lo + ' and ' + hi + ' mines.'));
+    if (has('connected')) text += ' The mines also form a single group, touching by edge or corner.';
+    if (has('snake')) text += ' They also form one edge-joined path that never runs alongside itself.';
   }
   el('noteRule').textContent = text &&
     text + ' Boards are built so the rule is needed to solve them.';
