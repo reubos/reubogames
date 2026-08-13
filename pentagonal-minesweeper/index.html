@@ -2592,6 +2592,216 @@ function rulesetMoves(known, find) {
       }
     }
   }
+
+  /* ===== What a law says about several cells at once =====
+
+     Everything above forces one cell from one fact. But much of what a law
+     knows arrives as a bound over a set: the cells round this piece can take
+     at most one more mine between them, this box still needs two, this
+     mine's covered neighbours hold exactly one. Once the single-cell rules
+     are done such a bound forces nothing on its own — it pays when set
+     against another statement about overlapping ground, the way two numbers
+     pay in the subset rule. So the bounds are gathered, the numbers laid
+     beside them, and every overlapping pair made to trade.
+
+     Every bound is written down whole, about cells named at the time of
+     writing, before anything is marked — and a claim of that shape is about
+     the true board, so it stays true no matter what is settled after it.
+     That is the lesson group-grow above had to learn: judge a piece against
+     ground reworked mid-sweep and the claim can be about a piece that no
+     longer exists; gather first and mark after, and it cannot be.
+
+     None of it is gathered while the single-cell rules are still finding
+     things: the solver comes back here the moment they dry up, so waiting
+     costs nothing and skips the dearest sweep on every pass that did not
+     need it. */
+  if (!moved) {
+    const bounds = [];
+    const bound = (cells, lo, hi, rule, clues) => {
+      lo = Math.max(0, lo); hi = Math.min(hi, cells.length);
+      if (!cells.length || (lo <= 0 && hi >= cells.length)) return;  // says nothing
+      bounds.push({ cells, lo, hi, rule, clues });
+    };
+
+    // the boxes: what each still needs, and what room it has left
+    if (theBoxLaw) {
+      const plain = theBoxLaw === 'exact' || theBoxLaw === 'irregular' ? null : boxBounds();
+      for (let b = 0; b < boxes.length; b++) {
+        let lo, hi;
+        if (plain) ({ lo, hi } = plain);
+        else {
+          if (!boxShown || (boxMuted && boxMuted[b])) continue;
+          [lo, hi] = boxRange(b);
+        }
+        let held = 0;
+        const left = [];
+        for (const c of boxes[b]) {
+          if (isM(c)) held++;
+          else if (known[c] === UNKNOWN) left.push(c);
+        }
+        bound(left, lo - held, hi - held, 'box-count', boxes[b]);
+      }
+    }
+
+    /* The pieces. Every mine beside a piece ends up in that piece's group,
+       so under a cap the cells round it can take at most what would bring it
+       to the cap — between them, not merely one by one — and under an exact
+       size a short piece must take at least one of them, since whatever
+       group it grows into reaches out through them. */
+    if (gCap || gSize) {
+      const limit = gCap || gSize;
+      const groupRule = gCap ? 'cap-count' : 'group-count';
+      const { id, comps } = compsOver(isM, edgOf);
+      const frontier = comps.map(g => {
+        const f = [];
+        for (const c of g) for (const j2 of edgOf(c))
+          if (known[j2] === UNKNOWN && !f.includes(j2)) f.push(j2);
+        return f;
+      });
+      comps.forEach((g, k) =>
+        bound(frontier[k], gSize && g.length < gSize ? 1 : 0, limit - g.length,
+              groupRule, g));
+
+      /* And the pairs: two cells that together would weld one group too big
+         cannot both be mines. They are sure to weld only when they sit side
+         by side or against the same piece — two mines near two separate
+         pieces are two separate groups, and the law has nothing against
+         that. A pair is a bound like any other, and it trades the same way:
+         a number needing all but one of three cells, two of which are such a
+         pair, has its third cell settled as a mine. */
+      const beside = new Map();          // covered cell -> the pieces it touches
+      for (let i2 = 0; i2 < n; i2++) {
+        if (known[i2] !== UNKNOWN) continue;
+        let s = null;
+        for (const j2 of edgOf(i2)) if (isM(j2)) (s = s || new Set()).add(id[j2]);
+        if (s) beside.set(i2, s);
+      }
+      const seen = new Set();
+      const tryPair = (a, b2) => {
+        const key = a < b2 ? a * n + b2 : b2 * n + a;
+        if (seen.has(key)) return;
+        seen.add(key);
+        const u = new Set([...(beside.get(a) || []), ...(beside.get(b2) || [])]);
+        let joint = 2;
+        for (const k of u) joint += comps[k].length;
+        if (joint > limit)
+          bound([a, b2], 0, 1, groupRule, [...u].flatMap(k => comps[k]));
+      };
+      for (const f of frontier)
+        for (let x = 0; x < f.length; x++)
+          for (let y = x + 1; y < f.length; y++) tryPair(f[x], f[y]);
+      for (const [a] of beside)
+        for (const j2 of edgOf(a)) if (known[j2] === UNKNOWN) tryPair(a, j2);
+      // alone of the sizes, singles forbids even a bare pair side by side
+      if (gSize === 1)
+        for (let i2 = 0; i2 < n; i2++) {
+          if (known[i2] !== UNKNOWN) continue;
+          for (const j2 of edgOf(i2))
+            if (known[j2] === UNKNOWN && j2 > i2) tryPair(i2, j2);
+        }
+    }
+
+    /* The path and the loop: how many mines a known mine must still find
+       among its covered neighbours is a count over exactly those cells. The
+       degree rules above spend it when it settles the whole set; written as
+       a bound it also trades with any number watching the same ground. */
+    if (has('snake') || has('loop')) {
+      const ring = has('loop');
+      /* Two mines already worn down to one mine neighbour and no covered
+         ground left are the path's two ends, found: after that, every other
+         mine is body and wants exactly two beside it. */
+      let endsFound = 0;
+      if (!ring) for (let i2 = 0; i2 < n; i2++) {
+        if (!isM(i2)) continue;
+        let mn = 0, unk = 0;
+        for (const j2 of edgOf(i2)) {
+          if (isM(j2)) mn++;
+          else if (known[j2] === UNKNOWN) unk++;
+        }
+        if (mn === 1 && !unk) endsFound++;
+      }
+      for (let i2 = 0; i2 < n; i2++) {
+        if (!isM(i2)) continue;
+        const mn = [...edgOf(i2)].filter(isM);
+        const unk = [...edgOf(i2)].filter(j2 => known[j2] === UNKNOWN);
+        const lo2 = ring || endsFound >= 2 ? 2 - mn.length
+                  : mines >= 2 ? 1 - mn.length : 0;
+        bound(unk, lo2, 2 - mn.length,
+              ring ? 'loop-count' : 'snake-count', [i2, ...mn]);
+      }
+    }
+
+    /* A bound whose own range pins its whole set spends itself, no partner
+       needed. The unary rules above catch most of these, but not all: a
+       path mine whose two ends are found must reach its full two, and when
+       one of its covered neighbours proves safe, "at least one of what is
+       left" can narrow to one cell that no older rule names. Leaving this
+       out made the solver non-monotone — a conclusion reachable from the
+       opening could become unreachable to a player who knew strictly more,
+       because it had been reachable only through a trade whose partner was
+       now spent — and a hint game stalled on ground the deal had promised. */
+    for (const A of bounds) {
+      if (A.lo >= A.cells.length) for (const x of A.cells) mark(x, 'mine', A.rule, A.clues);
+      else if (A.hi <= 0) for (const x of A.cells) mark(x, 'safe', A.rule, A.clues);
+    }
+
+    /* The trade itself, worked for any two statements about overlapping
+       ground. What the shared cells can hold is pinned from both sides —
+       no more than either statement allows, no less than either must put
+       there — and each statement's own remainder follows. The subset rule
+       is the special case where one set swallows the other. */
+    if (bounds.length) {
+      const pool = bounds.slice();
+      for (const c of constraintsOf(known))
+        pool.push({ cells: c.cells, lo: c.left, hi: c.left, rule: '', clues: [c.from] });
+      const owner = new Map();
+      pool.forEach((c, k) => {
+        for (const x of c.cells) {
+          let w = owner.get(x); if (!w) owner.set(x, w = []);
+          w.push(k);
+        }
+      });
+      const inA = new Uint8Array(n);
+      for (let ai = 0; ai < bounds.length; ai++) {
+        const A = bounds[ai];
+        for (const x of A.cells) inA[x] = 1;
+        const partners = new Set();
+        for (const x of A.cells) for (const k of owner.get(x)) partners.add(k);
+        partners.delete(ai);
+        for (const bi of partners) {
+          /* Bounds meet each other once apiece — and two bare pairs never
+             have anything to trade, so they are not asked. */
+          if (bi < bounds.length &&
+              (bi < ai || (A.cells.length <= 2 && pool[bi].cells.length <= 2)))
+            continue;
+          const B = pool[bi];
+          const inter = [], bOut = [];
+          for (const x of B.cells) (inA[x] ? inter : bOut).push(x);
+          const aOutN = A.cells.length - inter.length;
+          const inHi = Math.min(A.hi, B.hi, inter.length);
+          const inLo = Math.max(A.lo - aOutN, B.lo - bOut.length, 0);
+          if (inLo > inHi) continue;
+          const rule = A.rule, clues = A.clues.concat(B.clues);
+          if (bOut.length) {
+            if (B.hi - inLo <= 0) for (const x of bOut) mark(x, 'safe', rule, clues);
+            else if (B.lo - inHi >= bOut.length)
+              for (const x of bOut) mark(x, 'mine', rule, clues);
+          }
+          if (aOutN) {
+            const aSafe = A.hi - inLo <= 0, aMine = A.lo - inHi >= aOutN;
+            if (aSafe || aMine) {
+              const inB = new Set(B.cells);
+              for (const x of A.cells)
+                if (!inB.has(x)) mark(x, aSafe ? 'safe' : 'mine', rule, clues);
+            }
+          }
+          if (inLo >= inter.length) for (const x of inter) mark(x, 'mine', rule, clues);
+          else if (inHi <= 0) for (const x of inter) mark(x, 'safe', rule, clues);
+        }
+        for (const x of A.cells) inA[x] = 0;
+      }
+    }
+  }
   return moved;
 }
 
@@ -2628,12 +2838,21 @@ function visibleClosure() {
    benefit of the doubt, since killing them on a maybe is the failure that
    matters. */
 let strictWitness = null;              // the board the last search turned up
+let searchBlown = false;               // the last search gave up, not answered
 
-function couldBeMine(cell) {
+function couldBeMine(cell) { return couldHold(cell, 1); }
+
+/* Could the cell hold `bit` in any complete board that fits every number on
+   show, the mine counter and the law? Asked with 1 it is the strict law's
+   question; asked with 0 it is the other side of the same coin — no board
+   without a mine here means a mine here — and the hint of last resort asks
+   both. */
+function couldHold(cell, bit) {
   strictWitness = null;
+  searchBlown = false;
   const sure = visibleClosure();
-  if (sure[cell] === SAFE) return false;
-  if (sure[cell] === KNOWN_MINE) return true;
+  if (sure[cell] === SAFE) return bit === 0;
+  if (sure[cell] === KNOWN_MINE) return bit === 1;
 
   const vi = new Int32Array(n).fill(-1);
   const fixed = new Uint8Array(n);
@@ -2707,9 +2926,10 @@ function couldBeMine(cell) {
     const v = cons[best].cells.find(c => val[c] < 0);
     for (const b of [1, 0]) { set(v, b); rec(); drop(v, b); if (hit || blown) return; }
   };
-  set(vi[cell], 1);                      // insist on a mine there, then look
+  set(vi[cell], bit);                    // insist, then look
   rec();
   mine.set(truth);
+  searchBlown = blown;
   /* A search too large to finish lets the player through. The ordinary rule
      still applies underneath, so a real mine kills them anyway; what this
      avoids is killing them over a cell nobody could settle either way. */
@@ -2901,6 +3121,54 @@ function deduce(known, mode) {
     return moved;
   };
 
+  /* Two numbers whose cells overlap without either containing the other
+     still pin the shared ground between them: it can hold no more than
+     either number allows over its own cells, and no less than either must
+     put there once its private cells are all given over. When that squeeze
+     leaves a number's remainder nothing or everything, cells are settled
+     that no subset could reach. The subset rule is the special case where
+     one set swallows the other; this is the rest of that idea. */
+  const crossed = () => {
+    const cons = constraintsOf(known);
+    const owner = new Map();
+    for (const c of cons) for (const x of c.cells) {
+      let w = owner.get(x); if (!w) owner.set(x, w = []); w.push(c);
+    }
+    let moved = false;
+    for (const a of cons) {
+      const seen = new Set([a]);
+      const inA = new Set(a.cells);
+      for (const x of a.cells) for (const b of owner.get(x)) {
+        if (seen.has(b)) continue;
+        seen.add(b);
+        let interN = 0;
+        for (const y of b.cells) if (inA.has(y)) interN++;
+        const aOut = a.cells.length - interN, bOut = b.cells.length - interN;
+        const inHi = Math.min(a.left, b.left, interN);
+        const inLo = Math.max(a.left - aOut, b.left - bOut, 0);
+        if (inLo > inHi) continue;
+        if (bOut) {
+          if (b.left - inLo <= 0) {
+            for (const y of b.cells) if (!inA.has(y)) moved = setSafe(y) || moved;
+          } else if (b.left - inHi >= bOut) {
+            for (const y of b.cells) if (!inA.has(y)) moved = setMine(y) || moved;
+          }
+        }
+        if (aOut) {
+          const inB = new Set(b.cells);
+          if (a.left - inLo <= 0) {
+            for (const y of a.cells) if (!inB.has(y)) moved = setSafe(y) || moved;
+          } else if (a.left - inHi >= aOut) {
+            for (const y of a.cells) if (!inB.has(y)) moved = setMine(y) || moved;
+          }
+        }
+        if (interN && inLo >= interN)
+          for (const y of b.cells) if (inA.has(y)) moved = setMine(y) || moved;
+      }
+    }
+    return moved;
+  };
+
   const total = () => {
     const covered = [];
     let found = 0;
@@ -2928,12 +3196,14 @@ function deduce(known, mode) {
     ruleset !== 'none' && mode !== 'base' && rulesetMoves(known);
 
   /* Cheapest reasoning first, and back to it the moment anything gives way.
-     The four run to a fixpoint, so the order they are tried in cannot change
-     what comes out — only how long it takes to get there, and a law is dearer
-     to ask than a sweep of subsets is. Asking the law after them rather than
-     before saves a quarter of the time on a snake, which is worth having now
-     that Harder solves a board over and over to find out what it can spare. */
-  while (counting() || subsets() || structural() || total()) { /* keep going */ }
+     The stages run to a fixpoint, so the order they are tried in cannot
+     change what comes out — only how long it takes to get there, and a law
+     is dearer to ask than a sweep of subsets is. Asking the law after them
+     rather than before saves a quarter of the time on a snake, which is
+     worth having now that Harder solves a board over and over to find out
+     what it can spare. Crossed numbers earn their keep rarely, so they are
+     asked rarest of all. */
+  while (counting() || subsets() || structural() || crossed() || total()) { /* keep going */ }
 
   let safe = 0;
   for (let i = 0; i < n; i++) if (known[i] === SAFE) safe++;
@@ -2989,6 +3259,35 @@ function findHint(known) {
     }
   }
 
+  // crossed numbers, where neither set swallows the other — deduce's twin
+  for (const a of cons) {
+    const seen = new Set([a]);
+    const inA = new Set(a.cells);
+    for (const x of a.cells) for (const b of owner.get(x)) {
+      if (seen.has(b)) continue;
+      seen.add(b);
+      const inter = b.cells.filter(y => inA.has(y));
+      const aOut = a.cells.length - inter.length, bOut = b.cells.length - inter.length;
+      const inHi = Math.min(a.left, b.left, inter.length);
+      const inLo = Math.max(a.left - aOut, b.left - bOut, 0);
+      if (inLo > inHi) continue;
+      const say = (cells, kind) =>
+        ({ cells, kind, rule: 'crossed', clues: [a.from, b.from] });
+      if (bOut) {
+        const diff = b.cells.filter(y => !inA.has(y));
+        if (b.left - inLo <= 0) return say(diff, 'safe');
+        if (b.left - inHi >= bOut) return say(diff, 'mine');
+      }
+      if (aOut) {
+        const inB = new Set(b.cells);
+        const diff = a.cells.filter(y => !inB.has(y));
+        if (a.left - inLo <= 0) return say(diff, 'safe');
+        if (a.left - inHi >= aOut) return say(diff, 'mine');
+      }
+      if (inter.length && inLo >= inter.length) return say(inter, 'mine');
+    }
+  }
+
   const covered = [];
   let found = 0;
   for (let i = 0; i < n; i++) {
@@ -3010,6 +3309,29 @@ function findHint(known) {
       return { cells: rest, kind: 'safe', rule: 'total-elsewhere-clear', clues: [a.from] };
     if (left - a.left === covered.length - a.cells.length)
       return { cells: rest, kind: 'mine', rule: 'total-elsewhere-mined', clues: [a.from] };
+  }
+
+  /* The last method there is. The named rules are not the whole of
+     reasoning, and a rare position slips past every one of them: some rules
+     read the lie of the covered ground, and ground read one way from the
+     opening can be unreadable from the larger knowledge of a player who took
+     another path to the same place. So when the rules run dry, the
+     completions themselves are tried — a cell that comes out the same in
+     every board the clues still allow is settled, whatever the reasoning
+     would have been called. On a solvable board reached by true steps such a
+     cell always exists; only a search too big to finish can decline to name
+     it, and the cells against the numbers are asked first, where the answer
+     is likeliest to be quick. */
+  const nearby = [], farOff = [];
+  for (const c of covered)
+    ([...nbOf(c)].some(j => known[j] === SAFE && !muted[j]) ? nearby : farOff).push(c);
+  const stop = performance.now() + 800;
+  for (const c of nearby.concat(farOff)) {
+    if (performance.now() > stop) break;
+    if (!couldHold(c, 1) && !searchBlown)
+      return { cells: [c], kind: 'safe', rule: 'search', clues: [] };
+    if (!couldHold(c, 0) && !searchBlown)
+      return { cells: [c], kind: 'mine', rule: 'search', clues: [] };
   }
   return null;
 }
@@ -3043,7 +3365,13 @@ const HINTWORDS = {
   'reach-cut': 'Connectedness. This is the only cell the group has to pass through.',
   'outside-pocket': 'The border. Every mine must chain edge to edge out to the rim, and no chain could reach this ground.',
   'outside-cut': 'The border. This is the only way left from here out to the rim, so the chain must come through it.',
-  // the other half of the outside law, and not about the border at all
+  'crossed': "Two numbers, crossed. Neither's cells lie wholly inside the other's, but the shared cells are pinned between the two of them, and what is left over on one side is settled by it.",
+  'box-count': 'The boxes. What a box can still hold is a count over its covered cells, and a number reaching into it trades against that count until one side’s remainder is settled.',
+  'cap-count': 'The groups. The cells round a piece can take only so many mines between them before it grows past the law — so a number watching the same cells must put the rest of its due elsewhere.',
+  'group-count': 'The groups. A piece short of its size must take from the cells beside it, and a number watching those cells has that much of its answer spoken for.',
+  'snake-count': 'The path. How many mines this mine must still find beside it is a count over its covered neighbours, and a number watching the same cells trades against it.',
+  'loop-count': 'The loop. A mine’s covered neighbours must hold exactly what brings it to two, and a number watching the same cells has the difference settled for it.',
+  'search': 'Exhaustion. Every board the clues still allow has been tried, and in all of them this cell comes out the same way.',
 };
 
 const HINTIDLE = 'Asking once marks what to look at; asking again names the reasoning.';
