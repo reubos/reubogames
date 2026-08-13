@@ -2172,16 +2172,25 @@ function rulesetMoves(known, find) {
        has nothing but safe ground round it, one still short of it must grow,
        and a cell that would swell a group past the number cannot hold a mine.
        A cell with too little room left to make a whole group cannot either. */
+    /* Settling a mine joins pieces together, so a reckoning of the pieces
+       made before that is no longer the truth about them. The two passes are
+       therefore kept apart, each on a reckoning of its own: first what a full
+       group clears around it, then what a group short of its number must
+       take. Running them together let a stale piece be judged full when it
+       was not, and a board could come out unfinishable. */
     for (const g of compsOver(isM, edgOf).comps) {
+      if (g.length !== gSize) continue;
+      for (const c of g) for (const j2 of edgOf(c))
+        if (known[j2] === UNKNOWN) mark(j2, 'safe', 'group-full', g);
+    }
+
+    for (const g of compsOver(isM, edgOf).comps) {
+      if (g.length >= gSize) continue;
       const frontier = [];
       for (const c of g) for (const j2 of edgOf(c))
         if (known[j2] === UNKNOWN && !frontier.includes(j2)) frontier.push(j2);
-      if (g.length === gSize) {
-        for (const j2 of frontier) mark(j2, 'safe', 'group-full', g);
-      } else if (frontier.length === 1) {
-        // short of its number, and only one way left to make it up
-        mark(frontier[0], 'mine', 'group-grow', g);
-      }
+      // short of its number, and only one way left to make it up
+      if (frontier.length === 1) mark(frontier[0], 'mine', 'group-grow', g);
     }
 
     /* Worked out afresh, since the pass above may have settled new mines and
