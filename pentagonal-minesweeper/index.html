@@ -192,6 +192,7 @@
           <button data-rule="singles">Singles</button>
           <button data-rule="doubles">Doubles</button>
           <button data-rule="triples">Triples</button>
+          <button data-rule="notriples">No Triples</button>
           <button data-rule="snake">Snake</button>
           <button data-rule="loop">Loop</button>
           <button data-rule="boxed1">Boxed 1</button>
@@ -1473,7 +1474,7 @@ let ruleset = 'none';
    what is in force rather than match on the name of a combination. */
 const LAWS = {
   none: [], connected: ['connected'], outside: ['outside'],
-  singles: ['group'], doubles: ['group'], triples: ['group'],
+  singles: ['group'], doubles: ['group'], triples: ['group'], notriples: ['group'],
   snake: ['snake'], loop: ['loop'],
   boxed1: ['box'], boxed2: ['box'], boxed3: ['box'], boxed4: ['box'],
   cbox4: ['connected', 'box'], sbox4: ['snake', 'box']
@@ -1484,9 +1485,14 @@ const LAWS = {
 let lawOff = '';
 const has = law => law !== lawOff && (LAWS[ruleset] || []).includes(law);
 
-// how many cells to a group, where the law speaks of groups at all
+/* How many cells to a group, where the law speaks of groups at all. A size
+   says what every group must be; a cap says only what none may exceed, which
+   leaves the smaller groups free and can therefore never force a mine — only
+   ever clear the ground round one. */
 const GROUPSIZE = { singles: 1, doubles: 2, triples: 3 };
+const GROUPCAP = { notriples: 2 };
 const groupSize = () => (lawOff === 'group' ? 0 : GROUPSIZE[ruleset] || 0);
+const groupCap = () => (lawOff === 'group' ? 0 : GROUPCAP[ruleset] || 0);
 
 /* Which box law is in force. The first three bound how many mines a box may
    hold; the fourth writes the number on it instead, which binds the laying
@@ -1504,6 +1510,8 @@ const RULENOTES = {
            'along an edge.',
   triples: 'Mines come in edge-joined threes; the threes may meet at a corner, but ' +
            'never along an edge.',
+  notriples: 'No three mines join up along their edges: they come singly or in ' +
+             'pairs, and never more.',
   snake: 'Mines form one edge-joined path that never runs alongside itself.',
   loop: 'Mines form one edge-joined loop that never runs alongside itself — ' +
         'every mine has exactly two mines beside it.',
@@ -1779,6 +1787,42 @@ function placeConnected(k) {
   return placed === k;
 }
 
+/* Scattered anywhere at all, so long as no group of mines that meet along
+   their edges grows past the cap. A cell is tried, and taken back again if
+   it would join what is round it into something too big. */
+function placeCapped(k, cap) {
+  const order = [...Array(n).keys()];
+  const groupAt = c => {
+    const seen = new Set([c]), stack = [c];
+    while (stack.length) {
+      const v = stack.pop();
+      for (const j of edgOf(v)) if (mine[j] && !seen.has(j)) { seen.add(j); stack.push(j); }
+    }
+    return seen.size;
+  };
+  /* Taking cells in a random order and keeping whichever fit is a scatter
+     that jams: it fills to about two fifths and then no cell will go
+     anywhere. How far it gets varies, so a run that falls short is simply
+     tried again rather than left for the count to be eased down. */
+  for (let attempt = 0; attempt < 30; attempt++) {
+    mine.fill(0);
+    for (let i = order.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      const t = order[i]; order[i] = order[j]; order[j] = t;
+    }
+    let placed = 0;
+    for (const c of order) {
+      if (placed === k) break;
+      if (mine[c]) continue;
+      mine[c] = 1;
+      if (groupAt(c) > cap) { mine[c] = 0; continue; }
+      placed++;
+    }
+    if (placed === k) return true;
+  }
+  return false;
+}
+
 /* Groups of exactly g cells, edge-joined, each laid where nothing already
    stands within an edge of it. Blocking an edge's reach is what stops one
    group running into the next and making a bigger one; a corner between two
@@ -2004,6 +2048,9 @@ function validRuleset() {
   const g = groupSize();
   if (g && !compsOver(isMine, edgOf).comps.every(c => c.length === g)) return false;
 
+  const cap = groupCap();
+  if (cap && !compsOver(isMine, edgOf).comps.every(c => c.length <= cap)) return false;
+
   if (has('snake')) {
     const { comps } = compsOver(isMine, edgOf);
     if (comps.length !== 1) return false;
@@ -2055,6 +2102,7 @@ function layByRule() {
            : has('loop') ? placeLoop(mines)
            : has('connected') ? placeConnected(mines)
            : g ? placeGroups(mines, g)
+           : groupCap() ? placeCapped(mines, groupCap())
            : has('outside') ? placeOutside(mines)
            : boxLaw() === 'exact' ? (layMines(new Set()), true)
            : placeBoxed(mines);
@@ -2180,6 +2228,22 @@ function rulesetMoves(known, find) {
       if (!left.length) continue;
       if (held >= hi) for (const c of left) mark(c, 'safe', 'box-full', g);
       else if (lo - held === left.length) for (const c of left) mark(c, 'mine', 'box-short', g);
+    }
+  }
+
+  const gCap = groupCap();
+  if (gCap) {
+    /* Nothing may swell a group past the cap, so a cell that would is safe.
+       A ceiling clears ground and never settles a mine, which is the opposite
+       of what a floor does and the reason the two are worth having apart. */
+    const { id, comps } = compsOver(isM, edgOf);
+    for (let i2 = 0; i2 < n; i2++) {
+      if (known[i2] !== UNKNOWN) continue;
+      const near = new Set();
+      for (const j2 of edgOf(i2)) if (isM(j2)) near.add(id[j2]);
+      let total = 1;
+      for (const c of near) total += comps[c].length;
+      if (total > gCap) mark(i2, 'safe', 'cap-over', [...near].flatMap(c => comps[c]));
     }
   }
 
@@ -2798,6 +2862,7 @@ const HINTWORDS = {
   'loop-short': 'The loop. A mine here would close a ring too small to hold every mine on the board.',
   'loop-close': 'The loop. One mine is left, and it can only be the cell joining the two loose ends.',
   'box-exact': 'The boxes. This box says how many mines it holds, and between what is found and what is left there is only one way to read it.',
+  'cap-over': 'The groups. A mine here would join what is beside it into a group bigger than the law allows.',
   'group-full': 'The groups. This group is already the size a group may be, so nothing beside it can be a mine.',
   'group-grow': 'The groups. This group is short of its size and has only one cell left it could grow into.',
   'group-big': 'The groups. A mine here would join what is beside it into a group larger than the law allows.',
