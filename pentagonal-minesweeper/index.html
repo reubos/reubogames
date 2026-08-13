@@ -157,8 +157,9 @@
           <button data-mute="1">On</button>
         </div>
         <p class="note">With these on, some cells never show their count when
-          uncovered &mdash; they only prove themselves safe. Every board is still
-          one that can be finished without guessing.</p>
+          uncovered &mdash; they only prove themselves safe, and where the boxes
+          carry numbers some of those are kept back too. Every board is still one
+          that can be finished without guessing.</p>
         <p class="label" style="margin-top: 14px">Strict</p>
         <div class="btn-row">
           <button data-strict="" class="on">Off</button>
@@ -801,6 +802,9 @@ function wholeUnits(u, kept, need) {
    and which box a cell belongs to. Worked out once when the board is built,
    since the laying, the checking, the deducing and the drawing all want it. */
 let boxes = [], boxOf = null, boxMid = [], boxTop = [], boxShown = null;
+/* A box may keep its number to itself, the way a cell can. It still holds
+   what it holds; it simply does not say so. */
+let boxMuted = null;
 let boxSrc = null;             // the lattice as the board is actually stood
 
 function findBoxes() {
@@ -846,6 +850,7 @@ function findBoxes() {
     boxTop = boxMid.map(m => [m[0] + dx, m[1] + dy]);
   }
   boxShown = null;
+  boxMuted = new Uint8Array(boxes.length);
 }
 
 /* How many mines a box may hold, by the number of cells in it. The floor sits
@@ -1584,6 +1589,7 @@ function saveBoard() {
          law plants one where there was none, so neither follows from the board
          as it now stands. What was on the screen is what should come back. */
       opened: opened, flags: flags, count: pack(count),
+      boxMuted: boxMuted ? [...boxMuted].join('') : '',
       elapsed: startTime ? Math.round((over ? endTime : performance.now()) - startTime) : 0,
       mine: pack(mine), state: pack(state), muted: pack(muted)
     }));
@@ -1616,6 +1622,9 @@ function restoreBoard() {
     count[i] = parseInt(s.count[i], 36);
   }
   noteBoxCounts();                       // the boxes' numbers follow from the mines
+  boxMuted = new Uint8Array(boxes.length);
+  if (typeof s.boxMuted === 'string' && s.boxMuted.length === boxes.length)
+    for (let b = 0; b < boxes.length; b++) boxMuted[b] = +s.boxMuted[b];
   mines = s.mines; given = s.given; exploded = s.exploded;
   over = s.over; won = s.won; opened = s.opened; flags = s.flags;
   newBest = false; flashCell = -1; hover = -1; seeded = true;
@@ -2077,6 +2086,7 @@ function validRuleset() {
   if (law === 'exact') {
     // the numbers on the boxes are part of the puzzle, so they must read true
     if (boxShown) for (let b = 0; b < boxes.length; b++) {
+      if (boxMuted && boxMuted[b]) continue;      // a box that says nothing binds nothing
       let c = 0;
       for (const i of boxes[b]) c += mine[i];
       if (c !== boxShown[b]) return false;
@@ -2200,6 +2210,7 @@ function rulesetMoves(known, find) {
     /* A box with its number written on it is a clue like any other, only
        drawn round a group of cells instead of standing in one. */
     for (let b = 0; b < boxes.length; b++) {
+      if (boxMuted && boxMuted[b]) continue;      // a box that says nothing states nothing
       const g = boxes[b];
       let held = 0;
       const left = [];
@@ -3222,6 +3233,25 @@ function muteNumbers() {
       if (batch > 1) batch >>= 1; else at++;
     }
   }
+
+  /* Where the boxes carry numbers, those can be kept back too. There are few
+     enough boxes to try one at a time, and each is kept only if the board
+     still comes out without it — the same promise as before, made about a
+     different kind of clue. */
+  if (boxLaw() === 'exact' && boxes.length) {
+    const order = [...boxes.keys()];
+    for (let i = order.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      const t = order[i]; order[i] = order[j]; order[j] = t;
+    }
+    let hidden = 0;
+    const most = Math.round(boxes.length * 0.45);
+    for (const b of order) {
+      if (hidden >= most || performance.now() > deadline + 200) break;
+      boxMuted[b] = 1;
+      if (solves()) hidden++; else boxMuted[b] = 0;
+    }
+  }
 }
 
 /* =====================================================================
@@ -3464,8 +3494,10 @@ function draw() {
     ctx.fillStyle = BOXNUM;
     for (let b = 0; b < boxes.length; b++) {
       const x = boxTop[b][0] * view.s + view.ox, y = boxTop[b][1] * view.s + view.oy;
-      ctx.strokeText(boxShown[b], x, y);
-      ctx.fillText(boxShown[b], x, y);
+      const say = boxMuted && boxMuted[b] ? '?' : boxShown[b];
+      ctx.strokeText(say, x, y);
+      ctx.fillStyle = boxMuted && boxMuted[b] ? MUTE : BOXNUM;
+      ctx.fillText(say, x, y);
     }
     ctx.textBaseline = 'middle';
   }
