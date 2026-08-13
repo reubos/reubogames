@@ -2387,6 +2387,24 @@ function rulesetMoves(known, find) {
           }
         }
       }
+
+      /* A clump of safe cells that is not yet the whole of the safe ground
+         must reach the rest of it, which it can only do through covered
+         ground. One way out, and that way is safe.
+
+         Settling it joins clumps together, so this stops at the first and lets
+         the solver come round again — a clump read against an older reckoning
+         may already have found its way out by another road. */
+      const safeTotal = n - mines;
+      for (const clump of compsOver(isS, edgOf).comps) {
+        if (clump.length >= safeTotal) continue;
+        const ways = [];
+        for (const c of clump) for (const j of edgOf(c))
+          if (known[j] === UNKNOWN && !ways.includes(j)) ways.push(j);
+        if (ways.length !== 1) continue;
+        mark(ways[0], 'safe', 'safe-bridge', clump);
+        break;
+      }
     }
   }
   return moved;
@@ -2835,6 +2853,7 @@ const HINTWORDS = {
   'outside-pocket': 'The border. Every mine must chain edge to edge out to the rim, and no chain could reach this ground.',
   'outside-cut': 'The border. This is the only way left from here out to the rim, so the chain must come through it.',
   // the other half of the outside law, and not about the border at all
+  'safe-bridge': 'Connected ground. This patch of safe cells has to join the rest, and only one covered cell is left for it to go through.',
   'safe-cut': 'Connected ground. Every safe cell must reach every other one edge to edge, and a mine here would cut the safe ground in two.',
   'safe-pocket': 'Connected ground. No safe cell could reach this ground edge to edge without crossing a mine, so all of it is mine.'
 };
