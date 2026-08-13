@@ -2791,6 +2791,66 @@ function rulesetMoves(known, find) {
           for (const j2 of edgOf(i2))
             if (known[j2] === UNKNOWN && j2 > i2) tryPair(i2, j2);
         }
+
+      /* One number, asked exhaustively. A "3" over a run of five covered
+         cells under Singles takes its mines at the ends and the middle —
+         which no trade of two statements reaches, since it needs two
+         disjoint pairs and the number all speaking at once. So a number
+         with few enough covered cells simply tries every way of laying its
+         mines that the law does not refuse outright, and keeps whatever
+         all the ways agree on.
+
+         Refusal is only ever certain — a laying that welds a group past the
+         limit, counting the mines already found it would join — so the ways
+         kept can only be too many, never too few, and what they all agree
+         on is agreed by the truth among them. Not asked unless the law can
+         bite at all: more mines wanted than one group may hold, or laid
+         ground already against the number's cells. */
+      const waysRule = gCap ? 'cap-ways' : 'group-ways';
+      for (const c2 of constraintsOf(known)) {
+        const U = c2.cells, need = c2.left;
+        if (need < 2 || need >= U.length || U.length > 12) continue;
+        const nearMine = U.some(u2 => [...edgOf(u2)].some(isM));
+        if (need <= limit && !nearMine) continue;
+        const okWay = S => {
+          const set = new Set(S);
+          const seen2 = new Set();
+          for (const s2 of S) {
+            if (seen2.has(s2)) continue;
+            const grp = [s2]; seen2.add(s2);
+            for (let a2 = 0; a2 < grp.length; a2++)
+              for (const j2 of edgOf(grp[a2]))
+                if ((set.has(j2) || isM(j2)) && !seen2.has(j2)) { seen2.add(j2); grp.push(j2); }
+            if (grp.length > limit) return false;
+          }
+          return true;
+        };
+        const inAll = new Array(U.length).fill(true);
+        const inAny = new Array(U.length).fill(false);
+        let ways = 0;
+        const lay = (at, chosen) => {
+          if (chosen.length === need) {
+            if (!okWay(chosen)) return;
+            ways++;
+            const has = new Set(chosen);
+            for (let k2 = 0; k2 < U.length; k2++)
+              if (has.has(U[k2])) inAny[k2] = true; else inAll[k2] = false;
+            return;
+          }
+          if (at >= U.length || U.length - at < need - chosen.length) return;
+          chosen.push(U[at]); lay(at + 1, chosen); chosen.pop();
+          lay(at + 1, chosen);
+        };
+        lay(0, []);
+        if (!ways) continue;      // no laying passes: the position is past saving
+        const wClues = [c2.from];
+        for (const u2 of U) for (const j2 of edgOf(u2))
+          if (isM(j2) && !wClues.includes(j2)) wClues.push(j2);
+        for (let k2 = 0; k2 < U.length; k2++) {
+          if (inAll[k2]) mark(U[k2], 'mine', waysRule, wClues);
+          else if (!inAny[k2]) mark(U[k2], 'safe', waysRule, wClues);
+        }
+      }
     }
 
     /* The path and the loop: how many mines a known mine must still find
@@ -3464,6 +3524,8 @@ const HINTWORDS = {
   'group-count': 'The groups. A piece short of its size must take from the cells beside it, and a number watching those cells has that much of its answer spoken for.',
   'snake-count': 'The path. How many mines this mine must still find beside it is a count over its covered neighbours, and a number watching the same cells trades against it.',
   'loop-count': 'The loop. A mine’s covered neighbours must hold exactly what brings it to two, and a number watching the same cells has the difference settled for it.',
+  'cap-ways': "The groups. Lay this number's mines every way that does not weld a group past the law, and every way agrees about this cell.",
+  'group-ways': "The groups. Lay this number's mines every way that does not swell a group past its size, and every way agrees about this cell.",
   'search': 'Exhaustion. Every board the clues still allow has been tried, and in all of them this cell comes out the same way.',
 };
 
