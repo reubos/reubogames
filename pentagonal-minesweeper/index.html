@@ -819,12 +819,31 @@ function findBoxes() {
      number as a point can be — measured across the six tilings it keeps three
      fifths of a cell's width clear, where the middle of a twelve-cell box can
      come within a third. Drawing it downwards from there puts the figure
-     inside the box it belongs to. */
-  boxTop = boxes.map(g => {
+     inside the box it belongs to.
+
+     Every box is a copy of the same repeat, so the number belongs in the same
+     place in each. Picking the highest corner box by box looks the same until
+     two corners come out level — a floret's do — and then the choice falls to
+     rounding and the labels wander from one side to the other. So the offset
+     is settled once, on the box nearest the middle of the board, and every
+     box wears its number at that same remove from its own centre. */
+  boxTop = [];
+  if (boxes.length) {
+    let cx = 0, cy = 0;
+    for (const m of boxMid) { cx += m[0]; cy += m[1]; }
+    cx /= boxMid.length; cy /= boxMid.length;
+    let ref = 0, near = Infinity;
+    boxMid.forEach((m, b) => {
+      const d = Math.hypot(m[0] - cx, m[1] - cy);
+      if (d < near) { near = d; ref = b; }
+    });
     let top = null;
-    for (const i of g) for (const q of poly[i]) if (!top || q[1] < top[1]) top = q;
-    return top;
-  });
+    for (const i of boxes[ref]) for (const q of poly[i])
+      if (!top || q[1] < top[1] - 1e-6 ||
+          (Math.abs(q[1] - top[1]) <= 1e-6 && q[0] < top[0])) top = q;
+    const dx = top[0] - boxMid[ref][0], dy = top[1] - boxMid[ref][1];
+    boxTop = boxMid.map(m => [m[0] + dx, m[1] + dy]);
+  }
   boxShown = null;
 }
 
