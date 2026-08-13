@@ -194,6 +194,7 @@
           <button data-rule="doubles">Doubles</button>
           <button data-rule="triples">Triples</button>
           <button data-rule="notriples">No Triples</button>
+          <button data-rule="noquads">No Quads</button>
           <button data-rule="snake">Snake</button>
           <button data-rule="loop">Loop</button>
           <button data-rule="boxed1">Boxed 1</button>
@@ -1479,7 +1480,7 @@ let ruleset = 'none';
    what is in force rather than match on the name of a combination. */
 const LAWS = {
   none: [], connected: ['connected'], outside: ['outside'],
-  singles: ['group'], doubles: ['group'], triples: ['group'], notriples: ['group'],
+  singles: ['group'], doubles: ['group'], triples: ['group'], notriples: ['group'], noquads: ['group'],
   snake: ['snake'], loop: ['loop'],
   boxed1: ['box'], boxed2: ['box'], boxed3: ['box'], boxed4: ['box'],
   cbox4: ['connected', 'box'], sbox4: ['snake', 'box']
@@ -1495,7 +1496,7 @@ const has = law => law !== lawOff && (LAWS[ruleset] || []).includes(law);
    leaves the smaller groups free and can therefore never force a mine — only
    ever clear the ground round one. */
 const GROUPSIZE = { singles: 1, doubles: 2, triples: 3 };
-const GROUPCAP = { notriples: 2 };
+const GROUPCAP = { notriples: 2, noquads: 3 };
 const groupSize = () => (lawOff === 'group' ? 0 : GROUPSIZE[ruleset] || 0);
 const groupCap = () => (lawOff === 'group' ? 0 : GROUPCAP[ruleset] || 0);
 
@@ -1517,6 +1518,8 @@ const RULENOTES = {
            'never along an edge.',
   notriples: 'No three mines join up along their edges: they come singly or in ' +
              'pairs, and never more.',
+  noquads: 'No four mines join up along their edges: they come in ones, twos or ' +
+           'threes, and never more.',
   snake: 'Mines form one edge-joined path that never runs alongside itself.',
   loop: 'Mines form one edge-joined loop that never runs alongside itself — ' +
         'every mine has exactly two mines beside it.',
@@ -3493,11 +3496,14 @@ function draw() {
     ctx.strokeStyle = LINE;
     ctx.fillStyle = BOXNUM;
     for (let b = 0; b < boxes.length; b++) {
+      /* A box keeping its number to itself simply goes bare. A cell has to
+         say something, since a blank cell and a nought look alike; a box
+         writes its nought down, so nothing written can only mean nothing
+         known. */
+      if (boxMuted && boxMuted[b]) continue;
       const x = boxTop[b][0] * view.s + view.ox, y = boxTop[b][1] * view.s + view.oy;
-      const say = boxMuted && boxMuted[b] ? '?' : boxShown[b];
-      ctx.strokeText(say, x, y);
-      ctx.fillStyle = boxMuted && boxMuted[b] ? MUTE : BOXNUM;
-      ctx.fillText(say, x, y);
+      ctx.strokeText(boxShown[b], x, y);
+      ctx.fillText(boxShown[b], x, y);
     }
     ctx.textBaseline = 'middle';
   }
