@@ -531,6 +531,7 @@ const TILINGS = [
        with the right cells in it and every one of them turned a quarter. So the
        opening cell must also be able to take the leaning step along its row,
        which is what settles which way up the whole board stands. */
+    spin: 15 * Math.PI / 180,
     region: { kind: 'walk', start: 'Cairo',
               step: [-0.2, 0.65, 0.75, 1.15], drop: [0.7, 1.15, -0.7, 0.2],
               open: [0.7, 0.95, -0.7, -0.3], first: [0.35, 0.65, 0.75, 0.95],
@@ -1167,8 +1168,16 @@ function buildBoard(t, across, down) {
   const spin = t.spin || 0;
   const spinC = Math.cos(spin), spinS = Math.sin(spin);
   const turn = q => [q[0] * spinC - q[1] * spinS, q[0] * spinS + q[1] * spinC];
-  if (spin > Math.PI / 4 && ((t.region || {}).kind === 'walk')) {
-    const swap = across; across = down; down = swap;
+  /* A walk counts its cells along a row and its rows across the board, but
+     which way a row runs is the tiling's business, not the board's: the 1:1's
+     rows go across the page and the 3-uniform's go down it, and turning them
+     moves both again. So the step is taken as it will finally lie, and where
+     it runs down rather than across, the two sides asked for are swapped —
+     otherwise a board asked to be long comes back tall. */
+  const stepWin = (t.region || {}).step;
+  if (stepWin) {
+    const [dx, dy] = turn([(stepWin[0] + stepWin[1]) / 2, (stepWin[2] + stepWin[3]) / 2]);
+    if (Math.abs(dy) > Math.abs(dx)) { const swap = across; across = down; down = swap; }
   }
 
   cellPitch = 1 / Math.sqrt(t.src.density);          // mean width of a cell
