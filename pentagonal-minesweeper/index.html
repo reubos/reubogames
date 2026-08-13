@@ -1745,7 +1745,21 @@ function saveBests() {
   try { localStorage.setItem('pentagonal-minesweeper-bests', JSON.stringify(bests)); } catch (e) {}
 }
 
-function newGame(across, down, m) {
+/* Paring solves a board once for every clue it tries, which on a large one is
+   hundreds of solves and several seconds of them. Held in a single stretch
+   that would lock the page up with nothing to show for itself, so the deal
+   steps out now and then to let the page paint how far it has got. Every way
+   of starting a board therefore hands back a promise.
+
+   Only a pared deal ever actually steps out. On the other levels the body
+   runs from end to end without once waiting, so the board is finished and on
+   the screen by the time the promise is handed over, exactly as it was when
+   nothing here was a promise at all. */
+let dealNote = '';
+
+const breath = () => new Promise(r => setTimeout(r, 0));
+
+async function newGame(across, down, m) {
   builtAcross = across; builtDown = down;
   buildBoard(tiling, across, down);
   useCorners(true);          // cells touching at a corner count as neighbours
@@ -1786,10 +1800,11 @@ function newGame(across, down, m) {
   /* Paring supersedes the hidden-numbers setting rather than sitting beside
      it: it keeps back every number the board can spare, which is all the
      setting was ever asking for and then some. */
-  if (d.pare) pareDown();
+  if (d.pare) await pareDown();
   else if (muteOn) muteNumbers();
   given = opened;
 
+  dealNote = '';
   paintStatus();
 }
 
@@ -3403,11 +3418,32 @@ function muteNumbers() {
 
    It is built by taking things away. A clue is put aside, the board is worked
    out again from what is left, and the clue comes back only if the board no
-   longer comes out. One pass settles each clue for good: taking a thing away
-   never makes anything else sparable, since a solver given less to reason
-   from cannot settle more, so a clue that was needed once is needed still.
-   What is left at the end is spare in no part of it. */
-function pareDown() {
+   longer comes out.
+
+   One pass would settle each clue for good if the solver could only ever do
+   worse for being told less. It cannot quite: the border and the group both
+   reason over the ground still covered, and a wider stretch of covered ground
+   can have a neck in it that a narrower stretch has not — shut a block of the
+   opening and a cell that nothing forced before may be forced now. So a clue
+   refused early can turn sparable once the opening has been cut back, and the
+   passes are made over and over until a whole round takes nothing away. In
+   practice the second round is the last, and it finds about one clue in every
+   thirty thousand. */
+async function pareDown() {
+  /* A breath is taken between solves so the page can paint, but not after
+     every one of them: a solve costs a few milliseconds and stepping out
+     costs about as much, so it is taken on the clock instead. A tenth of a
+     second between breaths shows a line that moves without the stepping out
+     ever amounting to anything. */
+  let drew = performance.now(), say = '';
+  const breathe = async () => {
+    if (performance.now() - drew < 100) return;
+    drew = performance.now();
+    dealNote = say;
+    paintStatus();
+    await breath();
+  };
+
   const solves = () => {
     const known = new Uint8Array(n);
     for (let i = 0; i < n; i++) if (state[i] === OPEN) markOpen(known, i);
@@ -3421,83 +3457,102 @@ function pareDown() {
     return a;
   };
 
-  /* Numbers first, those on the cells and those on the boxes shuffled in
+  const hide = (c, v) => { if (c < 0) boxMuted[~c] = v; else muted[c] = v; };
+
+  /* The numbers, those on the cells and those on the boxes shuffled in
      together so that neither kind is picked over while the other is left
-     whole.
+     whole. Only what is still showing is offered: a clue already kept back
+     has nothing left to give.
 
      A clue that stays has to be tried on its own, since that single trial is
      the proof it is doing work; but clues that go can leave in batches, one
      solve covering the lot — keeping back fewer clues than a batch that came
-     out can only come out too. So the batch doubles while batches keep
-     coming out and drops back to one the moment a batch fails, and the run
-     that failed is then picked through singly. On a board where most clues
-     are spare that is a solve for every few of them; on one where few are,
-     it settles to a solve apiece, which is the price of the promise. Batching
-     harder than that costs more than it saves: doubling with no drop back
-     spent three solves a clue where one would do. */
-  const cand = [];
-  for (let i = 0; i < n; i++) if (!mine[i]) cand.push(i);
-  if (boxLaw() === 'exact' || boxLaw() === 'irregular')
-    for (let b = 0; b < boxes.length; b++) cand.push(~b);
-  shuffle(cand);
-  const hide = (c, v) => { if (c < 0) boxMuted[~c] = v; else muted[c] = v; };
+     out can only come out too. So the batch doubles while batches keep coming
+     out and drops back to one the moment a batch fails. On a board where most
+     clues are spare that is a solve for every few of them; on one where few
+     are, it settles to a solve apiece, which is the price of the promise.
+     Batching harder than that costs more than it saves: doubling with no drop
+     back spent three solves a clue where one would do.
 
-  /* A run that fails holds at least one clue the board needs, and the way to
-     find it is to halve the run rather than to walk it: on a run where one
-     clue in eight is doing the work, halving asks half as many solves as
-     walking does. Each keeper still ends up tried alone at the foot of the
-     halving, which is the proof required of it. */
-  const pick = run => {
-    for (const c of run) hide(c, 1);
-    if (solves()) return true;
-    for (const c of run) hide(c, 0);
-    if (run.length > 1) {
-      const half = run.length >> 1;
-      pick(run.slice(0, half));
-      pick(run.slice(half));
+     A run that fails holds at least one clue the board needs, and the way to
+     find it is to halve the run rather than to walk it. Each keeper still
+     ends up tried alone at the foot of the halving, which is the proof
+     required of it. */
+  const hideClues = async word => {
+    const cand = [];
+    for (let i = 0; i < n; i++) if (!mine[i] && !muted[i]) cand.push(i);
+    if (boxLaw() === 'exact' || boxLaw() === 'irregular')
+      for (let b = 0; b < boxes.length; b++) if (!boxMuted[b]) cand.push(~b);
+    shuffle(cand);
+
+    let took = false;
+    const pick = async run => {
+      await breathe();
+      for (const c of run) hide(c, 1);
+      if (solves()) { took = true; return true; }
+      for (const c of run) hide(c, 0);
+      if (run.length > 1) {
+        const half = run.length >> 1;
+        await pick(run.slice(0, half));
+        await pick(run.slice(half));
+      }
+      return false;
+    };
+
+    let batch = 1, at = 0;
+    while (at < cand.length) {
+      say = word + ' — ' + Math.round(100 * at / cand.length) + '%';
+      const slice = cand.slice(at, at + batch);
+      batch = await pick(slice) ? Math.min(32, batch + batch) : 1;
+      at += slice.length;
     }
-    return false;
+    return took;
   };
-  let batch = 1, at = 0;
-  while (at < cand.length) {
-    const slice = cand.slice(at, at + batch);
-    batch = pick(slice) ? Math.min(32, batch + batch) : 1;
-    at += slice.length;
-  }
 
   /* Then the opening. A blank tells the cells around it that they are safe
      and opens them itself, so a blank and what it opens stand or fall
      together — closing one of them alone would only see it opened again on
      the spot. The opening therefore comes apart in blocks: a blank with its
-     whole spill, or a lone number on its own. Some of the numbers just muted
-     were blanks holding a block together, and with the number gone the block
-     falls into its parts, which is why the blocks are drawn up now and not
-     before. */
-  const block = new Int32Array(n).fill(-1);
-  const blocks = [];
-  for (let i = 0; i < n; i++) {
-    if (state[i] !== OPEN || block[i] >= 0) continue;
-    const id = blocks.length, grp = [i], stack = [i];
-    block[i] = id;
-    while (stack.length) {
-      const j = stack.pop();
-      for (const m of nbOf(j)) {
-        if (state[m] !== OPEN || block[m] >= 0) continue;
-        if (!((count[j] === 0 && !muted[j]) || (count[m] === 0 && !muted[m]))) continue;
-        block[m] = id; grp.push(m); stack.push(m);
+     whole spill, or a lone number on its own. Numbers kept back in the round
+     just gone may have been blanks holding a block together, and with the
+     number gone the block falls into its parts, which is why the blocks are
+     drawn up afresh each time rather than once at the start. */
+  const shutBlocks = async () => {
+    const block = new Int32Array(n).fill(-1);
+    const blocks = [];
+    for (let i = 0; i < n; i++) {
+      if (state[i] !== OPEN || block[i] >= 0) continue;
+      const id = blocks.length, grp = [i], stack = [i];
+      block[i] = id;
+      while (stack.length) {
+        const j = stack.pop();
+        for (const m of nbOf(j)) {
+          if (state[m] !== OPEN || block[m] >= 0) continue;
+          if (!((count[j] === 0 && !muted[j]) || (count[m] === 0 && !muted[m]))) continue;
+          block[m] = id; grp.push(m); stack.push(m);
+        }
       }
+      blocks.push(grp);
     }
-    blocks.push(grp);
-  }
 
-  /* A board with nothing showing is not a board, so the last block stays
-     whatever the solver makes of it. */
-  let standing = blocks.length;
-  for (const grp of shuffle(blocks)) {
-    if (standing < 2) break;
-    for (const c of grp) state[c] = COVERED;
-    if (solves()) standing--;
-    else for (const c of grp) state[c] = OPEN;
+    /* A board with nothing showing is not a board, so the last block stays
+       whatever the solver makes of it. */
+    say = 'Paring the opening';
+    let standing = blocks.length, took = false;
+    for (const grp of shuffle(blocks)) {
+      if (standing < 2) break;
+      await breathe();
+      for (const c of grp) state[c] = COVERED;
+      if (solves()) { standing--; took = true; }
+      else for (const c of grp) state[c] = OPEN;
+    }
+    return took;
+  };
+
+  for (let round = 0; ; round++) {
+    const clues = await hideClues(round ? 'Checking nothing else can go' : 'Paring the clues');
+    const opening = await shutBlocks();
+    if (!clues && !opening) break;
   }
 
   opened = 0;
@@ -3530,26 +3585,44 @@ const NUMS = ['', '#60a5fa', '#4ade80', '#f87171', '#c084fc', '#fbbf24',
 
 /* The line round each box: every edge of the tiles in it, less the ones two
    of them share. Worked out when a board first asks for it and thrown away
-   with the board, since nothing else needs it. */
+   with the board, since nothing else needs it.
+
+   A box keeping its number to itself is left unlined as well as unlabelled.
+   Where the boxes carry numbers the line is what points at one, and a line
+   round nothing only sends the eye somewhere there is nothing to read. The
+   boxes that say the same thing all over — at least one mine apiece, and the
+   like — are lined every one of them, since there the line is the clue.
+
+   Which boxes are keeping quiet is not settled until the board has been muted
+   or pared, and by then the first draw has already been asked for its lines.
+   So what is kept is the line round every box, each on its own, and the ones
+   to leave out are chosen afresh at each drawing — the dear part cached, the
+   part that changes not. */
 let boxSeg = null;
 
 function boxSegments() {
-  if (boxSeg) return boxSeg;
-  const at = q => Math.round(q[0] * 2000) + ',' + Math.round(q[1] * 2000);
-  boxSeg = [];
-  for (const g of boxes) {
-    const rim = new Map();
-    for (const i of g) {
-      const p = poly[i];
-      for (let k = 0, m = p.length - 1; k < p.length; m = k++) {
-        const u = at(p[m]), v = at(p[k]);
-        const e = u < v ? u + '|' + v : v + '|' + u;
-        if (rim.has(e)) rim.delete(e); else rim.set(e, [p[m], p[k]]);
+  if (!boxSeg) {
+    const at = q => Math.round(q[0] * 2000) + ',' + Math.round(q[1] * 2000);
+    boxSeg = boxes.map(g => {
+      const rim = new Map();
+      for (const i of g) {
+        const p = poly[i];
+        for (let k = 0, m = p.length - 1; k < p.length; m = k++) {
+          const u = at(p[m]), v = at(p[k]);
+          const e = u < v ? u + '|' + v : v + '|' + u;
+          if (rim.has(e)) rim.delete(e); else rim.set(e, [p[m], p[k]]);
+        }
       }
-    }
-    for (const seg of rim.values()) boxSeg.push(seg);
+      return [...rim.values()];
+    });
   }
-  return boxSeg;
+  const numbered = boxLaw() === 'exact' || boxLaw() === 'irregular';
+  const out = [];
+  for (let b = 0; b < boxes.length; b++) {
+    if (numbered && boxMuted && boxMuted[b]) continue;
+    for (const seg of boxSeg[b]) out.push(seg);
+  }
+  return out;
 }
 
 function buildPaths() {
@@ -3640,6 +3713,11 @@ function draw() {
   if (!n || cellPath.length !== n) return;
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, canvas.width, canvas.height);
+  /* A board mid-deal is a half-truth — mines laid, clues not yet pared back —
+     and showing it would give away what the paring is about to take. So the
+     canvas stays empty until the deal is over, and the line under it says
+     how far along that is. */
+  if (dealNote) return;
 
   const flashing = flashCell >= 0 && performance.now() < flashUntil;
 
@@ -3806,6 +3884,8 @@ function paintStatus() {
   el('statBest').textContent = key && bests[key] ? fmtTime(bests[key]) : '—';
   const v = el('verdict');
   v.className = 'verdict' + (over ? (won ? ' won' : ' lost') : '');
+  // a deal still going on has the floor: there is no game yet to report on
+  if (dealNote) { v.textContent = dealNote; return; }
   // with no clock there is no time to report: subtracting a startTime of nought
   // would quote how long the page had been open
   v.textContent = over
@@ -3938,13 +4018,36 @@ function paintRuleNote() {
     text + ' Boards are built so the rule is needed to solve them.';
 }
 
-function startFromControls() {
-  clearHint();
-  newGame(+rngAcross.value, +rngDown.value, +rngMines.value);
-  paintSizeLabels(n, mines);
-  paintRuleNote();
-  saveBoard();
-  draw();
+/* The deal is announced before it is begun, and the announcement given a
+   breath to reach the screen — otherwise the whole thing, notice and all,
+   lands in one go after the wait rather than before it.
+
+   Two deals must never run at once, since the second would build its geometry
+   out from under the first. But a setting changed mid-deal should not simply
+   be dropped either, so a call arriving during a deal is remembered and the
+   deal is done again after, off whatever the controls say by then. */
+let dealBusy = false, dealAgain = false;
+
+async function startFromControls() {
+  if (dealBusy) { dealAgain = true; return; }
+  dealBusy = true;
+  try {
+    do {
+      dealAgain = false;
+      clearHint();
+      if (DIFF[difficulty].pare) {
+        dealNote = 'Dealing…';
+        paintStatus();
+        draw();
+        await breath();
+      }
+      await newGame(+rngAcross.value, +rngDown.value, +rngMines.value);
+    } while (dealAgain);
+    paintSizeLabels(n, mines);
+    paintRuleNote();
+    saveBoard();
+    draw();
+  } finally { dealBusy = false; dealNote = ''; paintStatus(); }
 }
 
 for (const r of [rngAcross, rngDown, rngMines]) r.oninput = () => paintSizeLabels();
