@@ -1497,8 +1497,7 @@ const boxLaw = () => (lawOff === 'box' ? '' : BOXLAW[ruleset] || '');
 const RULENOTES = {
   none: '',
   connected: 'All mines form a single group, touching by edge or corner.',
-  outside: 'All safe cells connect edge to edge, and every mine chains edge ' +
-           'to edge to the border.',
+  outside: 'Every mine chains edge to edge to the border.',
   singles: 'Every mine stands alone: no two share an edge, though they may meet ' +
            'at a corner.',
   doubles: 'Mines come in edge-joined pairs; pairs may meet at a corner, but never ' +
@@ -1947,8 +1946,6 @@ function placeBoxed(k) {
    at a time until the safe ground is whole again. */
 function placeOutside(k) {
   const dist = new Int32Array(n), prev = new Int32Array(n), q = new Int32Array(n);
-  const whole = () => compsOver(i => !mine[i], edgOf).comps.length === 1;
-
   for (let attempt = 0; attempt < 12; attempt++) {
     mine.fill(0);
     let placed = 0, stuck = 0;
@@ -1976,7 +1973,6 @@ function placeOutside(k) {
       for (let a = path.length - 1; a >= 0 && placed < k; a--) {
         mine[path[a]] = 1; placed++; laid++;
       }
-      while (laid && !whole()) { mine[path[path.length - laid]] = 0; placed--; laid--; }
       if (laid) stuck = 0; else stuck++;
     }
     if (placed === k && validRuleset()) return true;
@@ -2027,10 +2023,8 @@ function validRuleset() {
     if (!comps[0].every(c => [...edgOf(c)].filter(j => mine[j]).length === 2)) return false;
   }
 
-  if (has('outside')) {
-    if (compsOver(i => !mine[i], edgOf).comps.length !== 1) return false;
-    if (!compsOver(isMine, edgOf).comps.every(c => c.some(i => !interior[i]))) return false;
-  }
+  if (has('outside') &&
+      !compsOver(isMine, edgOf).comps.every(c => c.some(i => !interior[i]))) return false;
 
   const law = boxLaw();
   if (law === 'exact') {
@@ -2368,42 +2362,6 @@ function rulesetMoves(known, find) {
         if (g.some(isM))
           for (const u of cutCells(known, g, x => id[x] === id[g[0]], edgOf, rimC, isM, 'strand'))
             mark(u, 'mine', 'outside-cut', [...edgOf(u)]);
-      }
-    }
-    // the safe side: every safe cell must reach the others
-    {
-      const isS = i => known[i] === SAFE;
-      const ground = i => known[i] !== KNOWN_MINE;
-      const { id, comps } = compsOver(ground, edgOf);
-      const anchored = comps.some(g => g.some(isS));
-      if (anchored) {
-        for (const g of comps) {
-          if (g.some(isS)) {
-            for (const u of cutCells(known, g, x => id[x] === id[g[0]], edgOf, isS, isS, 'split'))
-              mark(u, 'safe', 'safe-cut', [...edgOf(u)]);
-          } else {
-            // a pocket no safe cell could ever reach must be all mine
-            for (const c of g) mark(c, 'mine', 'safe-pocket', g);
-          }
-        }
-      }
-
-      /* A clump of safe cells that is not yet the whole of the safe ground
-         must reach the rest of it, which it can only do through covered
-         ground. One way out, and that way is safe.
-
-         Settling it joins clumps together, so this stops at the first and lets
-         the solver come round again — a clump read against an older reckoning
-         may already have found its way out by another road. */
-      const safeTotal = n - mines;
-      for (const clump of compsOver(isS, edgOf).comps) {
-        if (clump.length >= safeTotal) continue;
-        const ways = [];
-        for (const c of clump) for (const j of edgOf(c))
-          if (known[j] === UNKNOWN && !ways.includes(j)) ways.push(j);
-        if (ways.length !== 1) continue;
-        mark(ways[0], 'safe', 'safe-bridge', clump);
-        break;
       }
     }
   }
@@ -2853,9 +2811,6 @@ const HINTWORDS = {
   'outside-pocket': 'The border. Every mine must chain edge to edge out to the rim, and no chain could reach this ground.',
   'outside-cut': 'The border. This is the only way left from here out to the rim, so the chain must come through it.',
   // the other half of the outside law, and not about the border at all
-  'safe-bridge': 'Connected ground. This patch of safe cells has to join the rest, and only one covered cell is left for it to go through.',
-  'safe-cut': 'Connected ground. Every safe cell must reach every other one edge to edge, and a mine here would cut the safe ground in two.',
-  'safe-pocket': 'Connected ground. No safe cell could reach this ground edge to edge without crossing a mine, so all of it is mine.'
 };
 
 const HINTIDLE = 'Asking once marks what to look at; asking again names the reasoning.';
