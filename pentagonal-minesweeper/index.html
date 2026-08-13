@@ -1827,9 +1827,23 @@ function noteBoxCounts() {
    one must find that one saying what it said when it was judged. */
 function clueFor(b, held, size) {
   const h = (((b + 1) * 2654435761) + held * 40503) >>> 0;
-  const kind = h % 3, nudge = (h >>> 5) % 2;
-  if (kind === 1 && held >= 1) return ['\u2265', Math.max(1, held - nudge)];
-  if (kind === 2 && held <= size - 1) return ['\u2264', Math.min(size - 1, held + nudge)];
+  const kind = h % 3, roll = h >>> 5;
+
+  /* A bound is drawn from the whole of its legal range rather than sitting a
+     step or two off the true count. Drawn from a narrow range it gives itself
+     away: at a nudge of nought or one, two thirds of "at least four" meant
+     exactly four and the rest meant five, so the bound announced its own
+     slack. Spread across the range it says what it says and no more. */
+  if (kind === 1 && held >= 1)
+    return ['\u2265', 1 + roll % held];             // one, up to what it holds
+
+  /* At most nought says no more than an exact nought does, so a ceiling
+     starts at one; and at most the whole box says nothing at all, so it stops
+     one short of the box. */
+  if (kind === 2 && size >= 2) {
+    const lo = Math.max(1, held), hi = size - 1;
+    if (lo <= hi) return ['\u2264', lo + roll % (hi - lo + 1)];
+  }
   return ['', held];
 }
 
