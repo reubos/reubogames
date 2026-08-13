@@ -2184,13 +2184,20 @@ function rulesetMoves(known, find) {
         if (known[j2] === UNKNOWN) mark(j2, 'safe', 'group-full', g);
     }
 
+    /* Settling one mine can join two pieces into one, and a piece judged
+       short against a reckoning made before that may not be short at all —
+       so this stops at the first mine it settles. The solver comes straight
+       back round with the pieces worked out afresh, which costs a sweep and
+       is the whole difference between sound and not. */
     for (const g of compsOver(isM, edgOf).comps) {
       if (g.length >= gSize) continue;
       const frontier = [];
       for (const c of g) for (const j2 of edgOf(c))
         if (known[j2] === UNKNOWN && !frontier.includes(j2)) frontier.push(j2);
       // short of its number, and only one way left to make it up
-      if (frontier.length === 1) mark(frontier[0], 'mine', 'group-grow', g);
+      if (frontier.length !== 1) continue;
+      mark(frontier[0], 'mine', 'group-grow', g);
+      break;
     }
 
     /* Worked out afresh, since the pass above may have settled new mines and
