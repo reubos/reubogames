@@ -146,11 +146,19 @@
 
       <div class="panel">
         <p class="label">Difficulty</p>
-        <div class="btn-row three">
+        <div class="btn-row">
           <button data-diff="easy" class="on">Easy</button>
           <button data-diff="medium">Medium</button>
           <button data-diff="hard">Hard</button>
+          <button data-diff="harder">Harder</button>
         </div>
+        <p class="note">Harder is Hard with everything spare taken off it: every
+          number the board will show, every clue on a box and every cell it opens
+          with is one that the board cannot be finished without. Nothing on it is
+          there twice over, so nothing on it can be skipped &mdash; and since it
+          keeps back every number it can spare, it takes no notice of the setting
+          below. Finding out what a board can spare means solving it over and
+          over, so a large one takes a few seconds to deal.</p>
         <p class="label" style="margin-top: 14px">Hidden numbers</p>
         <div class="btn-row">
           <button data-mute="" class="on">Off</button>
@@ -1606,11 +1614,13 @@ let difficulty = 'easy';
    opening aims to give away; res is the most of the board allowed to
    resist counting alone — none of it on easy, where counting is made
    sufficient outright; two-fifths on medium; everything on hard, where
-   the generator hunts for as much resistance as it can find. */
+   the generator hunts for as much resistance as it can find. Harder is
+   hard with everything spare taken off it: see pareDown. */
 const DIFF = {
   easy:   { mines: 1.0,  open: 0.25, res: 0 },
   medium: { mines: 1.15, open: 0.14, res: 0.4 },
-  hard:   { mines: 1.3,  open: 0.07, res: 1, dens: 0.35 }
+  hard:   { mines: 1.3,  open: 0.07, res: 1, dens: 0.35 },
+  harder: { mines: 1.3,  open: 0.07, res: 1, dens: 0.35, pare: true }
 };
 
 /* Hard aims at a density of its own rather than scaling whatever the slider
@@ -1773,8 +1783,12 @@ function newGame(across, down, m) {
   dealing = true;
   for (const g of buildPuzzle()) reveal(g);
   dealing = false;
+  /* Paring supersedes the hidden-numbers setting rather than sitting beside
+     it: it keeps back every number the board can spare, which is all the
+     setting was ever asking for and then some. */
+  if (d.pare) pareDown();
+  else if (muteOn) muteNumbers();
   given = opened;
-  if (muteOn) muteNumbers();
 
   paintStatus();
 }
@@ -2898,8 +2912,13 @@ function deduce(known, mode) {
   const structural = () =>
     ruleset !== 'none' && mode !== 'base' && rulesetMoves(known);
 
-  // cheapest reasoning first, and back to it the moment anything gives way
-  while (counting() || structural() || subsets() || total()) { /* keep going */ }
+  /* Cheapest reasoning first, and back to it the moment anything gives way.
+     The four run to a fixpoint, so the order they are tried in cannot change
+     what comes out — only how long it takes to get there, and a law is dearer
+     to ask than a sweep of subsets is. Asking the law after them rather than
+     before saves a quarter of the time on a snake, which is worth having now
+     that Harder solves a board over and over to find out what it can spare. */
+  while (counting() || subsets() || structural() || total()) { /* keep going */ }
 
   let safe = 0;
   for (let i = 0; i < n; i++) if (known[i] === SAFE) safe++;
@@ -3190,7 +3209,7 @@ function buildPuzzle() {
   const target = (n - mines) * d.open;
   // hard gets longer to search, and so do the laws: what they ask for is rarer
   const deadline = performance.now() +
-    (n > 300 ? 300 : 120) * ((difficulty === 'hard' ? 2 : 1) + (structured ? 1 : 0));
+    (n > 300 ? 300 : 120) * ((d.res >= 1 ? 2 : 1) + (structured ? 1 : 0));
   let best = null, spare = null;
 
   /* A law the mines cannot obey at the count asked for is answered by asking
@@ -3375,6 +3394,114 @@ function muteNumbers() {
       if (solves()) hidden++; else boxMuted[b] = 0;
     }
   }
+}
+
+/* Harder makes one promise the other levels do not: nothing on the board is
+   spare. Every number the board will show, every clue on a box, and every
+   cell the board opens with is there because taking it away leaves a board
+   that can only be guessed at.
+
+   It is built by taking things away. A clue is put aside, the board is worked
+   out again from what is left, and the clue comes back only if the board no
+   longer comes out. One pass settles each clue for good: taking a thing away
+   never makes anything else sparable, since a solver given less to reason
+   from cannot settle more, so a clue that was needed once is needed still.
+   What is left at the end is spare in no part of it. */
+function pareDown() {
+  const solves = () => {
+    const known = new Uint8Array(n);
+    for (let i = 0; i < n; i++) if (state[i] === OPEN) markOpen(known, i);
+    return deduce(known) === n - mines;
+  };
+  const shuffle = a => {
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      const t = a[i]; a[i] = a[j]; a[j] = t;
+    }
+    return a;
+  };
+
+  /* Numbers first, those on the cells and those on the boxes shuffled in
+     together so that neither kind is picked over while the other is left
+     whole.
+
+     A clue that stays has to be tried on its own, since that single trial is
+     the proof it is doing work; but clues that go can leave in batches, one
+     solve covering the lot — keeping back fewer clues than a batch that came
+     out can only come out too. So the batch doubles while batches keep
+     coming out and drops back to one the moment a batch fails, and the run
+     that failed is then picked through singly. On a board where most clues
+     are spare that is a solve for every few of them; on one where few are,
+     it settles to a solve apiece, which is the price of the promise. Batching
+     harder than that costs more than it saves: doubling with no drop back
+     spent three solves a clue where one would do. */
+  const cand = [];
+  for (let i = 0; i < n; i++) if (!mine[i]) cand.push(i);
+  if (boxLaw() === 'exact' || boxLaw() === 'irregular')
+    for (let b = 0; b < boxes.length; b++) cand.push(~b);
+  shuffle(cand);
+  const hide = (c, v) => { if (c < 0) boxMuted[~c] = v; else muted[c] = v; };
+
+  /* A run that fails holds at least one clue the board needs, and the way to
+     find it is to halve the run rather than to walk it: on a run where one
+     clue in eight is doing the work, halving asks half as many solves as
+     walking does. Each keeper still ends up tried alone at the foot of the
+     halving, which is the proof required of it. */
+  const pick = run => {
+    for (const c of run) hide(c, 1);
+    if (solves()) return true;
+    for (const c of run) hide(c, 0);
+    if (run.length > 1) {
+      const half = run.length >> 1;
+      pick(run.slice(0, half));
+      pick(run.slice(half));
+    }
+    return false;
+  };
+  let batch = 1, at = 0;
+  while (at < cand.length) {
+    const slice = cand.slice(at, at + batch);
+    batch = pick(slice) ? Math.min(32, batch + batch) : 1;
+    at += slice.length;
+  }
+
+  /* Then the opening. A blank tells the cells around it that they are safe
+     and opens them itself, so a blank and what it opens stand or fall
+     together — closing one of them alone would only see it opened again on
+     the spot. The opening therefore comes apart in blocks: a blank with its
+     whole spill, or a lone number on its own. Some of the numbers just muted
+     were blanks holding a block together, and with the number gone the block
+     falls into its parts, which is why the blocks are drawn up now and not
+     before. */
+  const block = new Int32Array(n).fill(-1);
+  const blocks = [];
+  for (let i = 0; i < n; i++) {
+    if (state[i] !== OPEN || block[i] >= 0) continue;
+    const id = blocks.length, grp = [i], stack = [i];
+    block[i] = id;
+    while (stack.length) {
+      const j = stack.pop();
+      for (const m of nbOf(j)) {
+        if (state[m] !== OPEN || block[m] >= 0) continue;
+        if (!((count[j] === 0 && !muted[j]) || (count[m] === 0 && !muted[m]))) continue;
+        block[m] = id; grp.push(m); stack.push(m);
+      }
+    }
+    blocks.push(grp);
+  }
+
+  /* A board with nothing showing is not a board, so the last block stays
+     whatever the solver makes of it. */
+  let standing = blocks.length;
+  for (const grp of shuffle(blocks)) {
+    if (standing < 2) break;
+    for (const c of grp) state[c] = COVERED;
+    if (solves()) standing--;
+    else for (const c of grp) state[c] = OPEN;
+  }
+
+  opened = 0;
+  for (let i = 0; i < n; i++) if (state[i] === OPEN) opened++;
 }
 
 /* =====================================================================
