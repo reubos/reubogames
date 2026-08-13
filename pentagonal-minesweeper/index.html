@@ -2331,6 +2331,74 @@ function cutCells(known, nodes, keep, adjOf, isA, isB, mode) {
   return forced;
 }
 
+/* cutCells asks whether a cell parts the mines from each other. This asks
+   whether it parts them from the room they still need.
+
+   Take a covered cell away and the covered ground falls into pieces. The
+   whole group has to sit in one piece, so that piece must hold every mine
+   already found and have room for every mine there is. Where no piece left
+   could serve, the cell taken away was the way through, and is a mine — a
+   path with an end still to run, walled in by safe ground save for one gap,
+   must take the gap.
+
+   One walk of the piece answers it for every cell in it at once. For a cell
+   that parts nothing, the single piece left is simply everything but itself;
+   for one that parts, the pieces are the subtrees it cuts off and whatever
+   remains after them. */
+function tightCells(known, nodes, keep, adjOf, isM, need) {
+  const disc = new Int32Array(n).fill(-1), low = new Int32Array(n);
+  const sz = new Int32Array(n), hm = new Int32Array(n);
+  const cutSz = new Int32Array(n), cutHm = new Int32Array(n);
+  const roomy = new Uint8Array(n);       // some piece it cuts off would serve
+  const forced = [];
+  let total = 0, mineTotal = 0, timer = 0;
+  for (const v of nodes) { total++; if (isM(v)) mineTotal++; }
+  // with no mine found there is no piece the group is pinned to, and a piece
+  // already too small for the group says the position is beyond saving
+  if (!mineTotal || total < need) return forced;
+  const serves = (s, m) => m === mineTotal && s >= need;
+
+  const root = nodes[0];
+  disc[root] = low[root] = timer++;
+  sz[root] = 1; hm[root] = isM(root) ? 1 : 0;
+  const stack = [[root, -1, 0]];
+  const rootParts = [];
+  while (stack.length) {
+    const fr = stack[stack.length - 1], v = fr[0], adj = adjOf(v);
+    if (fr[2] < adj.length) {
+      const w = adj[fr[2]++];
+      if (!keep(w)) continue;
+      if (disc[w] < 0) {
+        disc[w] = low[w] = timer++;
+        sz[w] = 1; hm[w] = isM(w) ? 1 : 0;
+        stack.push([w, v, 0]);
+      } else if (w !== fr[1]) low[v] = Math.min(low[v], disc[w]);
+    } else {
+      stack.pop();
+      const p = fr[1];
+      if (p < 0) break;
+      low[p] = Math.min(low[p], low[v]);
+      if (p === root) rootParts.push([sz[v], hm[v]]);
+      else if (low[v] >= disc[p]) {
+        cutSz[p] += sz[v]; cutHm[p] += hm[v];
+        if (serves(sz[v], hm[v])) roomy[p] = 1;
+      }
+      sz[p] += sz[v]; hm[p] += hm[v];
+    }
+  }
+
+  // the root cuts off every one of its subtrees and leaves nothing besides
+  if (known[root] === UNKNOWN && rootParts.length &&
+      !rootParts.some(([s, m]) => serves(s, m))) forced.push(root);
+
+  for (const v of nodes) {
+    if (v === root || known[v] !== UNKNOWN || roomy[v]) continue;
+    if (serves(total - 1 - cutSz[v], mineTotal - cutHm[v])) continue;
+    forced.push(v);
+  }
+  return forced;
+}
+
 /* Every deduction a law hands over goes through `mark`, which carries not
    only what it settles but the rule it leaned on and the cells a player
    would have to look at to see it. That attribution is dead weight to the
@@ -2549,14 +2617,38 @@ function rulesetMoves(known, find) {
     }
 
     // a mine can only reach the rest through covered ground
-    const { id, comps } = compsOver(open, adj);
-    const withM = comps.filter(g => g.some(isM));
-    if (withM.length) {
-      for (const g of comps) if (!g.some(isM))
-        for (const c of g) mark(c, 'safe', 'reach-pocket', g);
-      for (const g of withM)
-        for (const u of cutCells(known, g, x => id[x] === id[g[0]], adj, isM, isM, 'split'))
-          mark(u, 'mine', 'reach-cut', [...adj(u)]);
+    {
+      const { id, comps } = compsOver(open, adj);
+      const withM = comps.filter(g => g.some(isM));
+      if (withM.length) {
+        for (const g of comps) if (!g.some(isM))
+          for (const c of g) mark(c, 'safe', 'reach-pocket', g);
+        for (const g of withM)
+          for (const u of cutCells(known, g, x => id[x] === id[g[0]], adj, isM, isM, 'split'))
+            mark(u, 'mine', 'reach-cut', [...adj(u)]);
+      }
+    }
+
+    /* And the room the group still needs, rather than merely its own parts.
+
+       Worked out afresh rather than off the reckoning just above: clearing a
+       pocket runs the blanks out through corner neighbours, which under a
+       path law are not the neighbours the pieces were reckoned by, so ground
+       can leave a piece without the piece knowing. Mines found in two pieces
+       at once would say the position is already beyond the law, and there is
+       nothing to add to that.
+
+       And not while the cheaper rules are still finding things: the solver
+       comes back the moment they dry up, so waiting costs nothing and saves
+       a walk of the whole piece on every sweep that did not need it. */
+    if (!moved) {
+      const { id, comps } = compsOver(open, adj);
+      const withM = comps.filter(g => g.some(isM));
+      if (withM.length === 1) {
+        const g = withM[0];
+        for (const u of tightCells(known, g, x => id[x] === id[g[0]], adj, isM, mines))
+          mark(u, 'mine', 'reach-room', [...adj(u)]);
+      }
     }
 
     /* How far the group can still stretch. Reaching a cell d steps off
@@ -3363,6 +3455,7 @@ const HINTWORDS = {
   'reach-budget': 'The pieces. Reaching this far from the mines already found would cost more mines than remain, so the group cannot stretch to it.',
   'reach-pocket': 'Connectedness. No mine could reach this ground without leaving the group behind.',
   'reach-cut': 'Connectedness. This is the only cell the group has to pass through.',
+  'reach-room': 'Connectedness. Take this cell away and no piece of ground left has both the mines already found and room for all of them — so the group must come through here.',
   'outside-pocket': 'The border. Every mine must chain edge to edge out to the rim, and no chain could reach this ground.',
   'outside-cut': 'The border. This is the only way left from here out to the rim, so the chain must come through it.',
   'crossed': "Two numbers, crossed. Neither's cells lie wholly inside the other's, but the shared cells are pinned between the two of them, and what is left over on one side is settled by it.",
