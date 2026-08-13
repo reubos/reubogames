@@ -1478,18 +1478,22 @@ const LAWS = {
   boxed1: ['box'], boxed2: ['box'], boxed3: ['box'], boxed4: ['box'],
   cbox4: ['connected', 'box'], sbox4: ['snake', 'box']
 };
-const has = law => (LAWS[ruleset] || []).includes(law);
+/* One law may be held back for a moment, to ask whether the board really
+   needs it. Nothing lays or checks while it is held back — only the solver
+   runs — so the laying is never let off obeying both. */
+let lawOff = '';
+const has = law => law !== lawOff && (LAWS[ruleset] || []).includes(law);
 
 // how many cells to a group, where the law speaks of groups at all
 const GROUPSIZE = { singles: 1, doubles: 2, triples: 3 };
-const groupSize = () => GROUPSIZE[ruleset] || 0;
+const groupSize = () => (lawOff === 'group' ? 0 : GROUPSIZE[ruleset] || 0);
 
 /* Which box law is in force. The first three bound how many mines a box may
    hold; the fourth writes the number on it instead, which binds the laying
    not at all and tells the player a great deal. */
 const BOXLAW = { boxed1: 'floor', boxed2: 'ceiling', boxed3: 'both',
                  boxed4: 'exact', cbox4: 'exact', sbox4: 'exact' };
-const boxLaw = () => BOXLAW[ruleset] || '';
+const boxLaw = () => (lawOff === 'box' ? '' : BOXLAW[ruleset] || '');
 const RULENOTES = {
   none: '',
   connected: 'All mines form a single group, touching by edge or corner.',
@@ -3086,6 +3090,21 @@ function buildPuzzle() {
       const kb = new Uint8Array(n);
       for (const g of list) markOpen(kb, g);
       qualifies = deduce(kb, 'base') < n - mines;
+
+      /* Where two laws are in force, each has to earn its place: hold one
+         back and the board must still resist. Without this a pair is only
+         the stronger of the two wearing both names, which is what they
+         turned out to be — nearly half of them on the easier settings. */
+      if (qualifies && LAWS[ruleset].length > 1) {
+        for (const law of LAWS[ruleset]) {
+          const k2 = new Uint8Array(n);
+          for (const g of list) markOpen(k2, g);
+          lawOff = law;
+          const resists = deduce(k2) < n - mines;
+          lawOff = '';
+          if (!resists) { qualifies = false; break; }
+        }
+      }
     }
     if (qualifies && (!best || score < best.score))
       best = { mine: mine.slice(), count: count.slice(), list, score, mines };
