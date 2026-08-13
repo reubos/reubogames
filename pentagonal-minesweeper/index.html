@@ -505,6 +505,7 @@ const TILINGS = [
        a whole cell every four; the row below starts one step down the chain of
        prismatic fenceposts, which leans left. Four cells to a row-step and two
        rows to a fencepost-step is eight, which is what the repeat holds. */
+    spin: 75 * Math.PI / 180,
     region: { kind: 'walk', start: 'prismatic',
               step: [0.7, 1.15, -0.25, 0.7], drop: [-0.7, 0.15, 0.65, 1.25],
               open: [-0.7, -0.25, 0.65, 0.95], period: 2, units: true },
@@ -514,6 +515,7 @@ const TILINGS = [
           'one place further down the chain of prismatic fenceposts, so the board leans left as ' +
           'it descends.' },
   { id: 'cp21', name: 'Cairo and Prismatic 2', src: dualOf(T_n16),
+    spin: 45 * Math.PI / 180,
     region: { kind: 'boxCentre', anchor: 'prismaticPair', units: true },
     note: 'The same two pentagons on a larger repeat, with two Cairo pentagons to each prismatic ' +
           'one instead of one apiece. Its rows run flat across, nine cells with a prismatic in ' +
@@ -797,10 +799,11 @@ function wholeUnits(u, kept, need) {
    and which box a cell belongs to. Worked out once when the board is built,
    since the laying, the checking, the deducing and the drawing all want it. */
 let boxes = [], boxOf = null, boxMid = [], boxTop = [], boxShown = null;
+let boxSrc = null;             // the lattice as the board is actually stood
 
 function findBoxes() {
   const per = tilesPerUnit(tiling.src, tiling.boxMul);
-  const groups = unitCellsOf(poly, tiling.src, per, tiling.boxMul);
+  const groups = unitCellsOf(poly, boxSrc || tiling.src, per, tiling.boxMul);
   boxes = [...groups.values()].filter(g => g.length === per);
   boxOf = new Int32Array(n).fill(-1);
   boxes.forEach((g, b) => { for (const i of g) boxOf[i] = b; });
@@ -1148,6 +1151,26 @@ function walkBoard(t, across, down, spec) {
 
 function buildBoard(t, across, down) {
   tiling = t;
+
+  /* Some of these tilings read far better stood at an angle — turned so that
+     a row of cell middles runs level rather than uphill. The 1:1 wants three
+     quarters of a right angle and the 2:1 half of one; measured, that takes
+     the 1:1 from a hundred and thirty ragged rows to thirty-two of exactly
+     eight.
+
+     The turn comes at the end, once the board has been cut, so that the walk
+     windows and the region rules keep the frame they were written in. Two
+     things have to be squared with it. A board cut to a rectangle is cut in
+     the turned frame, or a wide board would come out a diamond. And a walked
+     board turned most of a right angle is asked for the other way about, or
+     a long board would come out a tall one. */
+  const spin = t.spin || 0;
+  const spinC = Math.cos(spin), spinS = Math.sin(spin);
+  const turn = q => [q[0] * spinC - q[1] * spinS, q[0] * spinS + q[1] * spinC];
+  if (spin > Math.PI / 4 && ((t.region || {}).kind === 'walk')) {
+    const swap = across; across = down; down = swap;
+  }
+
   cellPitch = 1 / Math.sqrt(t.src.density);          // mean width of a cell
   const want = across * down;
   const hx = across * cellPitch / 2, hy = down * cellPitch / 2;
@@ -1236,7 +1259,8 @@ function buildBoard(t, across, down) {
   const inside = regionOf(t);
   const fits = (p, k) => {
     const [ex, ey] = extents(k);
-    if (byCentre) { const c = centroidOf(p); return inside(c[0], c[1], ex, ey); }
+    // judged in the frame the board will be seen in, not the one it was built in
+    if (byCentre) { const c = turn(centroidOf(p)); return inside(c[0], c[1], ex, ey); }
     return p.every(q => inside(q[0], q[1], ex + 1e-6, ey + 1e-6));
   };
 
@@ -1300,6 +1324,11 @@ function buildBoard(t, across, down) {
   n = poly.length;
 
   }
+
+  if (spin) poly = poly.map(pg => pg.map(turn));
+  /* The boxes are found by where a tile sits in the lattice, so the lattice
+     has to be turned with the tiles. */
+  boxSrc = spin ? { v1: turn(t.src.v1), v2: turn(t.src.v2), density: t.src.density } : t.src;
 
   findBoxes();
   boxSeg = null;                 // a new board wants its boxes drawn afresh
