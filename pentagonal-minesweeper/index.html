@@ -152,22 +152,16 @@
           <button data-diff="hard">Hard</button>
           <button data-diff="harder">Harder</button>
         </div>
-        <p class="note">Harder is Hard with everything spare taken off it: every
-          number the board will show, every clue on a box and every cell it opens
-          with is one that the board cannot be finished without. Nothing on it is
-          there twice over, so nothing on it can be skipped &mdash; and since it
-          keeps back every number it can spare, it takes no notice of the setting
-          below. Finding out what a board can spare means solving it over and
-          over, so a large one takes a few seconds to deal.</p>
-        <p class="label" style="margin-top: 14px">Hidden numbers</p>
-        <div class="btn-row">
-          <button data-mute="" class="on">Off</button>
-          <button data-mute="1">On</button>
-        </div>
-        <p class="note">With these on, some cells never show their count when
-          uncovered &mdash; they only prove themselves safe, and where the boxes
-          carry numbers some of those are kept back too. Every board is still one
-          that can be finished without guessing.</p>
+        <p class="note">Each level stands on a ladder of reasoning. Easy asks
+          only one-glance rules &mdash; counting, full groups, boxes read like
+          numbers. Medium hides some of the numbers and asks two-fact rules
+          besides: overlaps, bottlenecks, sealed pockets. Hard hides numbers too
+          and needs the deep ones &mdash; crossed numbers, budgets, the endgame
+          against the mine counter. Harder hides every number the board can
+          spare and hunts for boards that need as many different kinds of
+          reasoning as it can find, so a large one takes a few seconds to deal.
+          A cell that never shows its count still proves itself safe, and every
+          board on every level can be finished without guessing.</p>
         <p class="label" style="margin-top: 14px">Strict</p>
         <div class="btn-row">
           <button data-strict="" class="on">Off</button>
@@ -1576,6 +1570,41 @@ const BOXLAW = { boxed1: 'floor', boxed2: 'ceiling', boxed3: 'both',
                  boxed4: 'exact', cbox4: 'exact', sbox4: 'exact',
                  boxedirr: 'irregular' };
 const boxLaw = () => (lawOff === 'box' ? '' : BOXLAW[ruleset] || '');
+
+/* Every rule the solver owns, ranked by what a player must hold in mind to
+   use it. Tier one is one clue and one glance: a number satisfied, a group
+   at full size, a box read like a number. Tier two is two facts held
+   together: one number inside another, a bottleneck, a bound traded with a
+   count. Tier three is whole-board budgets, endgame reckoning against the
+   mine counter, and casework. Difficulty stands on this ladder: a level's
+   boards fall to its tier and below, and genuinely need the tier they are
+   sold as. */
+const TIER = {
+  'counting-clear': 1, 'counting-full': 1, 'total-none': 1, 'total-all': 1,
+  'group-full': 1, 'group-grow': 1, 'group-big': 1, 'group-room': 1,
+  'cap-over': 1, 'snake-body': 1, 'snake-end': 1, 'loop-degree': 1,
+  'box-exact': 1, 'box-full': 1, 'box-short': 1,
+  'subset': 2, 'snake-touch': 2, 'loop-short': 2, 'loop-close': 2,
+  'reach-pocket': 2, 'outside-pocket': 2, 'reach-cut': 2, 'outside-cut': 2,
+  'cap-count': 2, 'group-count': 2, 'box-count': 2, 'snake-count': 2,
+  'loop-count': 2,
+  'crossed': 3, 'total-elsewhere-clear': 3, 'total-elsewhere-mined': 3,
+  'reach-budget': 3, 'piece-budget': 3, 'reach-room': 3,
+  'cap-ways': 3, 'group-ways': 3
+};
+
+/* The generator's dials on the solver: a ceiling on the tier it may reason
+   at (nought is no ceiling), one rule switched off to ask whether a board
+   truly needs it, and a tally of what fired, kept only while someone is
+   counting. Play always runs with the dials at rest. */
+let tierCap = 0;
+let ruleOff = '';
+let ruleTally = null;
+const allowRule = rule =>
+  (!tierCap || (TIER[rule] || 1) <= tierCap) && rule !== ruleOff;
+const tallyRule = rule => {
+  if (ruleTally) ruleTally[rule] = (ruleTally[rule] || 0) + 1;
+};
 const RULENOTES = {
   none: '',
   connected: 'All mines form a single group, touching by edge or corner.',
@@ -1611,16 +1640,22 @@ let startTime = 0, endTime = 0;
    be finished without guessing. */
 let difficulty = 'easy';
 /* mines scales the slider's density; open is the share of safe cells the
-   opening aims to give away; res is the most of the board allowed to
-   resist counting alone — none of it on easy, where counting is made
-   sufficient outright; two-fifths on medium; everything on hard, where
-   the generator hunts for as much resistance as it can find. Harder is
-   hard with everything spare taken off it: see pareDown. */
+   opening aims to give away; tier is the rung of the rule ladder the level
+   stands on — its boards fall to rules of that tier and below, and past the
+   first rung they genuinely need their own: a medium board does not fall to
+   easy's rules alone, nor a hard board to medium's. mute is the share of its
+   numbers a level may keep back, checked against the same tier its player
+   reasons at. Hard and harder skew their search toward boards whose solving
+   leans hardest on the deep rules; harder also hunts for boards that need as
+   many different rules as it can find, and hides every number it can spare.
+   None of it touches the guarantee: every board can still be finished
+   without guessing. */
 const DIFF = {
-  easy:   { mines: 1.0,  open: 0.25, res: 0 },
-  medium: { mines: 1.15, open: 0.14, res: 0.4 },
-  hard:   { mines: 1.3,  open: 0.07, res: 1, dens: 0.35 },
-  harder: { mines: 1.3,  open: 0.07, res: 1, dens: 0.35, pare: true }
+  easy:   { mines: 1.0,  open: 0.25, tier: 1 },
+  medium: { mines: 1.15, open: 0.14, tier: 2, mute: 0.45 },
+  hard:   { mines: 1.3,  open: 0.07, tier: 3, mute: 0.45, skew: true, dens: 0.35 },
+  harder: { mines: 1.3,  open: 0.07, tier: 3, mute: 1, skew: true, dens: 0.35,
+            variety: true, slow: true }
 };
 
 /* Hard aims at a density of its own rather than scaling whatever the slider
@@ -1734,7 +1769,6 @@ function paintToggles() {
   };
   mark('[data-diff]', x => x.dataset.diff === difficulty);
   mark('[data-rule]', x => x.dataset.rule === ruleset);
-  mark('[data-mute]', x => !!x.dataset.mute === muteOn);
   mark('[data-relax]', x => !!x.dataset.relax === relaxed);
   mark('[data-strict]', x => !!x.dataset.strict === strict);
   mark('[data-adj]', x => !!x.dataset.adj === adjOn);
@@ -1759,7 +1793,27 @@ let dealNote = '';
 
 const breath = () => new Promise(r => setTimeout(r, 0));
 
+/* A deal that steps out to breathe can find the world moved on: another
+   board started while it slept, and the arrays it was building now belong
+   to the newer deal. So every deal takes a numbered token, checks it on
+   waking, and a stale deal dies where it stands rather than write one more
+   word over a board that is no longer its own. The buttons already queue
+   their deals one behind another; this guards the ones nothing queues —
+   scripts, tests, anything driving the game directly. */
+let dealToken = 0;
+const STALE_DEAL = {};
+const dealCheck = t => { if (t !== dealToken) throw STALE_DEAL; };
+
 async function newGame(across, down, m) {
+  const my = ++dealToken;
+  try {
+    await newGameUnder(my, across, down, m);
+  } catch (e) {
+    if (e !== STALE_DEAL) throw e;       // superseded mid-breath: die quietly
+  }
+}
+
+async function newGameUnder(my, across, down, m) {
   builtAcross = across; builtDown = down;
   buildBoard(tiling, across, down);
   useCorners(true);          // cells touching at a corner count as neighbours
@@ -1795,13 +1849,15 @@ async function newGame(across, down, m) {
      since what it starts with showing is part of the answer. */
   seeded = true;
   dealing = true;
-  for (const g of buildPuzzle()) reveal(g);
+  const opening = await buildPuzzle();
+  dealCheck(my);
+  for (const g of opening) reveal(g);
   dealing = false;
-  /* Paring supersedes the hidden-numbers setting rather than sitting beside
-     it: it keeps back every number the board can spare, which is all the
-     setting was ever asking for and then some. */
-  if (d.pare) await pareDown();
-  else if (muteOn) muteNumbers();
+  /* Hidden numbers follow the level now, not a setting of their own: none
+     on easy, a share on medium and hard, and on harder every number the
+     board can spare. muteOn is kept abreast only for the saved game's sake. */
+  muteOn = !!d.mute;
+  if (d.mute) { await muteNumbers(d.mute); dealCheck(my); }
   given = opened;
 
   dealNote = '';
@@ -2414,12 +2470,13 @@ function rulesetMoves(known, find) {
   // the ground a mine could still pass through
   const open = i => known[i] === UNKNOWN || known[i] === KNOWN_MINE;
   const mark = (j, kind, rule, clues) => {
-    if (known[j] !== UNKNOWN) return;
+    if (known[j] !== UNKNOWN || !allowRule(rule)) return;
     if (find) {
       hintHit = { cells: [j], kind, rule, clues: clues.filter(c => c !== j) };
       throw HINT_STOP;
     }
     if (kind === 'safe') markOpen(known, j); else known[j] = KNOWN_MINE;
+    tallyRule(rule);
     moved = true;
   };
 
@@ -2641,7 +2698,7 @@ function rulesetMoves(known, find) {
        And not while the cheaper rules are still finding things: the solver
        comes back the moment they dry up, so waiting costs nothing and saves
        a walk of the whole piece on every sweep that did not need it. */
-    if (!moved) {
+    if (!moved && allowRule('reach-room')) {
       const { id, comps } = compsOver(open, adj);
       const withM = comps.filter(g => g.some(isM));
       if (withM.length === 1) {
@@ -2706,8 +2763,9 @@ function rulesetMoves(known, find) {
      None of it is gathered while the single-cell rules are still finding
      things: the solver comes back here the moment they dry up, so waiting
      costs nothing and skips the dearest sweep on every pass that did not
-     need it. */
-  if (!moved) {
+     need it. Nor under a tier ceiling of one, since everything here is a
+     rule of the second tier or the third. */
+  if (!moved && (!tierCap || tierCap >= 2)) {
     const bounds = [];
     const bound = (cells, lo, hi, rule, clues) => {
       lo = Math.max(0, lo); hi = Math.min(hi, cells.length);
@@ -2807,7 +2865,7 @@ function rulesetMoves(known, find) {
          bite at all: more mines wanted than one group may hold, or laid
          ground already against the number's cells. */
       const waysRule = gCap ? 'cap-ways' : 'group-ways';
-      for (const c2 of constraintsOf(known)) {
+      for (const c2 of allowRule(waysRule) ? constraintsOf(known) : []) {
         const U = c2.cells, need = c2.left;
         if (need < 2 || need >= U.length || U.length > 12) continue;
         const nearMine = U.some(u2 => [...edgOf(u2)].some(isM));
@@ -3245,13 +3303,16 @@ function deduce(known, mode) {
   const counting = () => {
     let moved = false;
     for (const c of constraintsOf(known)) {
-      if (c.left === 0) for (const j of c.cells) moved = setSafe(j) || moved;
-      else if (c.left === c.cells.length) for (const j of c.cells) moved = setMine(j) || moved;
+      if (c.left === 0 && allowRule('counting-clear'))
+        for (const j of c.cells) { if (setSafe(j)) { moved = true; tallyRule('counting-clear'); } }
+      else if (c.left === c.cells.length && allowRule('counting-full'))
+        for (const j of c.cells) { if (setMine(j)) { moved = true; tallyRule('counting-full'); } }
     }
     return moved;
   };
 
   const subsets = () => {
+    if (!allowRule('subset')) return false;
     const cons = constraintsOf(known);
     const owner = new Map();                 // cell -> the numbers watching it
     for (const c of cons) for (const x of c.cells) {
@@ -3266,8 +3327,8 @@ function deduce(known, mode) {
         if (!a.cells.every(y => b.cells.includes(y))) continue;
         const diff = b.cells.filter(y => !a.cells.includes(y));
         const d = b.left - a.left;
-        if (d === 0) for (const j of diff) moved = setSafe(j) || moved;
-        else if (d === diff.length) for (const j of diff) moved = setMine(j) || moved;
+        if (d === 0) for (const j of diff) { if (setSafe(j)) { moved = true; tallyRule('subset'); } }
+        else if (d === diff.length) for (const j of diff) { if (setMine(j)) { moved = true; tallyRule('subset'); } }
       }
     }
     return moved;
@@ -3281,12 +3342,14 @@ function deduce(known, mode) {
      that no subset could reach. The subset rule is the special case where
      one set swallows the other; this is the rest of that idea. */
   const crossed = () => {
+    if (!allowRule('crossed')) return false;
     const cons = constraintsOf(known);
     const owner = new Map();
     for (const c of cons) for (const x of c.cells) {
       let w = owner.get(x); if (!w) owner.set(x, w = []); w.push(c);
     }
     let moved = false;
+    const took = v => { if (v) { moved = true; tallyRule('crossed'); } return v; };
     for (const a of cons) {
       const seen = new Set([a]);
       const inA = new Set(a.cells);
@@ -3301,21 +3364,21 @@ function deduce(known, mode) {
         if (inLo > inHi) continue;
         if (bOut) {
           if (b.left - inLo <= 0) {
-            for (const y of b.cells) if (!inA.has(y)) moved = setSafe(y) || moved;
+            for (const y of b.cells) if (!inA.has(y)) took(setSafe(y));
           } else if (b.left - inHi >= bOut) {
-            for (const y of b.cells) if (!inA.has(y)) moved = setMine(y) || moved;
+            for (const y of b.cells) if (!inA.has(y)) took(setMine(y));
           }
         }
         if (aOut) {
           const inB = new Set(b.cells);
           if (a.left - inLo <= 0) {
-            for (const y of a.cells) if (!inB.has(y)) moved = setSafe(y) || moved;
+            for (const y of a.cells) if (!inB.has(y)) took(setSafe(y));
           } else if (a.left - inHi >= aOut) {
-            for (const y of a.cells) if (!inB.has(y)) moved = setMine(y) || moved;
+            for (const y of a.cells) if (!inB.has(y)) took(setMine(y));
           }
         }
         if (interN && inLo >= interN)
-          for (const y of b.cells) if (inA.has(y)) moved = setMine(y) || moved;
+          for (const y of b.cells) if (inA.has(y)) took(setMine(y));
       }
     }
     return moved;
@@ -3330,15 +3393,26 @@ function deduce(known, mode) {
     }
     const left = mines - found;
     let moved = false;
-    if (left === 0) { for (const j of covered) moved = setSafe(j) || moved; return moved; }
-    if (left === covered.length) { for (const j of covered) moved = setMine(j) || moved; return moved; }
+    if (left === 0 && allowRule('total-none')) {
+      for (const j of covered) { if (setSafe(j)) { moved = true; tallyRule('total-none'); } }
+      return moved;
+    }
+    if (left === covered.length && allowRule('total-all')) {
+      for (const j of covered) { if (setMine(j)) { moved = true; tallyRule('total-all'); } }
+      return moved;
+    }
     // one number holding every mine that is left leaves the rest of the board clear
     for (const a of constraintsOf(known)) {
       const inA = new Set(a.cells);
-      if (a.left === left)
-        for (const j of covered) { if (!inA.has(j)) moved = setSafe(j) || moved; }
-      else if (left - a.left === covered.length - a.cells.length)
-        for (const j of covered) { if (!inA.has(j)) moved = setMine(j) || moved; }
+      if (a.left === left && allowRule('total-elsewhere-clear'))
+        for (const j of covered) {
+          if (!inA.has(j) && setSafe(j)) { moved = true; tallyRule('total-elsewhere-clear'); }
+        }
+      else if (left - a.left === covered.length - a.cells.length &&
+               allowRule('total-elsewhere-mined'))
+        for (const j of covered) {
+          if (!inA.has(j) && setMine(j)) { moved = true; tallyRule('total-elsewhere-mined'); }
+        }
       if (moved) break;
     }
     return moved;
@@ -3379,7 +3453,23 @@ function deduce(known, mode) {
    from where the player really is.
    ===================================================================== */
 
+/* Asked at tier one first, then two, then three, so a hint names the
+   gentlest kind of reasoning the position yields to: a player is never shown
+   a crossed-number argument where a subset would have done, whatever order
+   the rules happen to sit in. The same ceiling the generator reasons under,
+   worn here for a different end. */
 function findHint(known) {
+  for (const cap of [1, 2, 3]) {
+    tierCap = cap;
+    try {
+      const h = findHintAt(known);
+      if (h) return h;
+    } finally { tierCap = 0; }
+  }
+  return searchHint(known);
+}
+
+function findHintAt(known) {
   const cons = constraintsOf(known);
 
   for (const c of cons) {
@@ -3398,7 +3488,7 @@ function findHint(known) {
   for (const c of cons) for (const x of c.cells) {
     let w = owner.get(x); if (!w) owner.set(x, w = []); w.push(c);
   }
-  for (const a of cons) {
+  for (const a of allowRule('subset') ? cons : []) {
     const seen = new Set();
     for (const x of a.cells) for (const b of owner.get(x)) {
       if (b === a || seen.has(b) || b.cells.length <= a.cells.length) continue;
@@ -3412,7 +3502,7 @@ function findHint(known) {
   }
 
   // crossed numbers, where neither set swallows the other — deduce's twin
-  for (const a of cons) {
+  for (const a of allowRule('crossed') ? cons : []) {
     const seen = new Set([a]);
     const inA = new Set(a.cells);
     for (const x of a.cells) for (const b of owner.get(x)) {
@@ -3450,7 +3540,7 @@ function findHint(known) {
   const left = mines - found;
   if (left === 0) return { cells: covered, kind: 'safe', rule: 'total-none', clues: [] };
   if (left === covered.length) return { cells: covered, kind: 'mine', rule: 'total-all', clues: [] };
-  for (const a of cons) {
+  for (const a of allowRule('total-elsewhere-clear') ? cons : []) {
     const inA = new Set(a.cells);
     const rest = covered.filter(j => !inA.has(j));
     if (!rest.length) continue;
@@ -3462,18 +3552,22 @@ function findHint(known) {
     if (left - a.left === covered.length - a.cells.length)
       return { cells: rest, kind: 'mine', rule: 'total-elsewhere-mined', clues: [a.from] };
   }
+  return null;
+}
 
-  /* The last method there is. The named rules are not the whole of
-     reasoning, and a rare position slips past every one of them: some rules
-     read the lie of the covered ground, and ground read one way from the
-     opening can be unreadable from the larger knowledge of a player who took
-     another path to the same place. So when the rules run dry, the
-     completions themselves are tried — a cell that comes out the same in
-     every board the clues still allow is settled, whatever the reasoning
-     would have been called. On a solvable board reached by true steps such a
-     cell always exists; only a search too big to finish can decline to name
-     it, and the cells against the numbers are asked first, where the answer
-     is likeliest to be quick. */
+/* The last method there is. The named rules are not the whole of reasoning,
+   and a rare position slips past every one of them: some rules read the lie
+   of the covered ground, and ground read one way from the opening can be
+   unreadable from the larger knowledge of a player who took another path to
+   the same place. So when the rules run dry, the completions themselves are
+   tried — a cell that comes out the same in every board the clues still
+   allow is settled, whatever the reasoning would have been called. On a
+   solvable board reached by true steps such a cell always exists; only a
+   search too big to finish can decline to name it, and the cells against
+   the numbers are asked first, where the answer is likeliest to be quick. */
+function searchHint(known) {
+  const covered = [];
+  for (let i = 0; i < n; i++) if (known[i] === UNKNOWN) covered.push(i);
   const nearby = [], farOff = [];
   for (const c of covered)
     ([...nbOf(c)].some(j => known[j] === SAFE && !muted[j]) ? nearby : farOff).push(c);
@@ -3661,36 +3755,7 @@ function shownBy(list) {
    layouts asking for the same number of hints the tie goes to the one whose
    opening is nearest a quarter of the board — big enough to work from, small
    enough to leave a game. */
-/* How much of a board yields to counting alone. What is left over is the work
-   the subtler rules must do, and that remainder is what difficulty means here:
-   an easy board falls to counting, a hard one keeps its secrets until the
-   player brings out subsets and the mine total. */
-function countingFix(known) {
-  let moved = true;
-  while (moved) {
-    moved = false;
-    for (const c of constraintsOf(known)) {
-      if (c.left === 0) {
-        for (const j of c.cells) if (known[j] === UNKNOWN) { markOpen(known, j); moved = true; }
-      } else if (c.left === c.cells.length) {
-        for (const j of c.cells) if (known[j] === UNKNOWN) { known[j] = KNOWN_MINE; moved = true; }
-      }
-    }
-    // once a law is on, its logic counts as plain sight, not as a subtler rule
-    if (!moved && ruleset !== 'none') moved = rulesetMoves(known);
-  }
-  let done = 0;
-  for (let i = 0; i < n; i++) if (known[i] !== UNKNOWN) done++;
-  return done;
-}
-
-function countingReach(list) {
-  const known = new Uint8Array(n);
-  for (const g of list) markOpen(known, g);
-  return countingFix(known);
-}
-
-function buildPuzzle() {
+async function buildPuzzle() {
   const d = DIFF[difficulty];
   const structured = ruleset !== 'none';
   /* Groups come in whole groups, a ring needs four cells at the very least,
@@ -3705,10 +3770,21 @@ function buildPuzzle() {
     mines = Math.max(1, Math.min(mines, n - 9));
   }
   const target = (n - mines) * d.open;
-  // hard gets longer to search, and so do the laws: what they ask for is rarer
+  // the deep tiers get longer to search, and so do the laws: what they ask for is rarer
   const deadline = performance.now() +
-    (n > 300 ? 300 : 120) * ((d.res >= 1 ? 2 : 1) + (structured ? 1 : 0));
+    (n > 300 ? 300 : 120) * ((d.tier >= 3 ? 2 : 1) + (structured ? 1 : 0));
   let best = null, spare = null;
+  const shortlist = [];          // harder's finalists, for the variety judging
+  const my = dealToken;          // entered before the deal's first breath
+  let drew = performance.now();
+  const breathe = async say => {
+    if (performance.now() - drew < 100) return;
+    drew = performance.now();
+    dealNote = say;
+    paintStatus();
+    await breath();
+    dealCheck(my);
+  };
 
   /* A law the mines cannot obey at the count asked for is answered by asking
      for fewer, not by giving up — a board of 106 mines that must all chain to
@@ -3726,10 +3802,15 @@ function buildPuzzle() {
     return false;
   };
 
-  // Cells handed over one at a time until the mines laid can all be reasoned out.
+  /* Cells handed over one at a time until the mines laid can all be
+     reasoned out — reasoned out at this level's tier, since the promise is
+     owed to a player wielding this level's rules and no more. What fired
+     along the way is tallied, for the levels that judge boards by it. */
   const handOut = () => {
     const known = new Uint8Array(n);
     const list = [];
+    tierCap = d.tier >= 3 ? 0 : d.tier;
+    ruleTally = {};
     while (true) {
       const g = pickGiven(known, list.length === 0);
       if (g < 0) break;
@@ -3737,39 +3818,35 @@ function buildPuzzle() {
       markOpen(known, g);
       if (deduce(known) === n - mines) break;
     }
-    return list;
+    const tally = ruleTally;
+    ruleTally = null;
+    tierCap = 0;
+    return { list, tally };
   };
 
   for (let attempt = 0; attempt < 500; attempt++) {
+    await breathe('Dealing…');
     if (!structured) layMines(new Set());
     else if (!layByRule()) { easeOff(); continue; }
-    const list = handOut();
+    const { list, tally } = handOut();
 
-    /* Solvable is not the whole promise: the board must also not resist
-       counting beyond what this level allows, and no amount of searching for
-       lucky layouts keeps that promise on the big boards. Wherever counting
-       still falls short of the ceiling, more hints go down along counting's
-       own frontier — until it finishes everything on easy, until at most
-       two-fifths withstands it on medium, and not at all on hard. */
-    if (d.res < 1) {
-      const ck = new Uint8Array(n);
-      for (const g of list) markOpen(ck, g);
-      let done = countingFix(ck);
-      while (n - done > d.res * n) {
-        const g = pickGiven(ck, false);
-        if (g < 0) break;
-        list.push(g);
-        markOpen(ck, g);
-        done = countingFix(ck);
-      }
-    }
     const cells = shownBy(list);
-    /* Judged in strict order: fewest hints first, then how near the board's
-       resistance to counting comes to what this level wants of it, and last,
-       an opening near the size this level grants. */
-    const stubborn = n - countingReach(list);
-    const score = (list.length - 1) * 1e6 + Math.abs(stubborn - d.res * n) * 100 +
-                  Math.abs(cells - target);
+    /* Judged in strict order: fewest hints first; then, where the level asks
+       it, how much of the solving leant on the deep rules — marks from the
+       second and third tiers as a share of all marks, the third counted
+       double, so a board that falls to counting scores low however it
+       finishes; and last, an opening near the size this level grants.
+       Harder also credits every distinct rule that fired, ahead of both. */
+    let score = (list.length - 1) * 1e6 + Math.abs(cells - target);
+    let marks = 0, deep = 0, kinds = 0;
+    for (const r of Object.keys(tally)) {
+      const t = TIER[r] || 1;
+      marks += tally[r]; kinds++;
+      if (t === 2) deep += tally[r];
+      else if (t === 3) deep += 2 * tally[r];
+    }
+    if (d.skew && marks) score += (1 - deep / (2 * marks)) * 2e4;
+    if (d.variety) score -= kinds * 5e4;
 
     /* Under a law, a board only counts if the law is load-bearing: a solver
        kept ignorant of it must stall short of finishing. Boards that fall to
@@ -3796,12 +3873,55 @@ function buildPuzzle() {
         }
       }
     }
+
+    /* And past the first rung, the tier is load-bearing too: a solver capped
+       one rung below must stall. A medium board that falls to easy's rules
+       is an easy board wearing the wrong name. */
+    if (qualifies && d.tier >= 2) {
+      const kt = new Uint8Array(n);
+      for (const g of list) markOpen(kt, g);
+      tierCap = d.tier - 1;
+      const resists = deduce(kt) < n - mines;
+      tierCap = 0;
+      if (!resists) qualifies = false;
+    }
+
     if (qualifies && (!best || score < best.score))
-      best = { mine: mine.slice(), count: count.slice(), list, score, mines };
+      best = { mine: mine.slice(), count: count.slice(), list, score, mines, tally };
+    if (qualifies && d.variety) {
+      shortlist.push({ mine: mine.slice(), count: count.slice(), list, score, mines, tally });
+      shortlist.sort((a, b) => a.score - b.score);
+      if (shortlist.length > 4) shortlist.pop();
+    }
     if (!spare || score < spare.score)
-      spare = { mine: mine.slice(), count: count.slice(), list, score, mines };
+      spare = { mine: mine.slice(), count: count.slice(), list, score, mines, tally };
     if (performance.now() > deadline &&
         (best || performance.now() > deadline + 500)) break;
+  }
+
+  /* Harder judges its shortlist the honest way: a rule counts only when the
+     board stops solving without it, so every rule that fired is switched off
+     in turn and the board asked again. The board needing the most distinct
+     rules wins. Counting alone is not asked after — no board does without
+     it, and asking would cost two solves for a foregone answer. */
+  if (d.variety && shortlist.length) {
+    let bestReq = -1;
+    for (const cand of shortlist) {
+      await breathe('Judging the shortlist');
+      mine.set(cand.mine); count.set(cand.count); mines = cand.mines;
+      noteBoxCounts();
+      let req = 0;
+      for (const r of Object.keys(cand.tally)) {
+        if (r === 'counting-clear' || r === 'counting-full') { req++; continue; }
+        const kv = new Uint8Array(n);
+        for (const g of cand.list) markOpen(kv, g);
+        ruleOff = r;
+        const still = deduce(kv) === n - mines;
+        ruleOff = '';
+        if (!still) req++;
+      }
+      if (req > bestReq) { bestReq = req; best = cand; }
+    }
   }
 
   /* Nothing came back at all: the law would not lay at any count the search
@@ -3819,7 +3939,7 @@ function buildPuzzle() {
        count that will lay. */
     while (!laid && mines + step <= n - 9) { mines += step; laid = layByRule(); }
     if (!laid) layMines(new Set());
-    return handOut();
+    return handOut().list;
   }
 
   /* The shrink can lower `mines` on attempts after the kept one was laid,
@@ -3833,17 +3953,22 @@ function buildPuzzle() {
 }
 
 /* Muting happens once the board is already known to be solvable, and every
-   mute is kept only if the board still solves without it — so the promise is
-   the one that was already made, not a new one taken on trust.
+   mute is kept only if the board still solves without it — solves at the
+   level's own tier, since the promise is owed to a player wielding that
+   level's rules and no more. `share` is the most of the numbers a level may
+   keep back: medium and hard hide a little under half; harder asks for all
+   of them and keeps whatever the board can actually spare.
 
    Cells the board opens with are left alone: the opening is what the player
    is given to work from, and a mute there would only make the start opaque.
 
-   Candidates go in batches against a clock. Checking one cell at a time costs
-   a whole solve apiece, which the big boards cannot afford; a batch that fails
-   is put back and halved, so the cost falls on the few refusals rather than on
-   every cell. */
-function muteNumbers() {
+   Candidates go in batches against a clock. Checking one cell at a time
+   costs a whole solve apiece, which the big boards cannot afford; a batch
+   that fails is put back and halved, so the cost falls on the few refusals
+   rather than on every cell. Asked for everything, the clock is longer and
+   the deal steps out now and then so the page can say how far it has got. */
+async function muteNumbers(share) {
+  const my = dealToken;          // entered before the deal's first breath
   const start = [], cand = [];
   for (let i = 0; i < n; i++) {
     if (state[i] === OPEN) start.push(i);
@@ -3854,17 +3979,30 @@ function muteNumbers() {
     const t = cand[i]; cand[i] = cand[j]; cand[j] = t;
   }
 
+  const cap = DIFF[difficulty].tier >= 3 ? 0 : DIFF[difficulty].tier;
   const solves = () => {
+    tierCap = cap;
     const known = new Uint8Array(n);
     for (const g of start) markOpen(known, g);
-    return deduce(known) === n - mines;
+    const r = deduce(known) === n - mines;
+    tierCap = 0;
+    return r;
   };
 
-  const target = Math.round(cand.length * 0.45);
-  const deadline = performance.now() + (n > 300 ? 400 : 200);
+  const target = Math.round(cand.length * share);
+  const deadline = performance.now() +
+    (share >= 1 ? (n > 300 ? 6000 : 2500) : (n > 300 ? 400 : 200));
   let batch = Math.max(1, target >> 3), at = 0, done = 0;
+  let drew = performance.now();
 
   while (at < cand.length && done < target && performance.now() < deadline) {
+    if (performance.now() - drew > 100) {
+      drew = performance.now();
+      dealNote = 'Hiding the numbers — ' + Math.round(100 * at / cand.length) + '%';
+      paintStatus();
+      await breath();
+      dealCheck(my);
+    }
     const slice = cand.slice(at, at + batch);
     for (const c of slice) muted[c] = 1;
     if (solves()) { done += slice.length; at += slice.length; }
@@ -3885,161 +4023,13 @@ function muteNumbers() {
       const t = order[i]; order[i] = order[j]; order[j] = t;
     }
     let hidden = 0;
-    const most = Math.round(boxes.length * 0.45);
+    const most = Math.round(boxes.length * (share >= 1 ? 1 : 0.45));
     for (const b of order) {
       if (hidden >= most || performance.now() > deadline + 200) break;
       boxMuted[b] = 1;
       if (solves()) hidden++; else boxMuted[b] = 0;
     }
   }
-}
-
-/* Harder makes one promise the other levels do not: nothing on the board is
-   spare. Every number the board will show, every clue on a box, and every
-   cell the board opens with is there because taking it away leaves a board
-   that can only be guessed at.
-
-   It is built by taking things away. A clue is put aside, the board is worked
-   out again from what is left, and the clue comes back only if the board no
-   longer comes out.
-
-   One pass would settle each clue for good if the solver could only ever do
-   worse for being told less. It cannot quite: the border and the group both
-   reason over the ground still covered, and a wider stretch of covered ground
-   can have a neck in it that a narrower stretch has not — shut a block of the
-   opening and a cell that nothing forced before may be forced now. So a clue
-   refused early can turn sparable once the opening has been cut back, and the
-   passes are made over and over until a whole round takes nothing away. In
-   practice the second round is the last, and it finds about one clue in every
-   thirty thousand. */
-async function pareDown() {
-  /* A breath is taken between solves so the page can paint, but not after
-     every one of them: a solve costs a few milliseconds and stepping out
-     costs about as much, so it is taken on the clock instead. A tenth of a
-     second between breaths shows a line that moves without the stepping out
-     ever amounting to anything. */
-  let drew = performance.now(), say = '';
-  const breathe = async () => {
-    if (performance.now() - drew < 100) return;
-    drew = performance.now();
-    dealNote = say;
-    paintStatus();
-    await breath();
-  };
-
-  const solves = () => {
-    const known = new Uint8Array(n);
-    for (let i = 0; i < n; i++) if (state[i] === OPEN) markOpen(known, i);
-    return deduce(known) === n - mines;
-  };
-  const shuffle = a => {
-    for (let i = a.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      const t = a[i]; a[i] = a[j]; a[j] = t;
-    }
-    return a;
-  };
-
-  const hide = (c, v) => { if (c < 0) boxMuted[~c] = v; else muted[c] = v; };
-
-  /* The numbers, those on the cells and those on the boxes shuffled in
-     together so that neither kind is picked over while the other is left
-     whole. Only what is still showing is offered: a clue already kept back
-     has nothing left to give.
-
-     A clue that stays has to be tried on its own, since that single trial is
-     the proof it is doing work; but clues that go can leave in batches, one
-     solve covering the lot — keeping back fewer clues than a batch that came
-     out can only come out too. So the batch doubles while batches keep coming
-     out and drops back to one the moment a batch fails. On a board where most
-     clues are spare that is a solve for every few of them; on one where few
-     are, it settles to a solve apiece, which is the price of the promise.
-     Batching harder than that costs more than it saves: doubling with no drop
-     back spent three solves a clue where one would do.
-
-     A run that fails holds at least one clue the board needs, and the way to
-     find it is to halve the run rather than to walk it. Each keeper still
-     ends up tried alone at the foot of the halving, which is the proof
-     required of it. */
-  const hideClues = async word => {
-    const cand = [];
-    for (let i = 0; i < n; i++) if (!mine[i] && !muted[i]) cand.push(i);
-    if (boxLaw() === 'exact' || boxLaw() === 'irregular')
-      for (let b = 0; b < boxes.length; b++) if (!boxMuted[b]) cand.push(~b);
-    shuffle(cand);
-
-    let took = false;
-    const pick = async run => {
-      await breathe();
-      for (const c of run) hide(c, 1);
-      if (solves()) { took = true; return true; }
-      for (const c of run) hide(c, 0);
-      if (run.length > 1) {
-        const half = run.length >> 1;
-        await pick(run.slice(0, half));
-        await pick(run.slice(half));
-      }
-      return false;
-    };
-
-    let batch = 1, at = 0;
-    while (at < cand.length) {
-      say = word + ' — ' + Math.round(100 * at / cand.length) + '%';
-      const slice = cand.slice(at, at + batch);
-      batch = await pick(slice) ? Math.min(32, batch + batch) : 1;
-      at += slice.length;
-    }
-    return took;
-  };
-
-  /* Then the opening. A blank tells the cells around it that they are safe
-     and opens them itself, so a blank and what it opens stand or fall
-     together — closing one of them alone would only see it opened again on
-     the spot. The opening therefore comes apart in blocks: a blank with its
-     whole spill, or a lone number on its own. Numbers kept back in the round
-     just gone may have been blanks holding a block together, and with the
-     number gone the block falls into its parts, which is why the blocks are
-     drawn up afresh each time rather than once at the start. */
-  const shutBlocks = async () => {
-    const block = new Int32Array(n).fill(-1);
-    const blocks = [];
-    for (let i = 0; i < n; i++) {
-      if (state[i] !== OPEN || block[i] >= 0) continue;
-      const id = blocks.length, grp = [i], stack = [i];
-      block[i] = id;
-      while (stack.length) {
-        const j = stack.pop();
-        for (const m of nbOf(j)) {
-          if (state[m] !== OPEN || block[m] >= 0) continue;
-          if (!((count[j] === 0 && !muted[j]) || (count[m] === 0 && !muted[m]))) continue;
-          block[m] = id; grp.push(m); stack.push(m);
-        }
-      }
-      blocks.push(grp);
-    }
-
-    /* A board with nothing showing is not a board, so the last block stays
-       whatever the solver makes of it. */
-    say = 'Paring the opening';
-    let standing = blocks.length, took = false;
-    for (const grp of shuffle(blocks)) {
-      if (standing < 2) break;
-      await breathe();
-      for (const c of grp) state[c] = COVERED;
-      if (solves()) { standing--; took = true; }
-      else for (const c of grp) state[c] = OPEN;
-    }
-    return took;
-  };
-
-  for (let round = 0; ; round++) {
-    const clues = await hideClues(round ? 'Checking nothing else can go' : 'Paring the clues');
-    const opening = await shutBlocks();
-    if (!clues && !opening) break;
-  }
-
-  opened = 0;
-  for (let i = 0; i < n; i++) if (state[i] === OPEN) opened++;
 }
 
 /* =====================================================================
@@ -4518,7 +4508,7 @@ async function startFromControls() {
     do {
       dealAgain = false;
       clearHint();
-      if (DIFF[difficulty].pare) {
+      if (DIFF[difficulty].slow) {
         dealNote = 'Dealing…';
         paintStatus();
         draw();
@@ -4553,13 +4543,6 @@ for (const b of document.querySelectorAll('[data-diff]'))
   b.onclick = () => {
     difficulty = b.dataset.diff;
     for (const x of document.querySelectorAll('[data-diff]')) x.classList.toggle('on', x === b);
-    startFromControls();
-  };
-
-for (const b of document.querySelectorAll('[data-mute]'))
-  b.onclick = () => {
-    muteOn = !!b.dataset.mute;
-    for (const x of document.querySelectorAll('[data-mute]')) x.classList.toggle('on', x === b);
     startFromControls();
   };
 
