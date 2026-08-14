@@ -4426,28 +4426,25 @@ function huntMotif() {
 async function buildPuzzle() {
   const d = DIFF[difficulty];
   const structured = ruleset !== 'none';
-  /* Groups come in whole groups, a ring needs four cells at the very least,
-     and a snake or a loop may prove a cell or two too long to lay. */
   const gSize = groupSize();
-  if (gSize) mines = Math.max(gSize, gSize * Math.floor(Math.min(n - 9, mines) / gSize));
-  if (has('loop')) mines = Math.max(4, mines);
   const theBoxLaw = boxLaw();
-  if (theBoxLaw && theBoxLaw !== 'exact') {
-    const { lo, hi } = boxBounds();
-    mines = Math.max(boxes.length * lo, Math.min(mines, boxes.length * hi));
+  /* Whatever count is asked for is bent to what the law can hold at all:
+     groups come in whole groups, a ring needs four cells at the very least,
+     and a box law binds the count between its floors and ceilings. Run
+     again after every change of count, since the nudging below changes it. */
+  const fitCount = () => {
+    if (gSize) mines = Math.max(gSize, gSize * Math.floor(Math.min(n - 9, mines) / gSize));
+    if (has('loop')) mines = Math.max(4, mines);
+    if (theBoxLaw && theBoxLaw !== 'exact') {
+      const { lo, hi } = boxBounds();
+      mines = Math.max(boxes.length * lo, Math.min(mines, boxes.length * hi));
+    }
     mines = Math.max(1, Math.min(mines, n - 9));
-  }
-  const target = (n - mines) * d.open;
-  /* The deep tiers get longer to search, and so do the laws: what they ask
-     for is rarer. The tenth of hard boards that miss their tier-three floor
-     are structural, not starved: doubling and quadrupling this clock were
-     both tried over three hundred boards apiece and moved the miss rate not
-     at all, and planting motifs the way harder does moved it no further —
-     hard keeps its first qualifier, and a planted shape is as easily given
-     over in the opening as found by search. For those draws of law and
-     tiling, no layout at this density needs the deep rules, and the spare
-     kept instead is still a sound board of its tier. */
-  const deadline = performance.now() +
+  };
+  fitCount();
+  let target = (n - mines) * d.open;
+  // the deep tiers get longer to search, and so do the laws: what they ask for is rarer
+  const clock =
     (n > 300 ? 300 : 120) * ((d.tier >= 3 ? 2 : 1) + (structured ? 1 : 0));
   let best = null, spare = null;
   const shortlist = [];          // harder's finalists, for the variety judging
@@ -4519,6 +4516,8 @@ async function buildPuzzle() {
     return { list, tally };
   };
 
+  const search = async until => {
+  target = (n - mines) * d.open;
   for (let attempt = 0; attempt < 500; attempt++) {
     await breathe('Dealing…');
     /* Harder plants a motif on most attempts — reasoning set waiting in the
@@ -4609,8 +4608,31 @@ async function buildPuzzle() {
     }
     if (!spare || score < spare.score)
       spare = { mine: mine.slice(), count: count.slice(), list, score, mines, tally };
-    if (performance.now() > deadline &&
-        (best || performance.now() > deadline + 500)) break;
+    if (performance.now() > until &&
+        (best || performance.now() > until + 500)) break;
+  }
+  };
+  await search(performance.now() + clock);
+
+  /* A floor the search cannot meet may be the density's doing rather than
+     the clock's: the deep rules live around a third-full board, and for
+     some law and tiling the count a level asks lands where no layout needs
+     them — longer clocks were measured to buy nothing there. So where the
+     level owns the density and no board qualified, the count is nudged a
+     step either way and the search sent out again, before any spare is
+     settled for. A nudged board wears its own count honestly; the level's
+     figure was an aim, not a promise. */
+  if (!best && d.tier >= 3 && sizeName) {
+    const asked = mines;
+    for (const share of [0.04, -0.04, 0.08, -0.08]) {
+      mines = asked + Math.round(share * n);
+      fitCount();
+      if (mines === asked) continue;
+      await breathe('Dealing…');
+      await search(performance.now() + clock / 2);
+      if (best) break;
+    }
+    if (!best) mines = asked;
   }
 
   /* Harder judges its shortlist the honest way: a rule counts only when the
