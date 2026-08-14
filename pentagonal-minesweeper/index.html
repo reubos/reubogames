@@ -1589,7 +1589,7 @@ const TIER = {
   'cap-count': 2, 'group-count': 2, 'box-count': 2, 'snake-count': 2,
   'loop-count': 2,
   'crossed': 3, 'total-elsewhere-clear': 3, 'total-elsewhere-mined': 3,
-  'reach-budget': 3, 'piece-budget': 3, 'reach-room': 3,
+  'reach-budget': 3, 'piece-budget': 3, 'reach-room': 3, 'reach-toll': 3,
   'cap-ways': 3, 'group-ways': 3
 };
 
@@ -2955,6 +2955,54 @@ function rulesetMoves(known, find) {
       else if (A.hi <= 0) for (const x of A.cells) mark(x, 'safe', A.rule, A.clues);
     }
 
+    /* A chain is priced in the coin of the number it crosses. Under the
+       chain laws a mine must reach beyond itself — to the rest of the group,
+       or out to the rim — and a mine deep among one number's cells spends
+       that number's own count on every link of its way out. Price each cell
+       of the number's watch by the cheapest route to ground beyond the
+       watch: a route out through d of the number's cells means d mines
+       against a count of k, so any cell whose every way out costs more than
+       k can hold no mine. A "2" over a four-cell stem hanging off open
+       ground prices the outer two cells at three and four, and both fall.
+
+       The group must genuinely extend beyond the watch for the argument to
+       bind — a mine already found anywhere does it, since one group must
+       reach it, and so do more mines remaining than the number holds. The
+       rim needs no such promise: every mine owes it a chain regardless. */
+    if (has('connected') || has('snake') || has('loop') || has('outside')) {
+      const chainAdj = has('connected') ? corOf : edgOf;
+      let foundAll = 0;
+      for (let i2 = 0; i2 < n; i2++) if (isM(i2)) foundAll++;
+      const binds = has('outside') || foundAll > 0;
+      for (const c2 of allowRule('reach-toll') ? constraintsOf(known) : []) {
+        const U = c2.cells, k = c2.left;
+        if (k < 1 || k >= U.length) continue;
+        if (!binds && mines - foundAll <= k) continue;
+        const inU = new Map();
+        U.forEach((u2, ix) => inU.set(u2, ix));
+        const cost = new Int32Array(U.length).fill(-1);
+        const q = [];
+        for (let ix = 0; ix < U.length; ix++) {
+          const u2 = U[ix];
+          let exit = has('outside') && !interior[u2];
+          if (!exit) for (const j2 of chainAdj(u2))
+            if (isM(j2) || (known[j2] === UNKNOWN && !inU.has(j2))) { exit = true; break; }
+          if (exit) { cost[ix] = 1; q.push(ix); }
+        }
+        for (let h2 = 0; h2 < q.length; h2++) {
+          const ix = q[h2];
+          if (cost[ix] >= k) continue;     // anything deeper is past paying anyway
+          for (const j2 of chainAdj(U[ix])) {
+            const jx = inU.get(j2);
+            if (jx !== undefined && cost[jx] < 0) { cost[jx] = cost[ix] + 1; q.push(jx); }
+          }
+        }
+        for (let ix = 0; ix < U.length; ix++)
+          if (cost[ix] < 0 || cost[ix] > k)
+            mark(U[ix], 'safe', 'reach-toll', [c2.from]);
+      }
+    }
+
     /* The trade itself, worked for any two statements about overlapping
        ground. What the shared cells can hold is pinned from both sides —
        no more than either statement allows, no less than either must put
@@ -3610,6 +3658,7 @@ const HINTWORDS = {
   'reach-pocket': 'Connectedness. No mine could reach this ground without leaving the group behind.',
   'reach-cut': 'Connectedness. This is the only cell the group has to pass through.',
   'reach-room': 'Connectedness. Take this cell away and no piece of ground left has both the mines already found and room for all of them — so the group must come through here.',
+  'reach-toll': 'The chain, priced. A mine here could only chain out through more of this number’s cells than the number has mines to give, so no chain can carry it.',
   'outside-pocket': 'The border. Every mine must chain edge to edge out to the rim, and no chain could reach this ground.',
   'outside-cut': 'The border. This is the only way left from here out to the rim, so the chain must come through it.',
   'crossed': "Two numbers, crossed. Neither's cells lie wholly inside the other's, but the shared cells are pinned between the two of them, and what is left over on one side is settled by it.",
