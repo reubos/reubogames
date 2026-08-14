@@ -4438,7 +4438,15 @@ async function buildPuzzle() {
     mines = Math.max(1, Math.min(mines, n - 9));
   }
   const target = (n - mines) * d.open;
-  // the deep tiers get longer to search, and so do the laws: what they ask for is rarer
+  /* The deep tiers get longer to search, and so do the laws: what they ask
+     for is rarer. The tenth of hard boards that miss their tier-three floor
+     are structural, not starved: doubling and quadrupling this clock were
+     both tried over three hundred boards apiece and moved the miss rate not
+     at all, and planting motifs the way harder does moved it no further —
+     hard keeps its first qualifier, and a planted shape is as easily given
+     over in the opening as found by search. For those draws of law and
+     tiling, no layout at this density needs the deep rules, and the spare
+     kept instead is still a sound board of its tier. */
   const deadline = performance.now() +
     (n > 300 ? 300 : 120) * ((d.tier >= 3 ? 2 : 1) + (structured ? 1 : 0));
   let best = null, spare = null;
