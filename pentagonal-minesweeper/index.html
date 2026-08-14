@@ -1591,7 +1591,8 @@ const TIER = {
   'loop-count': 2,
   'crossed': 3, 'total-elsewhere-clear': 3, 'total-elsewhere-mined': 3,
   'reach-budget': 3, 'piece-budget': 3, 'reach-room': 3, 'reach-toll': 3,
-  'reach-way': 3, 'cap-ways': 3, 'group-ways': 3
+  'reach-way': 3, 'cap-ways': 3, 'group-ways': 3,
+  'reach-need': 3, 'group-fit': 3, 'replay': 3
 };
 
 /* The generator's dials on the solver: a ceiling on the tier it may reason
@@ -1873,10 +1874,16 @@ async function newGameUnder(my, across, down, m) {
 // numbers read off afterwards.
 function layMines(banned) {
   mine.fill(0);
+  let placed = 0;
+  if (seedMotif) for (const c of seedMotif.mines)
+    if (!mine[c]) { mine[c] = 1; placed++; }
   let pool = [];
-  for (let j = 0; j < n; j++) if (!banned.has(j)) pool.push(j);
-  if (pool.length < mines) { pool = []; for (let j = 0; j < n; j++) pool.push(j); }
-  for (let m = 0; m < mines; m++) {
+  for (let j = 0; j < n; j++) if (!banned.has(j) && !mine[j] && seedOK(j)) pool.push(j);
+  if (pool.length < mines - placed) {
+    pool = [];
+    for (let j = 0; j < n; j++) if (!mine[j]) pool.push(j);
+  }
+  for (let m = 0; m < mines - placed; m++) {
     const p = m + Math.floor(Math.random() * (pool.length - m));
     const tmp = pool[m]; pool[m] = pool[p]; pool[p] = tmp;
     mine[pool[m]] = 1;
@@ -1980,7 +1987,8 @@ function placeConnected(k) {
   mine.fill(0);
   const dist = new Int32Array(n), prev = new Int32Array(n), q = new Int32Array(n);
   let placed = 0;
-  mine[Math.floor(Math.random() * n)] = 1; placed++;
+  if (seedMotif) { for (const c of seedMotif.mines) { mine[c] = 1; placed++; } }
+  else { mine[Math.floor(Math.random() * n)] = 1; placed++; }
 
   while (placed < k) {
     // how far off every cell stands from the group as it presently is
@@ -1989,7 +1997,7 @@ function placeConnected(k) {
     for (let i = 0; i < n; i++) if (mine[i]) { dist[i] = 0; prev[i] = -1; q[tail++] = i; }
     while (head < tail) {
       const v = q[head++];
-      for (const j of corOf(v)) if (dist[j] < 0) {
+      for (const j of corOf(v)) if (dist[j] < 0 && seedOK(j)) {
         dist[j] = dist[v] + 1; prev[j] = v; q[tail++] = j; far = j;
       }
     }
@@ -2025,14 +2033,18 @@ function placeCapped(k, cap) {
      tried again rather than left for the count to be eased down. */
   for (let attempt = 0; attempt < 30; attempt++) {
     mine.fill(0);
+    let placed = 0;
+    if (seedMotif) {
+      for (const c of seedMotif.mines) { mine[c] = 1; placed++; }
+      if (seedMotif.mines.some(c => groupAt(c) > cap)) return false;
+    }
     for (let i = order.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
       const t = order[i]; order[i] = order[j]; order[j] = t;
     }
-    let placed = 0;
     for (const c of order) {
       if (placed === k) break;
-      if (mine[c]) continue;
+      if (mine[c] || !seedOK(c)) continue;
       mine[c] = 1;
       if (groupAt(c) > cap) { mine[c] = 0; continue; }
       placed++;
@@ -2049,6 +2061,16 @@ function placeCapped(k, cap) {
 function placeGroups(k, g) {
   const blocked = new Uint8Array(n);
   let placed = 0;
+  /* Planted groups go down first, whole, and block their surroundings as
+     any laid group does; the motif is answerable for their being exactly
+     the size the law wants. */
+  if (seedMotif) {
+    for (const c of seedMotif.mines) { mine[c] = 1; placed++; }
+    for (const c of seedMotif.mines) {
+      blocked[c] = 1;
+      for (const j of edgOf(c)) blocked[j] = 1;
+    }
+  }
   const order = [...Array(n).keys()];
   for (let i = order.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
@@ -2056,12 +2078,12 @@ function placeGroups(k, g) {
   }
   for (const a of order) {
     if (placed >= k) break;
-    if (blocked[a]) continue;
+    if (blocked[a] || !seedOK(a)) continue;
     const blob = [a], seen = new Set([a]);
     while (blob.length < g) {
       const opts = [];
       for (const c of blob) for (const j of edgOf(c))
-        if (!blocked[j] && !seen.has(j)) opts.push(j);
+        if (!blocked[j] && !seen.has(j) && seedOK(j)) opts.push(j);
       if (!opts.length) break;
       const pick = opts[Math.floor(Math.random() * opts.length)];
       blob.push(pick); seen.add(pick);
@@ -2096,10 +2118,19 @@ function elbowRoom(c) {
    from a gamble into a search. Which way to try first still matters: the
    tightest step, the one leaving fewest ways on from where it lands, spends
    the cramped ground early and keeps the open ground open. */
-function walkOut(k, seed, allow) {
+function walkOut(k, seed, allow, preset) {
   mine.fill(0);
-  mine[seed] = 1;
-  const stack = [{ cell: seed, ways: null, at: 0 }];
+  const stack = [];
+  /* A preset is a stretch of the walk laid before it starts — the motif's
+     segment — and the walk carries on from its far end. Backing up may not
+     unwind into it: the planted stretch is the point. */
+  if (preset && preset.length) {
+    for (const c of preset) { mine[c] = 1; stack.push({ cell: c, ways: null, at: 0 }); }
+  } else {
+    mine[seed] = 1;
+    stack.push({ cell: seed, ways: null, at: 0 });
+  }
+  const root = stack.length;
   let budget = 20000 + 40 * k;
   while (stack.length < k && budget-- > 0) {
     const top = stack[stack.length - 1];
@@ -2111,7 +2142,7 @@ function walkOut(k, seed, allow) {
       top.ways = list.map(e => e[0]);
     }
     if (top.at >= top.ways.length) {
-      if (stack.length === 1) break;
+      if (stack.length <= root) break;
       mine[top.cell] = 0;
       stack.pop();
       continue;
@@ -2126,10 +2157,17 @@ function walkOut(k, seed, allow) {
 
 function placeSnake(k) {
   const allow = (j, head) => {
+    if (!seedOK(j)) return false;
     let touch = 0;
     for (const z of edgOf(j)) if (mine[z]) touch++;
     return touch === 1;               // the head, and nothing else
   };
+  const seg = seedMotif && seedMotif.segment;
+  if (seg) {
+    for (let t = 0; t < 4; t++)
+      if (walkOut(k, seg[0], allow, seg) && validRuleset()) return true;
+    return false;
+  }
   for (let t = 0; t < 8; t++)
     if (walkOut(k, Math.floor(Math.random() * n), allow)) return true;
   return false;
@@ -2142,16 +2180,19 @@ function placeSnake(k) {
 function placeLoop(k) {
   if (k < 4) return false;
   const dist = new Int32Array(n);
+  const seg = seedMotif && seedMotif.segment;
   for (let t = 0; t < 8; t++) {
-    const s = Math.floor(Math.random() * n);
+    const s = seg ? seg[0] : Math.floor(Math.random() * n);
     dist.fill(-1); dist[s] = 0;
     const q = [s];
     for (let a = 0; a < q.length; a++)
-      for (const j of edgOf(q[a])) if (dist[j] < 0) { dist[j] = dist[q[a]] + 1; q.push(j); }
+      for (const j of edgOf(q[a]))
+        if (dist[j] < 0 && seedOK(j)) { dist[j] = dist[q[a]] + 1; q.push(j); }
     /* The last cell laid has to touch both the head and the start, closing the
        ring; every other touches only the head, and has to stand near enough to
        the start to still get home in the steps that are left. */
     const allow = (j, head, len) => {
+      if (!seedOK(j)) return false;
       let touch = 0, meetsHead = false, meetsStart = false;
       for (const z of edgOf(j)) if (mine[z]) {
         touch++;
@@ -2162,7 +2203,8 @@ function placeLoop(k) {
         ? touch === 2 && meetsHead && meetsStart
         : touch === 1 && meetsHead && dist[j] >= 0 && dist[j] <= k - len;
     };
-    if (walkOut(k, s, allow) && validRuleset()) return true;
+    if (walkOut(k, s, allow, seg) && validRuleset()) return true;
+    if (seg && t >= 3) return false;   // a segment that will not close is not going to
   }
   return false;
 }
@@ -2183,13 +2225,20 @@ function placeBoxed(k) {
   };
   const held = new Int32Array(boxes.length);
   let placed = 0;
+  if (seedMotif) for (const c of seedMotif.mines) {
+    mine[c] = 1; placed++;
+    if (boxOf[c] >= 0) held[boxOf[c]]++;
+  }
   boxes.forEach((g, b) => {
-    for (const c of shuffle(g.slice()).slice(0, lo)) { mine[c] = 1; placed++; held[b]++; }
+    for (const c of shuffle(g.filter(c2 => !mine[c2] && seedOK(c2)))
+        .slice(0, Math.max(0, lo - held[b]))) {
+      mine[c] = 1; placed++; held[b]++;
+    }
   });
   if (placed > k) return false;
   for (const c of shuffle([...Array(n).keys()])) {
     if (placed === k) break;
-    if (mine[c]) continue;
+    if (mine[c] || !seedOK(c)) continue;
     const b = boxOf[c];
     if (b >= 0 && held[b] >= hi) continue;
     mine[c] = 1; placed++;
@@ -2212,6 +2261,30 @@ function placeOutside(k) {
   for (let attempt = 0; attempt < 12; attempt++) {
     mine.fill(0);
     let placed = 0, stuck = 0;
+    /* Planted mines go down first, and each planted piece is walked out to
+       the rim before anything else grows — the law owes every mine a chain
+       there, and the motif cannot be left owing. */
+    if (seedMotif) {
+      for (const c of seedMotif.mines) { mine[c] = 1; placed++; }
+      const { comps } = compsOver(i => mine[i] === 1, edgOf);
+      for (const g of comps) {
+        if (g.some(c => !interior[c])) continue;
+        dist.fill(-1);
+        let head = 0, tail = 0, hit = -1;
+        for (const c of g) { dist[c] = 0; prev[c] = -1; q[tail++] = c; }
+        while (head < tail && hit < 0) {
+          const v = q[head++];
+          for (const j of edgOf(v)) {
+            if (dist[j] >= 0 || mine[j] || !seedOK(j)) continue;
+            dist[j] = dist[v] + 1; prev[j] = v; q[tail++] = j;
+            if (!interior[j]) { hit = j; break; }
+          }
+        }
+        if (hit < 0) return false;
+        for (let v = hit; v >= 0 && !mine[v]; v = prev[v]) { mine[v] = 1; placed++; }
+      }
+      if (placed > k) return false;
+    }
     while (placed < k && stuck < 24) {
       dist.fill(-1);
       let head = 0, tail = 0, far = -1;
@@ -2219,7 +2292,7 @@ function placeOutside(k) {
         if (mine[i] || !interior[i]) { dist[i] = 0; prev[i] = -1; q[tail++] = i; }
       while (head < tail) {
         const v = q[head++];
-        for (const j of edgOf(v)) if (dist[j] < 0 && !mine[j]) {
+        for (const j of edgOf(v)) if (dist[j] < 0 && !mine[j] && seedOK(j)) {
           dist[j] = dist[v] + 1; prev[j] = v; q[tail++] = j; far = j;
         }
       }
@@ -2312,6 +2385,18 @@ function validRuleset() {
   }
   return true;
 }
+
+/* A motif is a small arrangement planted on purpose: mines that must lie
+   just so, cells that must stay clear, and for the path laws an ordered
+   segment the walk must carry — so that a chosen kind of reasoning is
+   waiting in the ground when the board is dealt, rather than hoped for.
+   The placers honour whichever motif is set; the laying is still checked
+   against the law like any other, and a motif that will not lay costs one
+   failed attempt and nothing more. */
+let seedMotif = null;          // { mines: [...], banned: Set, segment: [...] | null }
+const seedOK = c => !seedMotif || !seedMotif.banned.has(c);
+let dealSeeds = { hunted: 0, laid: 0, kept: 0, qualified: 0 };   // the last deal's planting, for the record
+let keptGround = null;         // the kept board's motif cells, steering the muting
 
 /* Lay by whichever law is on, and never take the laying on trust. Where two
    laws are in force the shape one does the laying; a box law that only writes
@@ -2775,6 +2860,11 @@ function rulesetMoves(known, find) {
     const bound = (cells, lo, hi, rule, clues) => {
       lo = Math.max(0, lo); hi = Math.min(hi, cells.length);
       if (!cells.length || (lo <= 0 && hi >= cells.length)) return;  // says nothing
+      /* A bound under a switched-off rule stays out of the pool entirely, so
+         a chain died at its first link cannot smuggle the rule's work in
+         under another rule's name — the honesty the variety judging and the
+         tier ceiling both lean on. */
+      if (!allowRule(rule)) return;
       bounds.push({ cells, lo, hi, rule, clues });
     };
 
@@ -2914,6 +3004,92 @@ function rulesetMoves(known, find) {
           else if (!inAny[k2]) mark(U[k2], 'safe', waysRule, wClues);
         }
       }
+
+      /* A short piece, asked exhaustively — the piece's own casework, where
+         the ways above were a number's. A lone mine under Doubles with two
+         cells beside it takes one of them, and a cell touching both leans
+         on a finished pair whichever is taken: no way keeps it, so it is
+         safe. Every way of completing the piece to its exact size is laid
+         out; cells no way can spare fall as mines, and cells every way
+         pushes out — the completed group's own surroundings — fall safe.
+         Only the exact sizes are asked: under a cap a piece may simply stay
+         as it is, and a way in which nothing more is laid excludes nothing.
+
+         Ways may weld pieces together, and a welding that lands the joined
+         group on its exact size is a way like any other; one that overruns
+         is refused. The reckoning is gathered whole before any marking, as
+         every reckoning here is. */
+      if (gSize && allowRule('group-fit')) {
+        const { id: fid, comps: fcomps } = compsOver(isM, edgOf);
+        for (const g of fcomps) {
+          const needMore = gSize - g.length;
+          if (needMore < 1 || needMore > 3) continue;
+          /* the ground a completion could use: within reach of the piece */
+          const region = [];
+          const rSeen = new Map();
+          let ring = g.slice();
+          for (let d0 = 0; d0 < needMore; d0++) {
+            const next = [];
+            for (const c of ring) for (const j2 of edgOf(c))
+              if (known[j2] === UNKNOWN && !rSeen.has(j2)) {
+                rSeen.set(j2, region.length); region.push(j2); next.push(j2);
+              }
+            ring = next;
+          }
+          if (!region.length || region.length > 10) continue;
+
+          const inAll2 = new Array(region.length).fill(true);
+          const excluded = new Map();      // cell -> ways that push it out
+          let ways2 = 0;
+          const tryWay = S => {
+            /* legal iff the piece's completed group is exactly the size,
+               counting whatever known mines the way welds in */
+            const set2 = new Set(S);
+            const grown = [g[0]];
+            const gSeen = new Set(grown);
+            for (let a2 = 0; a2 < grown.length; a2++)
+              for (const j2 of edgOf(grown[a2]))
+                if ((isM(j2) || set2.has(j2)) && !gSeen.has(j2)) {
+                  gSeen.add(j2); grown.push(j2);
+                }
+            if (grown.length !== gSize) return;
+            if (S.some(c => !gSeen.has(c))) return;   // a stray, not a completion
+            ways2++;
+            const has2 = new Set(S);
+            for (let r2 = 0; r2 < region.length; r2++)
+              if (!has2.has(region[r2])) inAll2[r2] = false;
+            /* What the finished group pushes out — each cell once per way,
+               however many of the group's cells it happens to touch. */
+            const out2 = new Set();
+            for (const c of grown) for (const j2 of edgOf(c))
+              if (known[j2] === UNKNOWN && !gSeen.has(j2)) out2.add(j2);
+            for (const j2 of out2)
+              excluded.set(j2, (excluded.get(j2) || 0) + 1);
+          };
+          /* Every size up to the need is a candidate way, not only the full
+             deficit: a completion that welds a neighbouring piece in brings
+             that piece's cells with it and wants fewer new ones. The size
+             check inside tryWay is what says whether a way truly lands. */
+          const pickWay = (at, chosen) => {
+            if (chosen.length) tryWay(chosen);
+            if (chosen.length === needMore) return;
+            for (let i2 = at; i2 < region.length; i2++) {
+              chosen.push(region[i2]); pickWay(i2 + 1, chosen); chosen.pop();
+            }
+          };
+          pickWay(0, []);
+          if (!ways2) continue;
+          for (let r2 = 0; r2 < region.length; r2++)
+            if (inAll2[r2]) mark(region[r2], 'mine', 'group-fit', g);
+          for (const [c, k2] of excluded)
+            if (k2 === ways2) mark(c, 'safe', 'group-fit', g);
+          /* A mark redraws the ground the next piece would be reckoned on —
+             a region walked over cells that have since become mines misses
+             true completions, and a missed completion is an unsound
+             intersection. One piece per sweep, as group-grow learnt. */
+          if (moved) break;
+        }
+      }
     }
 
     /* The path and the loop: how many mines a known mine must still find
@@ -2943,6 +3119,71 @@ function rulesetMoves(known, find) {
                   : mines >= 2 ? 1 - mn.length : 0;
         bound(unk, lo2, 2 - mn.length,
               ring ? 'loop-count' : 'snake-count', [i2, ...mn]);
+      }
+    }
+
+    /* Where two pieces can only join through one of two cells, the pair owes
+       the chain a mine between them — a floor of one over the two, which
+       forces nothing alone and everything in company: spent through a box's
+       ceiling or a number's count, it is the first link of the chains.
+
+       Every two-cell cut has at least one member on any single route from
+       piece to piece, so the members are found by walking one such route,
+       taking each of its cells away in turn, and asking what the ground then
+       funnels through — the same question the corridor rule asks, put to the
+       bare ground. A cell whose removal strands the far end entirely is a
+       cut of one, which reach-cut already forces, and is left to it. */
+    if ((has('connected') || has('snake') || has('loop') || has('outside'))) {
+      const chainAdj = has('connected') ? corOf : edgOf;
+      const passable = c => known[c] === UNKNOWN || isM(c);
+      const { id: pid, comps: pieces } = compsOver(isM, chainAdj);
+      const toRim = has('outside');
+      if (pieces.length >= (toRim ? 1 : 2) && pieces.length <= 6) {
+        const pairsOf = [];
+        if (toRim) for (let p = 0; p < pieces.length; p++) pairsOf.push([p, -1]);
+        else for (let p = 0; p < pieces.length; p++)
+          for (let p2 = p + 1; p2 < pieces.length; p2++) pairsOf.push([p, p2]);
+        const seenCut = new Set();
+        for (const [pa, pb] of pairsOf) {
+          // one route from A to B, by breadth
+          const prev = new Int32Array(n).fill(-2);
+          const q = [];
+          for (const c of pieces[pa]) { prev[c] = -1; q.push(c); }
+          let hit = -1;
+          const isEnd = pb >= 0 ? (c => pid[c] === pb) : (c => !interior[c]);
+          for (let h2 = 0; h2 < q.length && hit < 0; h2++)
+            for (const j2 of chainAdj(q[h2])) {
+              if (prev[j2] !== -2 || !passable(j2)) continue;
+              prev[j2] = q[h2]; q.push(j2);
+              if (isEnd(j2)) { hit = j2; break; }
+            }
+          if (hit < 0) continue;
+          const route = [];
+          for (let c = hit; c >= 0; c = prev[c])
+            if (known[c] === UNKNOWN) route.push(c);
+          if (route.length > 24) continue;
+
+          for (const u of route) {
+            /* the ground with u taken away, walked from the A side */
+            const seen2 = new Uint8Array(n);
+            const nodes = [];
+            for (const c of pieces[pa]) { seen2[c] = 1; nodes.push(c); }
+            for (let h2 = 0; h2 < nodes.length; h2++)
+              for (const j2 of chainAdj(nodes[h2]))
+                if (!seen2[j2] && j2 !== u && passable(j2)) {
+                  seen2[j2] = 1; nodes.push(j2);
+                }
+            if (!nodes.some(isEnd)) continue;    // u alone cuts: reach-cut's case
+            for (const v of cutCells(known, nodes, c => seen2[c] === 1, chainAdj,
+                                     isEnd, c => pid[c] === pa, 'strand')) {
+              const key2 = u < v ? u * n + v : v * n + u;
+              if (seenCut.has(key2)) continue;
+              seenCut.add(key2);
+              bound([u, v], 1, 2, 'reach-need',
+                    pieces[pa].concat(pb >= 0 ? pieces[pb] : []));
+            }
+          }
+        }
       }
     }
 
@@ -3012,56 +3253,108 @@ function rulesetMoves(known, find) {
        ground. What the shared cells can hold is pinned from both sides —
        no more than either statement allows, no less than either must put
        there — and each statement's own remainder follows. The subset rule
-       is the special case where one set swallows the other. */
+       is the special case where one set swallows the other.
+
+       And what a trade learns short of forcing is not thrown away: a bound
+       carved off the shared cells or a remainder is written back into the
+       pool as a statement of its own, and the trading goes round again
+       until a round learns nothing new. That is what lets a chain run — a
+       floor from the ground's shape spent through a box's ceiling into a
+       number, and the number's change of due spent somewhere else again.
+       Every derived bound is plain arithmetic on statements true of the
+       board, so the chain is as sound at its third link as at its first.
+       Rounds and pool are capped: past a few links a chain is casework in
+       costume, and the search rules bear that instead. */
     if (bounds.length) {
       const pool = bounds.slice();
       for (const c of constraintsOf(known))
         pool.push({ cells: c.cells, lo: c.left, hi: c.left, rule: '', clues: [c.from] });
+
+      // one entry per distinct set, kept at the tightest range yet known
+      const keyOf = cells => cells.slice().sort((x, y) => x - y).join(',');
+      const best = new Map();
+      for (const c of pool) {
+        const key = keyOf(c.cells);
+        const o = best.get(key);
+        if (!o) best.set(key, [c.lo, c.hi]);
+        else { o[0] = Math.max(o[0], c.lo); o[1] = Math.min(o[1], c.hi); }
+      }
+
       const owner = new Map();
-      pool.forEach((c, k) => {
+      const enroll = (c, k) => {
         for (const x of c.cells) {
           let w = owner.get(x); if (!w) owner.set(x, w = []);
           w.push(k);
         }
-      });
+      };
+      pool.forEach(enroll);
+
       const inA = new Uint8Array(n);
-      for (let ai = 0; ai < bounds.length; ai++) {
-        const A = bounds[ai];
-        for (const x of A.cells) inA[x] = 1;
-        const partners = new Set();
-        for (const x of A.cells) for (const k of owner.get(x)) partners.add(k);
-        partners.delete(ai);
-        for (const bi of partners) {
-          /* Bounds meet each other once apiece — and two bare pairs never
-             have anything to trade, so they are not asked. */
-          if (bi < bounds.length &&
-              (bi < ai || (A.cells.length <= 2 && pool[bi].cells.length <= 2)))
-            continue;
-          const B = pool[bi];
-          const inter = [], bOut = [];
-          for (const x of B.cells) (inA[x] ? inter : bOut).push(x);
-          const aOutN = A.cells.length - inter.length;
-          const inHi = Math.min(A.hi, B.hi, inter.length);
-          const inLo = Math.max(A.lo - aOutN, B.lo - bOut.length, 0);
-          if (inLo > inHi) continue;
-          const rule = A.rule, clues = A.clues.concat(B.clues);
-          if (bOut.length) {
-            if (B.hi - inLo <= 0) for (const x of bOut) mark(x, 'safe', rule, clues);
-            else if (B.lo - inHi >= bOut.length)
-              for (const x of bOut) mark(x, 'mine', rule, clues);
-          }
-          if (aOutN) {
-            const aSafe = A.hi - inLo <= 0, aMine = A.lo - inHi >= aOutN;
-            if (aSafe || aMine) {
+      let from = 0;                      // entries older than this have all met
+      for (let round = 0; round < 3 && from < pool.length; round++) {
+        const upto = pool.length;
+        const fresh = [];
+        const derive = (cells, lo, hi, rule, clues) => {
+          lo = Math.max(0, lo); hi = Math.min(hi, cells.length);
+          if (lo > hi || (lo <= 0 && hi >= cells.length)) return;
+          if (cells.length < 1 || cells.length > 12) return;
+          if (pool.length + fresh.length > 400) return;
+          const key = keyOf(cells);
+          const o = best.get(key);
+          if (o && lo <= o[0] && hi >= o[1]) return;      // says nothing new
+          if (!o) best.set(key, [lo, hi]);
+          else { o[0] = Math.max(o[0], lo); o[1] = Math.min(o[1], hi); }
+          fresh.push({ cells, lo, hi, rule, clues: clues.slice(0, 12) });
+        };
+
+        /* A fresh entry leads every trade it is part of, which is what keeps
+           the rounds from re-treading old ground: entries older than `from`
+           have already met everything older than themselves. */
+        for (let ai = from; ai < upto; ai++) {
+          const A = pool[ai];
+          if (!A.rule) continue;         // plain numbers never lead a trade
+          for (const x of A.cells) inA[x] = 1;
+          const partners = new Set();
+          for (const x of A.cells) for (const k of owner.get(x)) partners.add(k);
+          partners.delete(ai);
+          for (const bi of partners) {
+            if (pool[bi].rule && bi >= from && bi < ai) continue;  // met already
+            if (A.cells.length <= 2 && pool[bi].cells.length <= 2 &&
+                pool[bi].rule) continue;  // two bare pairs have nothing to trade
+            const B = pool[bi];
+            const inter = [], bOut = [];
+            for (const x of B.cells) (inA[x] ? inter : bOut).push(x);
+            if (!inter.length) continue;
+            const aOut = [];
+            if (A.cells.length !== inter.length) {
               const inB = new Set(B.cells);
-              for (const x of A.cells)
-                if (!inB.has(x)) mark(x, aSafe ? 'safe' : 'mine', rule, clues);
+              for (const x of A.cells) if (!inB.has(x)) aOut.push(x);
             }
+            const inHi = Math.min(A.hi, B.hi, inter.length);
+            const inLo = Math.max(A.lo - aOut.length, B.lo - bOut.length, 0);
+            if (inLo > inHi) continue;
+            const rule = A.rule || B.rule, clues = A.clues.concat(B.clues);
+            if (bOut.length) {
+              if (B.hi - inLo <= 0) for (const x of bOut) mark(x, 'safe', rule, clues);
+              else if (B.lo - inHi >= bOut.length)
+                for (const x of bOut) mark(x, 'mine', rule, clues);
+              else derive(bOut, B.lo - inHi, B.hi - inLo, rule, clues);
+            }
+            if (aOut.length) {
+              const aSafe = A.hi - inLo <= 0, aMine = A.lo - inHi >= aOut.length;
+              if (aSafe || aMine)
+                for (const x of aOut) mark(x, aSafe ? 'safe' : 'mine', rule, clues);
+              else derive(aOut, A.lo - inHi, A.hi - inLo, rule, clues);
+            }
+            if (inLo >= inter.length) for (const x of inter) mark(x, 'mine', rule, clues);
+            else if (inHi <= 0) for (const x of inter) mark(x, 'safe', rule, clues);
+            else derive(inter, inLo, inHi, rule, clues);
           }
-          if (inLo >= inter.length) for (const x of inter) mark(x, 'mine', rule, clues);
-          else if (inHi <= 0) for (const x of inter) mark(x, 'safe', rule, clues);
+          for (const x of A.cells) inA[x] = 0;
         }
-        for (const x of A.cells) inA[x] = 0;
+
+        from = upto;
+        for (const c of fresh) { enroll(c, pool.length); pool.push(c); }
       }
     }
 
@@ -3642,13 +3935,28 @@ function replayHint(known) {
       try { h = findHintAt(k0); } finally { tierCap = 0; }
       if (h) break;
     }
-    if (!h) return null;
+    if (!h) break;
     if (h.cells.some(c => known[c] === UNKNOWN))
       return { cells: h.cells.filter(c => known[c] === UNKNOWN),
                kind: h.kind, rule: h.rule, clues: h.clues };
     for (const c of h.cells) {
       if (h.kind === 'safe') markOpen(k0, c); else k0[c] = KNOWN_MINE;
     }
+  }
+
+  /* The hints walk the rules in their own order, and that order is not the
+     solver's: some rules read the lie of the ground, and two sound paths
+     from the same opening can part ways. When the hint-ordered replay runs
+     dry, the solve itself is run instead — the very computation the deal
+     was accepted on — and anything it settles that the player has not is
+     handed over. It cannot come home empty on a board this build dealt. */
+  const k1 = new Uint8Array(n);
+  for (const g of dealt) markOpen(k1, g);
+  deduce(k1);
+  for (let c = 0; c < n; c++) {
+    if (known[c] !== UNKNOWN || k1[c] === UNKNOWN) continue;
+    return { cells: [c], kind: k1[c] === SAFE ? 'safe' : 'mine',
+             rule: 'replay', clues: [] };
   }
   return null;
 }
@@ -3796,6 +4104,8 @@ const HINTWORDS = {
   'reach-room': 'Connectedness. Take this cell away and no piece of ground left has both the mines already found and room for all of them — so the group must come through here.',
   'reach-toll': 'The chain, priced. A mine here could only chain out through more of this number’s cells than the number has mines to give, so no chain can carry it.',
   'reach-way': 'The one affordable way. Of every route the pieces could still join by, all that this number can pay for pass through here — so the chain does too.',
+  'reach-need': 'The narrow join. The pieces can only meet through one of two cells, so between them those two owe a mine — and what watches them spends it.',
+  'group-fit': 'The groups. Complete this piece every way its size allows, and every way agrees about this cell.',
   'outside-pocket': 'The border. Every mine must chain edge to edge out to the rim, and no chain could reach this ground.',
   'outside-cut': 'The border. This is the only way left from here out to the rim, so the chain must come through it.',
   'crossed': "Two numbers, crossed. Neither's cells lie wholly inside the other's, but the shared cells are pinned between the two of them, and what is left over on one side is settled by it.",
@@ -3807,6 +4117,7 @@ const HINTWORDS = {
   'cap-ways': "The groups. Lay this number's mines every way that does not weld a group past the law, and every way agrees about this cell.",
   'group-ways': "The groups. Lay this number's mines every way that does not swell a group past its size, and every way agrees about this cell.",
   'search': 'Exhaustion. Every board the clues still allow has been tried, and in all of them this cell comes out the same way.',
+  'replay': 'The deal remembers. Solved from the opening cells alone, the board settles this — retrace it from what was first shown.',
 };
 
 const HINTIDLE = 'Asking once marks what to look at; asking again names the reasoning.';
@@ -3941,6 +4252,177 @@ function shownBy(list) {
    layouts asking for the same number of hints the tie goes to the one whose
    opening is nearest a quarter of the board — big enough to work from, small
    enough to leave a game. */
+/* =====================================================================
+   MOTIFS — reasoning planted on purpose.
+
+   Each hunt looks over the bare board for ground where a chosen kind of
+   reasoning could live, and answers with the mines to plant, the cells to
+   keep clear, and — for the path laws — the stretch of walk to carry.
+   A hunt promises geometry, not outcome: whether the reasoning ends up
+   truly needed is judged afterwards, the honest way, by switching rules
+   off; a motif that dissolves into the rest of the board has still seeded
+   a livelier layout than chance. Hunts start from a random cell, so the
+   same board is never planted twice alike.
+   ===================================================================== */
+
+// cells of i's ring forming an edge-joined path of length L, in order
+function ringRun(i, L) {
+  const ring = [...nbOf(i)];
+  if (ring.length < L) return null;
+  const eadj = (a, b) => [...edgOf(a)].includes(b);
+  const found = [];
+  const grow = path => {
+    if (found.length) return;
+    if (path.length === L) {
+      // induced: no touching except along the run
+      for (let x = 0; x < L; x++) for (let y = x + 2; y < L; y++)
+        if (eadj(path[x], path[y])) return;
+      found.push(path.slice());
+      return;
+    }
+    for (const c of ring)
+      if (!path.includes(c) && eadj(path[path.length - 1], c)) {
+        path.push(c); grow(path); path.pop();
+      }
+  };
+  const off = Math.floor(Math.random() * ring.length);
+  for (let s = 0; s < ring.length && !found.length; s++)
+    grow([ring[(off + s) % ring.length]]);
+  return found[0] || null;
+}
+
+/* A run beside one cell: mines spaced so the law leaves a single reading,
+   the gaps kept clear, the watcher kept clear to carry the number. */
+function huntRun() {
+  const s = groupSize(), cap = groupCap();
+  let L, mineAt;
+  if (s === 1) { L = 5; mineAt = [0, 2, 4]; }
+  else if (cap === 2) { L = 4; mineAt = [0, 1, 3]; }
+  else if (cap === 3) { L = 5; mineAt = [0, 1, 2, 4]; }
+  else return null;
+  const start = Math.floor(Math.random() * n);
+  for (let o = 0; o < n; o++) {
+    const i = (start + o) % n;
+    if (!interior[i]) continue;
+    const run = ringRun(i, L);
+    if (!run) continue;
+    const banned = new Set([i]);
+    for (let p = 0; p < L; p++) if (!mineAt.includes(p)) banned.add(run[p]);
+    return { mines: mineAt.map(p => run[p]), banned, segment: null };
+  }
+  return null;
+}
+
+/* The wedge, for the pairs: a mine whose only growth is two forked cells,
+   and a third cell touching both — safe whichever way the pair completes. */
+function huntWedge() {
+  const start = Math.floor(Math.random() * n);
+  const eadj = (a, b) => [...edgOf(a)].includes(b);
+  for (let o = 0; o < n; o++) {
+    const m = (start + o) % n;
+    if (!interior[m]) continue;
+    const nb = [...edgOf(m)];
+    for (let i1 = 0; i1 < nb.length; i1++) for (let i2 = i1 + 1; i2 < nb.length; i2++) {
+      const a = nb[i1], b = nb[i2];
+      if (eadj(a, b)) continue;
+      const c = [...edgOf(a)].find(x =>
+        x !== m && x !== b && !eadj(x, m) && eadj(x, b));
+      if (c === undefined) continue;
+      return { mines: [m, a], banned: new Set([b, c]), segment: null };
+    }
+  }
+  return null;
+}
+
+/* The stem: a four-cell run beside a cell, its outer half kept clear, its
+   inner half mined and anchored — to the group, or as a stretch of path. */
+function huntStem() {
+  const path = has('snake') || has('loop');
+  const start = Math.floor(Math.random() * n);
+  for (let o = 0; o < n; o++) {
+    const i = (start + o) % n;
+    if (!interior[i]) continue;
+    const run = ringRun(i, 4);
+    if (!run) continue;
+    const [c1, c2, c3, c4] = run;
+    const banned = new Set([i, c3, c4]);
+    if (path) {
+      const m = [...edgOf(c1)].find(x =>
+        !run.includes(x) && x !== i &&
+        ![c2, c3, c4].some(z => [...edgOf(x)].includes(z)));
+      if (m === undefined) continue;
+      return { mines: [m, c1, c2], banned, segment: [m, c1, c2] };
+    }
+    if (has('outside')) return { mines: [c1, c2], banned, segment: null };
+    const m = [...corOf(c1)].find(x =>
+      !run.includes(x) && x !== i && ![...nbOf(i)].includes(x));
+    if (m === undefined) continue;
+    return { mines: [m, c1, c2], banned, segment: null };
+  }
+  return null;
+}
+
+/* The corridor: two ends with two ways between them, one way watched by a
+   cell that can only pay for half of it. */
+function huntCorridor() {
+  const path = has('snake') || has('loop');
+  const adj = path ? edgOf : corOf;
+  const eadj = (a, b) => [...adj(a)].includes(b);
+  const start = Math.floor(Math.random() * n);
+  for (let o = 0; o < n; o++) {
+    const mA = (start + o) % n;
+    if (!interior[mA]) continue;
+    for (const x1 of adj(mA)) {
+      for (const x2 of adj(x1)) {
+        if (x2 === mA || eadj(mA, x2)) continue;
+        for (const mB of adj(x2)) {
+          if (mB === mA || mB === x1 || eadj(mA, mB) || eadj(x1, mB)) continue;
+          if (!path) {
+            const y = [...adj(mA)].find(c =>
+              c !== x1 && c !== x2 && c !== mB && eadj(c, mB));
+            if (y === undefined) continue;
+            const w = [...nbOf(x1)].find(c =>
+              ![mA, mB, x2, y].includes(c) &&
+              [...nbOf(c)].includes(x2) && [...nbOf(c)].includes(y) &&
+              ![...nbOf(c)].includes(mA) && ![...nbOf(c)].includes(mB));
+            if (w === undefined) continue;
+            return { mines: [mA, y, mB], banned: new Set([x1, x2]), segment: null };
+          }
+          let y1 = -1, y2 = -1;
+          outer:
+          for (const a of adj(mA)) {
+            if (a === x1 || a === x2 || a === mB || eadj(a, mB)) continue;
+            for (const b of adj(a)) {
+              if ([mA, mB, x1, x2, a].includes(b)) continue;
+              if (eadj(b, mA) || !eadj(b, mB)) continue;
+              y1 = a; y2 = b; break outer;
+            }
+          }
+          if (y1 < 0) continue;
+          const mE = [...adj(mA)].find(c =>
+            ![mA, mB, x1, x2, y1, y2].includes(c));
+          if (mE === undefined) continue;
+          return { mines: [mE, mA, y1, y2, mB], banned: new Set([x1, x2]),
+                   segment: [mE, mA, y1, y2, mB] };
+        }
+      }
+    }
+  }
+  return null;
+}
+
+// whichever motif suits the law in force, chosen at random among them
+function huntMotif() {
+  const kinds = [];
+  if (groupSize() === 1 || groupCap()) kinds.push(huntRun);
+  if (groupSize() === 2) kinds.push(huntWedge);
+  if (has('connected')) kinds.push(huntStem, huntCorridor);
+  if (has('outside')) kinds.push(huntStem);
+  if (has('snake') || has('loop')) kinds.push(huntStem, huntCorridor);
+  if (!kinds.length) return null;
+  return kinds[Math.floor(Math.random() * kinds.length)]();
+}
+
 async function buildPuzzle() {
   const d = DIFF[difficulty];
   const structured = ruleset !== 'none';
@@ -3961,6 +4443,8 @@ async function buildPuzzle() {
     (n > 300 ? 300 : 120) * ((d.tier >= 3 ? 2 : 1) + (structured ? 1 : 0));
   let best = null, spare = null;
   const shortlist = [];          // harder's finalists, for the variety judging
+  dealSeeds = { hunted: 0, laid: 0, kept: 0, qualified: 0 };
+  keptGround = null;
   const my = dealToken;          // entered before the deal's first breath
   let drew = performance.now();
   const breathe = async say => {
@@ -3997,12 +4481,29 @@ async function buildPuzzle() {
     const list = [];
     tierCap = d.tier >= 3 ? 0 : d.tier;
     ruleTally = {};
-    while (true) {
-      const g = pickGiven(known, list.length === 0);
-      if (g < 0) break;
-      list.push(g);
-      markOpen(known, g);
-      if (deduce(known) === n - mines) break;
+    /* The promise owed is one-shot: a player starts from the opening alone,
+       not from the trajectory the dealing happened to walk. Some rules read
+       the lie of the covered ground, and what they derive with few cells
+       open they cannot always re-derive with more — so a closure built up
+       given by given can outrun the closure the opening actually yields.
+       Deal on the working closure, then put the honest question: does the
+       opening alone still finish? Where it falls short, adopt what it
+       really knows and keep dealing from there. */
+    for (let round = 0; round < 50; round++) {
+      /* Give before asking: under the box laws the clues stand on the boxes
+         and can finish a thin board from nothing at all, and a board with
+         nothing showing is not a board. */
+      while (true) {
+        const g = pickGiven(known, list.length === 0);
+        if (g < 0) break;
+        list.push(g);
+        markOpen(known, g);
+        if (deduce(known) === n - mines) break;
+      }
+      const k1 = new Uint8Array(n);
+      for (const g of list) markOpen(k1, g);
+      if (deduce(k1) === n - mines) break;
+      known.set(k1);
     }
     const tally = ruleTally;
     ruleTally = null;
@@ -4012,8 +4513,24 @@ async function buildPuzzle() {
 
   for (let attempt = 0; attempt < 500; attempt++) {
     await breathe('Dealing…');
+    /* Harder plants a motif on most attempts — reasoning set waiting in the
+       ground rather than hoped for. A motif that will not lay costs the one
+       attempt and never eases the count: the failure was the planting's,
+       not the board's. */
+    seedMotif = d.variety && attempt % 3 !== 2 ? huntMotif() : null;
+    if (seedMotif && seedMotif.mines.length > mines - 4) seedMotif = null;
+    const wasSeeded = !!seedMotif;
+    const seedGround = wasSeeded
+      ? seedMotif.mines.concat([...seedMotif.banned]) : null;
+    if (wasSeeded) dealSeeds.hunted++;
     if (!structured) layMines(new Set());
-    else if (!layByRule()) { easeOff(); continue; }
+    else if (!layByRule()) {
+      seedMotif = null;
+      if (!wasSeeded) easeOff();
+      continue;
+    }
+    seedMotif = null;
+    if (wasSeeded) dealSeeds.laid++;
     const { list, tally } = handOut();
 
     const cells = shownBy(list);
@@ -4072,10 +4589,13 @@ async function buildPuzzle() {
       if (!resists) qualifies = false;
     }
 
+    if (qualifies && wasSeeded) dealSeeds.qualified++;
     if (qualifies && (!best || score < best.score))
-      best = { mine: mine.slice(), count: count.slice(), list, score, mines, tally };
+      best = { mine: mine.slice(), count: count.slice(), list, score, mines, tally,
+               wasSeeded, seedGround };
     if (qualifies && d.variety) {
-      shortlist.push({ mine: mine.slice(), count: count.slice(), list, score, mines, tally });
+      shortlist.push({ mine: mine.slice(), count: count.slice(), list, score, mines,
+                       tally, wasSeeded, seedGround });
       shortlist.sort((a, b) => a.score - b.score);
       if (shortlist.length > 4) shortlist.pop();
     }
@@ -4091,12 +4611,17 @@ async function buildPuzzle() {
      rules wins. Counting alone is not asked after — no board does without
      it, and asking would cost two solves for a foregone answer. */
   if (d.variety && shortlist.length) {
-    let bestReq = -1;
+    /* The rules that only ever speak through chains and casework count
+       double: a board needing them is a board where the reasoning links,
+       which is what this level is for. */
+    const CHAINY = { 'reach-need': 1, 'reach-toll': 1, 'reach-way': 1,
+                     'group-fit': 1, 'cap-ways': 1, 'group-ways': 1 };
+    let bestReq = -1, bestChained = false;
     for (const cand of shortlist) {
       await breathe('Judging the shortlist');
       mine.set(cand.mine); count.set(cand.count); mines = cand.mines;
       noteBoxCounts();
-      let req = 0;
+      let req = 0, chained = false;
       for (const r of Object.keys(cand.tally)) {
         if (r === 'counting-clear' || r === 'counting-full') { req++; continue; }
         const kv = new Uint8Array(n);
@@ -4104,10 +4629,19 @@ async function buildPuzzle() {
         ruleOff = r;
         const still = deduce(kv) === n - mines;
         ruleOff = '';
-        if (!still) req++;
+        if (!still) {
+          req += CHAINY[r] ? 2 : 1;
+          if (CHAINY[r]) chained = true;
+        }
       }
-      if (req > bestReq) { bestReq = req; best = cand; }
+      /* A board that genuinely needs a chain outranks any board that does
+         not, whatever their counts: chains are what this level is for. */
+      if ((chained && !bestChained) ||
+          (chained === bestChained && req > bestReq)) {
+        bestReq = req; bestChained = chained; best = cand;
+      }
     }
+    if (best && best.wasSeeded) dealSeeds.kept = 1;
   }
 
   /* Nothing came back at all: the law would not lay at any count the search
@@ -4134,6 +4668,7 @@ async function buildPuzzle() {
   mine.set(kept.mine);
   count.set(kept.count);
   mines = kept.mines;
+  keptGround = kept.seedGround || null;   // where the motif lies, for the muting
   noteBoxCounts();               // the numbers on the boxes follow the board kept
   return kept.list;
 }
@@ -4163,6 +4698,17 @@ async function muteNumbers(share) {
   for (let i = cand.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
     const t = cand[i]; cand[i] = cand[j]; cand[j] = t;
+  }
+  /* Where a motif was planted, the numbers around it are offered up first.
+     A motif's reasoning is only needed once the cheap readings beside it
+     are gone, and the cheap readings live in exactly those numbers — hiding
+     them first is what turns a planted shape into a required one. The
+     solvability check below is unchanged, so nothing is hidden that the
+     board cannot spare. */
+  if (keptGround && keptGround.length) {
+    const near = new Set();
+    for (const c of keptGround) { near.add(c); for (const j of nbOf(c)) near.add(j); }
+    cand.sort((a, b) => (near.has(b) ? 1 : 0) - (near.has(a) ? 1 : 0));
   }
 
   const cap = DIFF[difficulty].tier >= 3 ? 0 : DIFF[difficulty].tier;
