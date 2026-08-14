@@ -532,6 +532,40 @@ function cutCells(known, nodes, keep, adjOf, isA, isB, mode) {
    that parts nothing, the single piece left is simply everything but itself;
    for one that parts, the pieces are the subtrees it cuts off and whatever
    remains after them. */
+/* The cells whose going parts a piece of ground in two — the places worth
+   asking a question of, when the question is what gets cut off from what.
+   The usual walk, keeping the cells at which a child's reach never climbs
+   back above its parent. The first cell is judged by how many children the
+   walk hangs on it, since it has no parent to be cut from. */
+function partingCells(nodes, keep, adjOf) {
+  const disc = new Int32Array(n).fill(-1), low = new Int32Array(n);
+  const out = [];
+  const root = nodes[0];
+  let timer = 0, rootKids = 0;
+  disc[root] = low[root] = timer++;
+  const stack = [[root, -1, 0]];
+  while (stack.length) {
+    const fr = stack[stack.length - 1], v = fr[0], adj = adjOf(v);
+    if (fr[2] < adj.length) {
+      const w = adj[fr[2]++];
+      if (!keep(w)) continue;
+      if (disc[w] < 0) {
+        disc[w] = low[w] = timer++;
+        if (v === root) rootKids++;
+        stack.push([w, v, 0]);
+      } else if (w !== fr[1]) low[v] = Math.min(low[v], disc[w]);
+    } else {
+      stack.pop();
+      const p = fr[1];
+      if (p < 0) break;
+      low[p] = Math.min(low[p], low[v]);
+      if (p !== root && low[v] >= disc[p] && !out.includes(p)) out.push(p);
+    }
+  }
+  if (rootKids > 1) out.push(root);
+  return out;
+}
+
 function tightCells(known, nodes, keep, adjOf, isM, need) {
   const disc = new Int32Array(n).fill(-1), low = new Int32Array(n);
   const sz = new Int32Array(n), hm = new Int32Array(n);
@@ -836,6 +870,70 @@ function rulesetMoves(known, find) {
         const g = withM[0];
         for (const u of tightCells(known, g, x => id[x] === id[g[0]], adj, isM, mines))
           mark(u, 'mine', 'reach-room', [...adj(u)]);
+      }
+    }
+
+    /* A mine that is owed but not yet placed anchors the ground as firmly as
+       one already found. A number still wanting a mine says one of its
+       covered cells holds one without saying which — and since every mine
+       lies in the one piece of ground the group occupies, that piece must
+       hold a cell of every number still owed. Two things follow.
+
+       Where a number has only one candidate left inside that piece, the
+       waiting mine can be nowhere else, and the cell is settled. And where
+       taking a covered cell away would leave the piece holding none of some
+       number's candidates, the owed mine could no longer join the group at
+       all: the cell taken away is the way through, and is a mine. That is
+       the bottleneck a player sees when a "1" sits in a pocket with one
+       gap — the pocket owes a mine, and the mine owes the group a chain.
+
+       Only cells whose going actually parts the ground are worth asking
+       after for the second, so the parting cells are found once and asked
+       one at a time — cheap enough that this one need not wait for narrow
+       ground the way the priced routes do. It says nothing under the border
+       law, where the mines owe the rim a chain apiece and need never gather
+       into one piece at all. */
+    if (!moved && allowRule('reach-owed') && !has('outside')) {
+      const { id, comps } = compsOver(open, adj);
+      const withM = comps.filter(g => g.some(isM));
+      if (withM.length === 1) {
+        const home = id[withM[0][0]];
+        const owed = [];
+        for (const c2 of constraintsOf(known))
+          if (c2.left >= 1) {
+            const inHome = c2.cells.filter(x => id[x] === home);
+            if (inHome.length) owed.push({ cells: inHome, from: c2.from });
+          }
+
+        // the one candidate left: the owed mine can be nowhere else
+        for (const o of owed)
+          if (o.cells.length === 1) mark(o.cells[0], 'mine', 'reach-owed', [o.from]);
+
+        /* And the partings. A cell whose going splits the piece is found by
+           the usual walk; then the part still holding the mines must hold a
+           candidate of every number owed, or the going was impossible. */
+        if (owed.length) {
+          const nodes = withM[0];
+          const inHome2 = new Uint8Array(n);
+          for (const c of nodes) inHome2[c] = 1;
+          for (const u of partingCells(nodes, c => inHome2[c] === 1, adj)) {
+            if (known[u] !== UNKNOWN) continue;
+            const seen2 = new Uint8Array(n);
+            const part = [];
+            const from = nodes.find(c => c !== u && isM(c));
+            if (from === undefined) break;          // no mine to anchor on
+            seen2[from] = 1; part.push(from);
+            for (let a2 = 0; a2 < part.length; a2++)
+              for (const j2 of adj(part[a2]))
+                if (!seen2[j2] && j2 !== u && inHome2[j2]) { seen2[j2] = 1; part.push(j2); }
+            let serves = part.length >= mines;
+            if (serves) for (const c of nodes)
+              if (isM(c) && !seen2[c]) { serves = false; break; }
+            if (serves) for (const o of owed)
+              if (!o.cells.some(c => c !== u && seen2[c])) { serves = false; break; }
+            if (!serves) mark(u, 'mine', 'reach-owed', owed.map(o => o.from));
+          }
+        }
       }
     }
 
@@ -2143,6 +2241,7 @@ const HINTWORDS = {
   'reach-pocket': 'Connectedness. No mine could reach this ground without leaving the group behind.',
   'reach-cut': 'Connectedness. This is the only cell the group has to pass through.',
   'reach-room': 'Connectedness. Take this cell away and no piece of ground left has both the mines already found and room for all of them — so the group must come through here.',
+  'reach-owed': 'Connectedness. A number here is still owed a mine, and wherever that mine turns out to be it must join the group — which leaves it only this way through.',
   'reach-toll': 'The chain, priced. A mine here could only chain out through more of this number’s cells than the number has mines to give, so no chain can carry it.',
   'reach-way': 'The one affordable way. Of every route the pieces could still join by, all that this number can pay for pass through here — so the chain does too.',
   'reach-need': 'The narrow join. The pieces can only meet through one of two cells, so between them those two owe a mine — and what watches them spends it.',

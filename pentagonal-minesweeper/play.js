@@ -94,7 +94,7 @@ const TIER = {
   'crossed': 3, 'total-elsewhere-clear': 3, 'total-elsewhere-mined': 3,
   'reach-budget': 3, 'piece-budget': 3, 'reach-room': 3, 'reach-toll': 3,
   'reach-way': 3, 'cap-ways': 3, 'group-ways': 3,
-  'reach-need': 3, 'group-fit': 3, 'replay': 3
+  'reach-need': 3, 'group-fit': 3, 'reach-owed': 3, 'replay': 3
 };
 
 /* The generator's dials on the solver: a ceiling on the tier it may reason
