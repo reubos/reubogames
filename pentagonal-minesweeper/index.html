@@ -1521,6 +1521,7 @@ let muteOn = false;
 let strict = false;
 // the opening is dealt, not clicked, so the strict law has nothing to say to it
 let dealing = false;
+let dealt = [];                // the opening as dealt, for the hint of very last resort
 
 /* Which cells a number counts is plain on a square grid and anything but on
    these, so the pointer can be made to light them. It changes nothing about
@@ -1590,7 +1591,7 @@ const TIER = {
   'loop-count': 2,
   'crossed': 3, 'total-elsewhere-clear': 3, 'total-elsewhere-mined': 3,
   'reach-budget': 3, 'piece-budget': 3, 'reach-room': 3, 'reach-toll': 3,
-  'cap-ways': 3, 'group-ways': 3
+  'reach-way': 3, 'cap-ways': 3, 'group-ways': 3
 };
 
 /* The generator's dials on the solver: a ceiling on the tier it may reason
@@ -1703,6 +1704,8 @@ function saveBoard() {
       // an irregular cut is drawn afresh each board, so it has to be kept
       boxOf: boxOf ? [...boxOf].map(v => (v + 1).toString(36)).join(',') : '',
       elapsed: startTime ? Math.round((over ? endTime : performance.now()) - startTime) : 0,
+      // the opening as dealt, kept for the hint of very last resort
+      dealt: dealt.join(','),
       mine: pack(mine), state: pack(state), muted: pack(muted)
     }));
   } catch (e) {}
@@ -1754,6 +1757,7 @@ function restoreBoard() {
     for (let b = 0; b < boxes.length; b++) boxMuted[b] = +s.boxMuted[b];
   mines = s.mines; given = s.given; exploded = s.exploded;
   over = s.over; won = s.won; opened = s.opened; flags = s.flags;
+  dealt = typeof s.dealt === 'string' && s.dealt ? s.dealt.split(',').map(Number) : [];
   newBest = false; flashCell = -1; hover = -1; seeded = true;
   // the clock is put back to where it stood rather than restarted
   startTime = s.elapsed ? performance.now() - s.elapsed : 0;
@@ -1851,6 +1855,7 @@ async function newGameUnder(my, across, down, m) {
   dealing = true;
   const opening = await buildPuzzle();
   dealCheck(my);
+  dealt = opening.slice();
   for (const g of opening) reveal(g);
   dealing = false;
   /* Hidden numbers follow the level now, not a setting of their own: none
@@ -3059,6 +3064,105 @@ function rulesetMoves(known, find) {
         for (const x of A.cells) inA[x] = 0;
       }
     }
+
+    /* And priced across, not merely priced to stay — and dearest of all, so
+       asked only when every other rule has gone quiet. Two pieces that must
+       join can have several ways between them, and a number watching a
+       corridor prices every route that crosses its cells: a two-cell way
+       under a "1" is unaffordable though either cell alone is cheap. So for
+       each number and each pair of pieces, keep only the ground that lies on
+       some route the number can afford — crossings counted from both ends —
+       and where that affordable ground all funnels through one cell, the
+       chain has no other way: the cell is a mine.
+
+       Sound whatever else is true of the routes: the affordable ground can
+       only be too generous, never too mean, since it prices against one
+       number and ignores every other law of the chain — so a funnel found
+       in it holds for the true routes too. Under Outside the far end is the
+       rim itself, which every piece owes a chain regardless. */
+    if (!moved && (has('connected') || has('snake') || has('loop') || has('outside')) &&
+        allowRule('reach-way')) {
+      const chainAdj = has('connected') ? corOf : edgOf;
+      const passable = c => known[c] === UNKNOWN || isM(c);
+      const { id: pid, comps: pieces } = compsOver(isM, chainAdj);
+      const toRim = has('outside');
+      /* Wide-open ground holds no funnels worth asking after — routes
+         abound — so the pricing waits until the covered part has narrowed
+         to where a corridor can actually exist. Generation's stalls on wide
+         boards skip it whole, which is most of what it would cost. */
+      let unknownLeft = 0;
+      for (let i2 = 0; i2 < n; i2++) if (known[i2] === UNKNOWN) unknownLeft++;
+      if (unknownLeft <= 140 &&
+          pieces.length >= (toRim ? 1 : 2) && pieces.length <= 6) {
+        /* Fewest crossings of the watched cells on any chain from the seed.
+           Costs run in small layers, so a bucket a crossing dearer than the
+           budget is far enough to look. */
+        const price = (seeds, inU2, cap2) => {
+          const dist = new Int32Array(n).fill(127);
+          const q = Array.from({ length: cap2 + 2 }, () => []);
+          for (const [c, d0] of seeds)
+            if (d0 <= cap2 + 1 && d0 < dist[c]) { dist[c] = d0; q[d0].push(c); }
+          for (let d0 = 0; d0 <= cap2 + 1; d0++)
+            for (let h2 = 0; h2 < q[d0].length; h2++) {
+              const c = q[d0][h2];
+              if (dist[c] < d0) continue;
+              for (const j2 of chainAdj(c)) {
+                if (!passable(j2)) continue;
+                const nd = d0 + (inU2.has(j2) ? 1 : 0);
+                if (nd < dist[j2] && nd <= cap2 + 1) { dist[j2] = nd; q[nd].push(j2); }
+              }
+            }
+          return dist;
+        };
+
+        const seedsOf = p => pieces[p].map(c => [c, 0]);
+        const pairs = [];
+        if (toRim) {
+          for (let p = 0; p < pieces.length; p++) pairs.push([p, -1]);
+        } else {
+          for (let p = 0; p < pieces.length; p++)
+            for (let p2 = p + 1; p2 < pieces.length; p2++) pairs.push([p, p2]);
+        }
+
+        for (const c2 of constraintsOf(known)) {
+          const k = c2.left;
+          if (k < 1 || k > 2 || c2.cells.length <= k) continue;
+          const inU2 = new Set(c2.cells);
+          for (const [pa, pb] of pairs) {
+            const dA = price(seedsOf(pa), inU2, k);
+            const seedsB = pb >= 0 ? seedsOf(pb)
+              : (() => {                     // the rim, wherever a chain could end
+                  const s = [];
+                  for (let i2 = 0; i2 < n; i2++)
+                    if (!interior[i2] && passable(i2))
+                      s.push([i2, inU2.has(i2) ? 1 : 0]);
+                  return s;
+                })();
+            if (!seedsB.length) continue;
+            const dB = price(seedsB, inU2, k);
+
+            // the ground on some route the number can afford
+            const inK = c =>
+              passable(c) && dA[c] + dB[c] - (inU2.has(c) ? 1 : 0) <= k;
+            const start = pieces[pa][0];
+            if (!inK(start)) continue;       // no affordable route at all: not ours to fix
+            const nodes = [start];
+            const seen2 = new Uint8Array(n);
+            seen2[start] = 1;
+            for (let h2 = 0; h2 < nodes.length; h2++)
+              for (const j2 of chainAdj(nodes[h2]))
+                if (!seen2[j2] && inK(j2)) { seen2[j2] = 1; nodes.push(j2); }
+            const isA2 = pb >= 0 ? (c => pid[c] === pb) : (c => !interior[c]);
+            const isB2 = c => pid[c] === pa;
+            if (!nodes.some(isA2)) continue; // the far end never came affordable
+            for (const u of cutCells(known, nodes, c => seen2[c] === 1,
+                                     chainAdj, isA2, isB2, 'strand'))
+              mark(u, 'mine', 'reach-way', [c2.from, ...pieces[pa]]);
+          }
+        }
+      }
+    }
+
   }
   return moved;
 }
@@ -3514,7 +3618,39 @@ function findHint(known) {
       if (h) return h;
     } finally { tierCap = 0; }
   }
-  return searchHint(known);
+  return searchHint(known) || replayHint(known);
+}
+
+/* The very last resort under the last one. The exhaustion search proves its
+   answers by trying every completion, and on a board hiding most of its
+   numbers there can be too little to prune by: the refutations it needs
+   blow their budget and it comes home empty. But the deal itself once
+   solved this board, from the opening, by the named rules — that is the
+   promise every board is built on — and a player who wandered another way
+   still holds everything the opening held. So the solve is played again
+   from the dealt cells alone, in quiet, until it settles something the
+   player has not: that hint was good on the day the board was made, and
+   what was sound then is sound now. */
+function replayHint(known) {
+  if (!dealt.length) return null;
+  const k0 = new Uint8Array(n);
+  for (const g of dealt) markOpen(k0, g);
+  for (let guard = 0; guard < 100000; guard++) {
+    let h = null;
+    for (const cap of [1, 2, 3]) {
+      tierCap = cap;
+      try { h = findHintAt(k0); } finally { tierCap = 0; }
+      if (h) break;
+    }
+    if (!h) return null;
+    if (h.cells.some(c => known[c] === UNKNOWN))
+      return { cells: h.cells.filter(c => known[c] === UNKNOWN),
+               kind: h.kind, rule: h.rule, clues: h.clues };
+    for (const c of h.cells) {
+      if (h.kind === 'safe') markOpen(k0, c); else k0[c] = KNOWN_MINE;
+    }
+  }
+  return null;
 }
 
 function findHintAt(known) {
@@ -3659,6 +3795,7 @@ const HINTWORDS = {
   'reach-cut': 'Connectedness. This is the only cell the group has to pass through.',
   'reach-room': 'Connectedness. Take this cell away and no piece of ground left has both the mines already found and room for all of them — so the group must come through here.',
   'reach-toll': 'The chain, priced. A mine here could only chain out through more of this number’s cells than the number has mines to give, so no chain can carry it.',
+  'reach-way': 'The one affordable way. Of every route the pieces could still join by, all that this number can pay for pass through here — so the chain does too.',
   'outside-pocket': 'The border. Every mine must chain edge to edge out to the rim, and no chain could reach this ground.',
   'outside-cut': 'The border. This is the only way left from here out to the rim, so the chain must come through it.',
   'crossed': "Two numbers, crossed. Neither's cells lie wholly inside the other's, but the shared cells are pinned between the two of them, and what is left over on one side is settled by it.",
