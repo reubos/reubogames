@@ -2165,21 +2165,20 @@ function reveal(i) {
   if (!seeded) seed(i);
 
   /* The strict law, applied before the board is consulted at all: if what is
-     on show leaves any room for this cell to hold a mine, then it holds one. */
+     on show leaves any room for this cell to hold a mine, then it holds one.
+     Under strict the board really is rewritten to put a mine there — the one
+     the search turned up, so that every number on show still reads true and
+     the law is still kept — and then the mine is forgiven like any other. */
   if (strict && !dealing && couldBeMine(i)) {
-    if (relaxed) { flashCell = i; flashUntil = performance.now() + 550; return; }
-    /* Show a board it really could have been: the one the search turned up,
-       with a mine where the click landed, every number still on show reading
-       true and the law still kept. Planting a mine on the board as it stood
-       would have shown an arrangement that could not exist. */
     if (strictWitness) { mine.set(strictWitness); countFromMines(); }
     else mine[i] = 1;            // the solver had already settled it as a mine
-    lose(i);
+    mistakes++;
+    flashCell = i; flashUntil = performance.now() + 550;
     return;
   }
 
   if (mine[i]) {
-    if (!relaxed) { lose(i); return; }
+    mistakes++;
     flashCell = i; flashUntil = performance.now() + 550;
     return;                        // the cell stays covered, the game stays on
   }
@@ -2216,19 +2215,25 @@ function flag(i) {
   else { state[i] = FLAG; flags++; }
 }
 
-function lose(i) {
-  over = true; won = false; exploded = i;
-  endTime = performance.now();
-  for (let j = 0; j < n; j++) if (mine[j] && state[j] === COVERED) state[j] = OPEN;
+/* Giving up. Nothing on the board can end a game any more, so this is the
+   only way one ends unwon: the player asks to see it. Everything is turned
+   face up, mines included, and the clock stops where it stood. */
+function giveUp() {
+  if (over) return;
+  over = true; won = false; exploded = -1;
+  endTime = startTime ? performance.now() : 0;
+  for (let j = 0; j < n; j++) if (state[j] !== OPEN) state[j] = OPEN;
+  clearHint();
 }
 
 function win() {
   over = true; won = true;
   endTime = performance.now();
   /* A record needs a clock that was really running — startTime is only set by
-     the player's own first move — a board from a standard size, and a game
-     where a mine would have ended it. */
-  const key = startTime && !relaxed && !strict && bestKey();
+     the player's own first move — a board from a standard size, and a board
+     played clean: not a mine touched, not a hint asked for. A forgiven mine
+     costs nothing but the record, which is the whole of what it costs. */
+  const key = startTime && !strict && !mistakes && !hintsUsed && !historyLost && bestKey();
   if (key) {
     const t = endTime - startTime;
     if (!(key in bests) || t < bests[key]) { bests[key] = t; newBest = true; saveBests(); }
@@ -2810,6 +2815,8 @@ function askHint() {
   const sig = opened + ':' + flags + ':' + h.rule + ':' + h.cells.join(',');
   hintLevel = sig === hintAt ? Math.min(2, hintLevel + 1) : 1;
   hintAt = sig;
+  // asking the same hint again for its reasoning is the one ask, not two
+  if (hintLevel === 1) hintsUsed++;
   // the clues if the rule named any, and otherwise the ground it is talking about
   hintClues = (h.clues.length ? h.clues : h.cells).slice();
   el('noteHint').textContent = hintLevel >= 2
@@ -2832,7 +2839,8 @@ function pickGiven(known, opening) {
     let touches = 0;
     for (const j of nbOf(i)) if (known[j] === SAFE) touches++;
     const score = (opening
-      ? (count[i] === 0 ? 100 : 10 - count[i])
+      ? (openTight ? (count[i] === 0 ? -100 : count[i])
+                   : (count[i] === 0 ? 100 : 10 - count[i]))
       : (count[i] === 0 ? 0 : 60) + (touches ? 40 : 0) + count[i]) + Math.random();
     if (score > bestScore) { bestScore = score; best = i; }
   }

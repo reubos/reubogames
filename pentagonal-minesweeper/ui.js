@@ -333,6 +333,20 @@ function paintStatus() {
   el('statTime').textContent = fmtTime(ms);
   const key = bestKey();
   el('statBest').textContent = key && bests[key] ? fmtTime(bests[key]) : '—';
+  /* What the run has cost so far, in plain sight, so the player knows before
+     the end whether the clock is still worth anything. */
+  const tallyWords = () => {
+    const bits = [];
+    if (mistakes) bits.push(mistakes + (mistakes === 1 ? ' mine touched' : ' mines touched'));
+    if (hintsUsed) bits.push(hintsUsed + (hintsUsed === 1 ? ' hint' : ' hints'));
+    return bits.join(' · ');
+  };
+  const run = el('noteRun');
+  if (run) run.textContent = !n ? ''
+    : (mistakes || hintsUsed) ? tallyWords() + ' — this board sets no best time.'
+    : historyLost ? 'Picked up from an earlier save, so no best time from it.'
+    : 'Clean so far — the clock counts.';
+
   const v = el('verdict');
   v.className = 'verdict' + (over ? (won ? ' won' : ' lost') : '');
   // a deal still going on has the floor: there is no game yet to report on
@@ -341,9 +355,11 @@ function paintStatus() {
   // would quote how long the page had been open
   v.textContent = over
     ? (won ? 'Swept' + (startTime ? ' — ' + fmtTime(endTime - startTime) : '') +
-             (newBest ? ' · a new best!' : relaxed ? ' · relaxed, not recorded'
-             : strict ? ' · strict, not recorded' : '')
-           : 'Boom.')
+             (newBest ? ' · a new best!'
+              : strict ? ' · strict, not recorded'
+              : (mistakes || hintsUsed) ? ' · ' + tallyWords() + ', not recorded'
+              : historyLost ? ' · resumed, not recorded' : '')
+           : 'Given up — the board as it stood.')
     : '';
 }
 
@@ -540,15 +556,6 @@ for (const b of document.querySelectorAll('[data-adj]'))
     draw();
   };
 
-// forgiveness changes only what a mine costs, so the board in play can stay
-for (const b of document.querySelectorAll('[data-relax]'))
-  b.onclick = () => {
-    relaxed = !!b.dataset.relax;
-    for (const x of document.querySelectorAll('[data-relax]')) x.classList.toggle('on', x === b);
-    paintStatus();
-    saveBoard();
-  };
-
 for (const b of document.querySelectorAll('[data-rule]'))
   b.onclick = () => {
     ruleset = b.dataset.rule;
@@ -563,6 +570,30 @@ selTiling.onchange = () => { tiling = TILINGS[+selTiling.value]; startFromContro
 el('btnNew').onclick = startFromControls;
 el('btnHint').onclick = askHint;
 el('btnCheck').onclick = checkFlags;
+
+/* Giving up asks twice, as the hint does. One press is easy to make by
+   accident and there is no taking it back — the board is spent. */
+let revealArmed = 0;
+const disarmReveal = () => {
+  revealArmed = 0;
+  el('btnReveal').textContent = 'Reveal board';
+  el('btnReveal').classList.remove('warn');
+};
+el('btnReveal').onclick = () => {
+  if (over || !n) return;
+  if (performance.now() > revealArmed) {
+    revealArmed = performance.now() + 4000;
+    el('btnReveal').textContent = 'Really? Press again';
+    el('btnReveal').classList.add('warn');
+    setTimeout(() => { if (performance.now() > revealArmed - 50) disarmReveal(); }, 4100);
+    return;
+  }
+  disarmReveal();
+  giveUp();
+  saveBoard();
+  paintStatus();
+  draw();
+};
 
 /* The canvas follows its panel rather than the window, since the panel also
    changes width when the sidebar drops below it. Only a width change is acted

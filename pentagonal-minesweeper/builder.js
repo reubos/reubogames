@@ -205,6 +205,10 @@ async function buildPuzzle() {
   const shortlist = [];          // harder's finalists, for the variety judging
   dealSeeds = { hunted: 0, laid: 0, kept: 0, qualified: 0 };
   keptGround = null;
+  /* At rest for every deal. The retry below may turn it on, and it must stay
+     on for the rest of this deal — the kept board's opening was chosen with
+     it — but the next board starts from the ordinary one. */
+  openTight = 0;
   const my = dealToken;          // entered before the deal's first breath
   let drew = performance.now();
   const breathe = async say => {
@@ -395,6 +399,37 @@ async function buildPuzzle() {
       if (best) break;
     }
     if (!best) mines = asked;
+  }
+
+  /* Medium's floor has a trouble of its own, and a different remedy. The
+     crowding laws speak almost entirely in one glance — a mine short of its
+     companions, a mine already at its fill, a cell with too little room
+     round it ever to find three — so a board under them tends to fall to
+     easy's rules however the mines are laid, and nudging the count does not
+     help: the information is in the law, not in the density.
+
+     What does help is the opening. The first cell handed out is normally a
+     nought, and a nought cascades: it opens its whole neighbourhood at a
+     stroke and hands the one-glance rules everything they need. Open on the
+     tightest number instead and the player must reach further before those
+     rules run out. Tried before any spare is settled for, and only where the
+     search came home empty — an ordinary board keeps its ordinary start. */
+  if (!best && d.tier === 2 && sizeName) {
+    openTight = 1;
+    await breathe('Dealing…');
+    await search(performance.now() + clock / 2);
+    if (!best) {
+      const asked = mines;
+      for (const share of [0.04, -0.04]) {
+        mines = asked + Math.round(share * n);
+        fitCount();
+        if (mines === asked) continue;
+        await breathe('Dealing…');
+        await search(performance.now() + clock / 2);
+        if (best) break;
+      }
+      if (!best) mines = asked;
+    }
   }
 
   /* Harder judges its shortlist the honest way: a rule counts only when the

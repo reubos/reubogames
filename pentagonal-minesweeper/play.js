@@ -30,10 +30,24 @@ let dealt = [];                // the opening as dealt, for the hint of very las
    the board, only what is drawn. */
 let adjOn = false;
 
-/* Relaxed play forgives a mine: it shows itself for a moment and is then
-   covered over again, leaving the board as it was and the game running. */
-let relaxed = false;
+/* A mine is forgiven: it shows itself for a moment and is then covered over
+   again, leaving the board as it was and the game running. This was once a
+   setting and is now simply how the game is played — a board that ends at
+   the first slip punishes a misclick as hard as a misreading, and these
+   tilings afford plenty of misclicks. What a slip costs instead is the
+   record: the clock is only worth keeping for a board played clean. */
 let flashCell = -1, flashUntil = 0;
+
+/* Kept for that judgement, and shown so the player knows where they stand.
+   Either one above nought and the time is not recorded — not a punishment,
+   just an honest label on what the number would mean.
+
+   And a third reason a board may not record, kept apart from the two counts
+   because it is not the player's doing: a board restored from a save written
+   before any of this was counted has a history nobody knows. It must not set
+   a record, but neither should it be accused of a slip it may not have
+   made. */
+let mistakes = 0, hintsUsed = 0, historyLost = false;
 
 /* An optional law the mines must obey, over and above the numbers. The
    boards built under one are made so that the law is needed: a solver
@@ -152,6 +166,13 @@ const TIER = {
 let tierCap = 0;
 let ruleOff = '';
 let ruleTally = null;
+/* And a dial on the opening. The first cell handed out is normally a nought,
+   because a nought cascades and gives the player somewhere to stand. But a
+   cascade is a great deal of one-glance information at once, and under a law
+   that already speaks in one glance — the crowding laws especially — it can
+   hand over the whole board's easy half before the player has done anything.
+   Turned on, the opening takes the tightest number it can find instead. */
+let openTight = 0;
 const allowRule = rule =>
   (!tierCap || (TIER[rule] || 1) <= tierCap) && rule !== ruleOff;
 const tallyRule = rule => {
@@ -264,7 +285,8 @@ function saveBoard() {
       v: 1, tiling: tiling.id,
       across: builtAcross, down: builtDown, ask: +rngMines.value,
       size: sizeName, diff: difficulty, rule: ruleset,
-      mute: muteOn, relax: relaxed, strict: strict, adj: adjOn,
+      mute: muteOn, strict: strict, adj: adjOn,
+      miss: mistakes, hints: hintsUsed, lost: historyLost,
       n: n, mines: mines, given: given, exploded: exploded, over: over, won: won,
       /* opened and flags are kept rather than counted back, and so are the
          numbers: losing opens the mines without counting them, and the strict
@@ -292,7 +314,10 @@ function restoreBoard() {
   // the settings go back first, since the board is built out of them
   tiling = t;
   difficulty = s.diff; ruleset = s.rule; muteOn = s.mute;
-  relaxed = s.relax; strict = s.strict; adjOn = s.adj; sizeName = s.size;
+  strict = s.strict; adjOn = s.adj; sizeName = s.size;
+  mistakes = s.miss || 0;
+  hintsUsed = s.hints || 0;
+  historyLost = s.miss === undefined || !!s.lost;
   rngAcross.value = s.across; rngDown.value = s.down; rngMines.value = s.ask;
 
   builtAcross = s.across; builtDown = s.down;
@@ -344,7 +369,6 @@ function paintToggles() {
   };
   mark('[data-diff]', x => x.dataset.diff === difficulty);
   mark('[data-rule]', x => x.dataset.rule === ruleset);
-  mark('[data-relax]', x => !!x.dataset.relax === relaxed);
   mark('[data-strict]', x => !!x.dataset.strict === strict);
   mark('[data-adj]', x => !!x.dataset.adj === adjOn);
   selTiling.value = TILINGS.indexOf(tiling);
@@ -415,6 +439,7 @@ async function newGameUnder(my, across, down, m) {
   muted = new Uint8Array(n);
 
   opened = 0; flags = 0; given = 0; newBest = false;
+  mistakes = 0; hintsUsed = 0; historyLost = false;
   seeded = false; over = false; won = false; exploded = -1; flashCell = -1;
   startTime = 0; endTime = 0; hover = -1;
 

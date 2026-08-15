@@ -64,6 +64,9 @@
   button:hover:not(:disabled) { background: #2a5530; border-color: var(--accent); color: #fff; }
   button.primary { background: #2c6b3c; border-color: #3d8a51; color: #fff; font-weight: 600; font-size: 1rem; }
   button.primary:hover { background: #35804a; }
+  /* a press that cannot be taken back, while it waits for its second press */
+  button.warn { background: #6b2c2c; border-color: #8a3d3d; color: #fff; }
+  button.warn:hover { background: #803535; border-color: #a04a4a; }
 
   select {
     font-family: inherit; font-size: 0.9rem; width: 100%;
@@ -125,6 +128,7 @@
           <div class="stat"><div class="v" id="statBest">&mdash;</div><div class="k">Best</div></div>
         </div>
         <div class="verdict" id="verdict"></div>
+        <p class="note" id="noteRun"></p>
       </div>
 
       <div class="panel">
@@ -137,11 +141,16 @@
           <button class="primary full" id="btnNew">New game</button>
           <button class="full" id="btnHint">Hint</button>
           <button class="full" id="btnCheck">Check flags</button>
+          <button class="full" id="btnReveal">Reveal board</button>
         </div>
         <p class="note" id="noteHint">Asking once marks what to look at; asking again
           names the reasoning.</p>
         <p class="note">Click to uncover. Right-click to plant a flag. Clicking a number that already
           has its full quota of flags beside it uncovers everything else it touches.</p>
+        <p class="note">Uncovering a mine shows it for a moment and covers it again;
+          the board is never lost, only given up on. A board finished without
+          touching a mine and without asking for a hint sets a best time &mdash;
+          any other is played for its own sake.</p>
       </div>
 
       <div class="panel">
@@ -179,14 +188,6 @@
         <p class="note">With this on, resting the pointer on a number lights the
           cells it counts &mdash; which a tiling of pentagons does not make
           obvious by looking.</p>
-        <p class="label" style="margin-top: 14px">Relaxed</p>
-        <div class="btn-row">
-          <button data-relax="" class="on">Off</button>
-          <button data-relax="1">On</button>
-        </div>
-        <p class="note">With this on, uncovering a mine shows it for a moment and
-          then covers it again, and the game goes on. Boards finished this way
-          set no best time.</p>
         <p class="label" style="margin-top: 14px">Ruleset</p>
         <div class="btn-row three">
           <button data-rule="none" class="on">None</button>
