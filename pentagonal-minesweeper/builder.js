@@ -106,7 +106,7 @@ function huntStem() {
       return { mines: [m, c1, c2], banned, segment: [m, c1, c2] };
     }
     if (has('outside')) return { mines: [c1, c2], banned, segment: null };
-    const m = [...corOf(c1)].find(x =>
+    const m = [...joinAdj()(c1)].find(x =>
       !run.includes(x) && x !== i && ![...nbOf(i)].includes(x));
     if (m === undefined) continue;
     return { mines: [m, c1, c2], banned, segment: null };
@@ -118,7 +118,7 @@ function huntStem() {
    cell that can only pay for half of it. */
 function huntCorridor() {
   const path = has('snake') || has('loop');
-  const adj = path ? edgOf : corOf;
+  const adj = path ? edgOf : joinAdj();
   const eadj = (a, b) => [...adj(a)].includes(b);
   const start = Math.floor(Math.random() * n);
   for (let o = 0; o < n; o++) {
@@ -292,7 +292,14 @@ async function buildPuzzle() {
     if (wasSeeded) dealSeeds.laid++;
     const { list, tally } = handOut();
 
-    const cells = shownBy(list);
+    /* What the board really hands over: the opening and its cascades, plus
+       whatever the boxes settle for nothing. A level that asks for a small
+       start should be judged on the start a player actually gets. */
+    const shown = new Uint8Array(n);
+    for (const g of list) markOpen(shown, g);
+    let cells = 0;
+    for (let i2 = 0; i2 < n; i2++) if (shown[i2] === SAFE) cells++;
+    cells += freeByBoxes(shown);
     /* Judged in strict order: fewest hints first; then, where the level asks
        it, how much of the solving leant on the deep rules — marks from the
        second and third tiers as a share of all marks, the third counted
@@ -536,6 +543,24 @@ async function muteNumbers(share) {
       const j = Math.floor(Math.random() * (i + 1));
       const t = order[i]; order[i] = order[j]; order[j] = t;
     }
+    /* A box reading nought hands over every cell it holds before a click is
+       made, and one wanting all its remaining cells does the same — so those
+       are offered up first. A level that asks for a small opening was
+       otherwise getting a large one through the back door: on Boxed 4 at the
+       deep levels the free cells outnumbered the opening itself. Whether
+       such a clue can actually go is settled as ever, by whether the board
+       still comes out without it. */
+    const givesAway = b => {
+      let held = 0, left = 0;
+      for (const c of boxes[b]) {
+        if (mine[c]) held++;
+        else if (state[c] !== OPEN) left++;
+      }
+      if (!left || !boxShown) return 0;
+      const [lo, hi] = boxRange(b);
+      return (held >= hi || lo - held >= left) ? left : 0;
+    };
+    order.sort((a2, b2) => givesAway(b2) - givesAway(a2));
     let hidden = 0;
     const most = Math.round(boxes.length * (share >= 1 ? 1 : 0.45));
     for (const b of order) {

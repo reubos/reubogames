@@ -44,7 +44,8 @@ let ruleset = 'none';
    the rulesets means the laying, the checking and the deducing can each ask
    what is in force rather than match on the name of a combination. */
 const LAWS = {
-  none: [], connected: ['connected'], outside: ['outside'],
+  none: [], connected: ['connected'], connected2: ['connected'], outside: ['outside'],
+  cluster: ['degree'], sparse: ['degree'],
   singles: ['group'], doubles: ['group'], triples: ['group'], notriples: ['group'], noquads: ['group'],
   snake: ['snake'], loop: ['loop'],
   boxed1: ['box'], boxed2: ['box'], boxed3: ['box'], boxed4: ['box'],
@@ -57,10 +58,42 @@ const LAWS = {
 let lawOff = '';
 const has = law => law !== lawOff && (LAWS[ruleset] || []).includes(law);
 
+/* What counts as joined, where a law speaks of one group. Connected lets
+   mines meet at a corner; Connected 2 asks for a shared edge, which is a far
+   tighter thing to ask of a pentagon — a cell has three or four edge
+   neighbours where it has seven or eight touching it in all — and makes the
+   group a thicker, blunter shape. Everything else that chains, the paths and
+   the border, has always gone edge to edge. */
+const CORNERJOIN = { connected: 1, cbox4: 1 };
+const joinAdj = () => (CORNERJOIN[ruleset] ? corOf : edgOf);
+
 /* How many cells to a group, where the law speaks of groups at all. A size
    says what every group must be; a cap says only what none may exceed, which
    leaves the smaller groups free and can therefore never force a mine — only
    ever clear the ground round one. */
+/* How many mines a mine must, or may, have beside it — counting every cell
+   it touches, edge or corner. A floor makes the mines huddle: no mine may
+   stand with fewer than two companions, so the field comes in thick clumps
+   and long braids rather than scattered dots. A ceiling does the opposite,
+   forbidding the dense heart of a clump while leaving its edges free. The
+   two are opposite in what they can prove, as a floor and a ceiling always
+   are: a floor forces mines and a ceiling clears ground. */
+/* The numbers were measured rather than guessed, and the floor was measured
+   twice. A floor of two is met by almost any arrangement at these densities
+   and the law barely speaks — one part of the solving in a hundred, where
+   connectedness does five. Four speaks loudly but cannot be laid: a blob
+   thick enough that every cell of it, edge included, touches four others is
+   so rare that the generator thrashes between giving up and filling the
+   board, and the density came out anywhere from a twelfth to nineteen
+   twentieths. Three is the one that both speaks and lays — five parts in a
+   hundred, and a density that stays where it is put. Likewise a ceiling of
+   four is nearly free at a third-full board; three bites four times as
+   hard, and lays without complaint. */
+const DEGFLOOR = { cluster: 3 };
+const DEGCAP = { sparse: 3 };
+const degFloor = () => (lawOff === 'degree' ? 0 : DEGFLOOR[ruleset] || 0);
+const degCap = () => (lawOff === 'degree' ? 99 : (DEGCAP[ruleset] === undefined ? 99 : DEGCAP[ruleset]));
+
 const GROUPSIZE = { singles: 1, doubles: 2, triples: 3 };
 const GROUPCAP = { notriples: 2, noquads: 3 };
 const groupSize = () => (lawOff === 'group' ? 0 : GROUPSIZE[ruleset] || 0);
@@ -86,15 +119,17 @@ const TIER = {
   'counting-clear': 1, 'counting-full': 1, 'total-none': 1, 'total-all': 1,
   'group-full': 1, 'group-grow': 1, 'group-big': 1, 'group-room': 1,
   'cap-over': 1, 'snake-body': 1, 'snake-end': 1, 'loop-degree': 1,
+  'deg-full': 1, 'deg-grow': 1, 'deg-over': 1, 'deg-room': 1,
   'box-exact': 1, 'box-full': 1, 'box-short': 1,
   'subset': 2, 'snake-touch': 2, 'loop-short': 2, 'loop-close': 2,
   'reach-pocket': 2, 'outside-pocket': 2, 'reach-cut': 2, 'outside-cut': 2,
   'cap-count': 2, 'group-count': 2, 'box-count': 2, 'snake-count': 2,
-  'loop-count': 2,
+  'loop-count': 2, 'deg-count': 2,
   'crossed': 3, 'total-elsewhere-clear': 3, 'total-elsewhere-mined': 3,
   'reach-budget': 3, 'piece-budget': 3, 'reach-room': 3, 'reach-toll': 3,
   'reach-way': 3, 'cap-ways': 3, 'group-ways': 3,
-  'reach-need': 3, 'group-fit': 3, 'reach-owed': 3, 'replay': 3
+  'reach-need': 3, 'group-fit': 3, 'reach-owed': 3, 'conn-ways': 3, 'reach-fare': 3,
+  'deg-ways': 3, 'replay': 3
 };
 
 /* The generator's dials on the solver: a ceiling on the tier it may reason
@@ -112,7 +147,10 @@ const tallyRule = rule => {
 const RULENOTES = {
   none: '',
   connected: 'All mines form a single group, touching by edge or corner.',
+  connected2: 'All mines form a single group, joined edge to edge — a corner between two of them does not join them.',
   outside: 'Every mine chains edge to edge to the border.',
+  cluster: 'Every mine has at least three other mines touching it, by edge or corner.',
+  sparse: 'No mine has more than three other mines touching it, by edge or corner.',
   singles: 'Every mine stands alone: no two share an edge, though they may meet ' +
            'at a corner.',
   doubles: 'Mines come in edge-joined pairs; pairs may meet at a corner, but never ' +
@@ -167,7 +205,16 @@ const DIFF = {
    board and the sliders were never going to land there by accident. The
    path laws want a little more: a longer path passes through more of the
    board, and their logic is worth the most where it nearly fills it. */
-const LAWDENS = { snake: 0.40, loop: 0.40, sbox4: 0.40 };
+const LAWDENS = { snake: 0.40, loop: 0.40, sbox4: 0.40,
+                  cluster: 0.45, sparse: 0.45, boxed4: 0.45 };
+/* Boxed 4 asks for more than a third because a thin board leaves boxes
+   empty, and a box reading nought hands over every cell it holds before a
+   click is made — so a level asking for a small opening was giving a large
+   one away through its boxes. At a third full, a four-cell box is empty
+   about one time in five and those boxes freed more cells than the opening
+   showed; nearer half full it is one in twenty, and the free start falls by
+   a third. The irregular cut is left where it was: its boxes vary in size,
+   and crowding them only grew the opening instead. */
 
 /* Best times, one for each tiling at each standard size and difficulty,
    kept in the browser's storage. A board made on the sliders is its own

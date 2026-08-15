@@ -38,7 +38,7 @@ function placeConnected(k) {
     for (let i = 0; i < n; i++) if (mine[i]) { dist[i] = 0; prev[i] = -1; q[tail++] = i; }
     while (head < tail) {
       const v = q[head++];
-      for (const j of corOf(v)) if (dist[j] < 0 && seedOK(j)) {
+      for (const j of joinAdj()(v)) if (dist[j] < 0 && seedOK(j)) {
         dist[j] = dist[v] + 1; prev[j] = v; q[tail++] = j; far = j;
       }
     }
@@ -91,6 +91,116 @@ function placeCapped(k, cap) {
       placed++;
     }
     if (placed === k) return true;
+  }
+  return false;
+}
+
+/* Mines that must huddle. A lone mine is illegal from the moment it is laid,
+   so the laying never makes one: it starts from three cells that all touch
+   each other — which a pentagon's corners always afford — and every cell
+   after that goes down against two mines already there. Every mine so laid
+   has its two from the start, and the ones already down only ever gain, so
+   the law holds throughout rather than being repaired at the end. */
+function placeCluster(k) {
+  if (k < 3) return false;
+  for (let attempt = 0; attempt < 24; attempt++) {
+    mine.fill(0);
+    let placed = 0;
+    if (seedMotif) { for (const c of seedMotif.mines) { mine[c] = 1; placed++; } }
+    else {
+      // a seed of three, each touching the other two
+      const start = Math.floor(Math.random() * n);
+      let laid = false;
+      for (let o = 0; o < n && !laid; o++) {
+        const a = (start + o) % n;
+        if (!seedOK(a)) continue;
+        const ring = [...corOf(a)].filter(seedOK);
+        for (let x = 0; x < ring.length && !laid; x++)
+          for (let y = x + 1; y < ring.length && !laid; y++)
+            if ([...corOf(ring[x])].includes(ring[y])) {
+              mine[a] = mine[ring[x]] = mine[ring[y]] = 1; placed = 3; laid = true;
+            }
+      }
+      if (!laid) return false;
+    }
+    /* Grown at its thickest: of the cells that would come in with the most
+       mines already touching them, one at random. A floor of two is met by
+       almost any growth, but a floor of three or four is met only by a blob
+       that stays fat — a straggling one leaves its own edge short, and it is
+       the edge that fails the law. Ties are broken at random so the same
+       board is never grown twice. */
+    let stuck = 0;
+    while (placed < k && stuck < 400) {
+      let best = -1, bestD = -1;
+      for (let c = 0; c < n; c++) {
+        if (mine[c] || !seedOK(c)) continue;
+        let d = 0;
+        for (const j of corOf(c)) if (mine[j]) d++;
+        if (d < 2) continue;
+        const score = d + Math.random();
+        if (score > bestD) { bestD = score; best = c; }
+      }
+      if (best < 0) { stuck = 400; break; }
+      mine[best] = 1;
+      placed++; stuck = 0;
+    }
+    /* The last cells laid may still stand short of a deep floor, and a mine
+       short of it is no legal board — so the thin ones are lifted away and
+       laid again where the blob is fatter, as often as it takes. */
+    for (let mend = 0; mend < 60 && placed === k; mend++) {
+      let thin = -1;
+      for (let c = 0; c < n && thin < 0; c++) {
+        if (!mine[c]) continue;
+        let d = 0;
+        for (const j of corOf(c)) if (mine[j]) d++;
+        if (d < degFloor()) thin = c;
+      }
+      if (thin < 0) break;
+      mine[thin] = 0;
+      let best = -1, bestD = -1;
+      for (let c = 0; c < n; c++) {
+        if (mine[c] || c === thin || !seedOK(c)) continue;
+        let d = 0;
+        for (const j of corOf(c)) if (mine[j]) d++;
+        const score = d + Math.random();
+        if (d >= degFloor() && score > bestD) { bestD = score; best = c; }
+      }
+      if (best < 0) { mine[thin] = 1; break; }
+      mine[best] = 1;
+    }
+    if (placed === k && validRuleset()) return true;
+  }
+  return false;
+}
+
+/* Mines that must not crowd. Anywhere at all, so long as no mine ends with
+   more than the ceiling touching it — the cell laid and every cell it
+   touches are checked, since laying one raises the count of all of them. */
+function placeSparse(k, cap) {
+  const order = [...Array(n).keys()];
+  for (let attempt = 0; attempt < 30; attempt++) {
+    mine.fill(0);
+    let placed = 0;
+    if (seedMotif) for (const c of seedMotif.mines) { mine[c] = 1; placed++; }
+    for (let i = order.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      const t = order[i]; order[i] = order[j]; order[j] = t;
+    }
+    const degOK = c => {
+      let d = 0;
+      for (const j of corOf(c)) if (mine[j]) d++;
+      return d <= cap;
+    };
+    for (const c of order) {
+      if (placed === k) break;
+      if (mine[c] || !seedOK(c)) continue;
+      mine[c] = 1;
+      let ok = degOK(c);
+      if (ok) for (const j of corOf(c)) if (mine[j] && !degOK(j)) { ok = false; break; }
+      if (!ok) { mine[c] = 0; continue; }
+      placed++;
+    }
+    if (placed === k && validRuleset()) return true;
   }
   return false;
 }
@@ -376,13 +486,21 @@ function compsOver(keep, adjOf) {
 function validRuleset() {
   const isMine = i => mine[i] === 1;
 
-  if (has('connected') && compsOver(isMine, corOf).comps.length !== 1) return false;
+  if (has('connected') && compsOver(isMine, joinAdj()).comps.length !== 1) return false;
 
   const g = groupSize();
   if (g && !compsOver(isMine, edgOf).comps.every(c => c.length === g)) return false;
 
   const cap = groupCap();
   if (cap && !compsOver(isMine, edgOf).comps.every(c => c.length <= cap)) return false;
+
+  const dLo = degFloor(), dHi = degCap();
+  if (dLo || dHi < 99) for (let i = 0; i < n; i++) {
+    if (!mine[i]) continue;
+    let d = 0;
+    for (const j of corOf(i)) if (mine[j]) d++;
+    if (d < dLo || d > dHi) return false;
+  }
 
   if (has('snake')) {
     const { comps } = compsOver(isMine, edgOf);
@@ -449,6 +567,8 @@ function layByRule() {
            : has('loop') ? placeLoop(mines)
            : has('connected') ? placeConnected(mines)
            : g ? placeGroups(mines, g)
+           : degFloor() ? placeCluster(mines)
+           : degCap() < 99 ? placeSparse(mines, degCap())
            : groupCap() ? placeCapped(mines, groupCap())
            : has('outside') ? placeOutside(mines)
            : (boxLaw() === 'exact' || boxLaw() === 'irregular') ? (layMines(new Set()), true)
@@ -644,6 +764,10 @@ function rulesetMoves(known, find) {
     tallyRule(rule);
     moved = true;
   };
+  /* Which clue to point the player at. The mine counter is a statement with
+     no cell of its own to light up, so it cites nothing and the wording
+     carries the reasoning instead. */
+  const cite = c => (c.from >= 0 ? [c.from] : []);
 
   const theBoxLaw = boxLaw();
   if ((theBoxLaw === 'exact' || theBoxLaw === 'irregular') && boxShown) {
@@ -700,6 +824,37 @@ function rulesetMoves(known, find) {
     }
   }
 
+  /* What a mine owes, and what it may not exceed, in companions. A mine
+     short of the floor must find the rest among the ground still covered; a
+     mine already at the ceiling has nothing but safe ground round it. And a
+     covered cell answers for itself: one touching more mines than the
+     ceiling allows could never be a mine, and one with too few cells around
+     it that could ever hold a mine could never reach the floor. */
+  const dLo = degFloor(), dHi = degCap();
+  if (dLo || dHi < 99) {
+    for (let i2 = 0; i2 < n; i2++) {
+      if (!isM(i2)) continue;
+      const near = [...corOf(i2)];
+      const mn = near.filter(isM);
+      const unk = near.filter(j2 => known[j2] === UNKNOWN);
+      if (mn.length >= dHi)
+        for (const j2 of unk) mark(j2, 'safe', 'deg-full', [i2, ...mn]);
+      else if (unk.length && dLo - mn.length === unk.length)
+        for (const j2 of unk) mark(j2, 'mine', 'deg-grow', [i2, ...mn]);
+    }
+    for (let i2 = 0; i2 < n; i2++) {
+      if (known[i2] !== UNKNOWN) continue;
+      const near = [...corOf(i2)];
+      let mn = 0, could = 0;
+      for (const j2 of near) {
+        if (isM(j2)) { mn++; could++; }
+        else if (known[j2] === UNKNOWN) could++;
+      }
+      if (mn > dHi) mark(i2, 'safe', 'deg-over', near.filter(isM));
+      else if (could < dLo) mark(i2, 'safe', 'deg-room', near);
+    }
+  }
+
   const gSize = groupSize();
   if (gSize) {
     /* Every group holds the same number of cells, so a group already that big
@@ -753,7 +908,7 @@ function rulesetMoves(known, find) {
   }
 
   if (has('connected') || has('snake') || has('loop')) {
-    const adj = (has('snake') || has('loop')) ? edgOf : corOf;
+    const adj = (has('snake') || has('loop')) ? edgOf : joinAdj();
 
     if (has('snake') || has('loop')) {
       /* How many mines a mine must have beside it: a snake's have one or
@@ -937,6 +1092,71 @@ function rulesetMoves(known, find) {
       }
     }
 
+    /* One number, asked exhaustively, with the group law sitting in the
+       judge's chair — what cap-ways does for the caps and group-ways for the
+       sizes. Lay this number's mines every way it allows; throw out the ways
+       under which the group could not survive; keep what the rest agree on.
+
+       A "1" with two cells beside it, one of which would strand the mines,
+       has its answer in the other. A number wanting one of three, where
+       leaving two of them clear would break the group, must hold it in one
+       of those two — so the third is clear, though which of the two it is
+       stays open. Neither reading comes of asking about one cell at a time,
+       which is why nothing above finds them.
+
+       A way is thrown out only where it is certainly impossible: with those
+       mines laid and those cells cleared, no piece of open ground holds
+       every mine and has room for all of them. That is a necessary truth,
+       so the ways kept can only be too many, never too few, and what they
+       all agree on is agreed by the truth among them. Kept to short numbers
+       and few ways, since each way costs a reckoning of the whole ground. */
+    if (!moved && has('connected') && allowRule('conn-ways')) {
+      const chainAdj = joinAdj();
+      for (const c2 of constraintsWithTotal(known)) {
+        const U = c2.cells, need = c2.left;
+        // the counter is allowed a wider set than a number, since it is the
+        // one statement worth asking when little ground is left
+        if (need < 1 || need > U.length || U.length > (c2.from < 0 ? 8 : 6)) continue;
+        let ways2 = 1;
+        for (let a2 = 0; a2 < need; a2++) ways2 = ways2 * (U.length - a2) / (a2 + 1);
+        if (ways2 > 20) continue;
+
+        const inAll = new Array(U.length).fill(true);
+        const inAny = new Array(U.length).fill(false);
+        let live = 0;
+        const canLive = (add, clear) => {
+          const mineNow = i => isM(i) || add.has(i);
+          const openNow = i => !clear.has(i) && (known[i] === UNKNOWN || mineNow(i));
+          const { id, comps } = compsOver(openNow, chainAdj);
+          const held = [];
+          for (let i2 = 0; i2 < n; i2++) if (mineNow(i2)) held.push(i2);
+          if (!held.length) return true;
+          return comps.some(g =>
+            g.length >= mines && held.every(m => id[m] === id[g[0]]));
+        };
+        const lay = (at, chosen) => {
+          if (chosen.length === need) {
+            const add = new Set(chosen);
+            const clear = new Set(U.filter(x => !add.has(x)));
+            if (!canLive(add, clear)) return;
+            live++;
+            for (let k2 = 0; k2 < U.length; k2++)
+              if (add.has(U[k2])) inAny[k2] = true; else inAll[k2] = false;
+            return;
+          }
+          if (at >= U.length || U.length - at < need - chosen.length) return;
+          chosen.push(U[at]); lay(at + 1, chosen); chosen.pop();
+          lay(at + 1, chosen);
+        };
+        lay(0, []);
+        if (!live) continue;          // no way at all: the position is past saving
+        for (let k2 = 0; k2 < U.length; k2++) {
+          if (inAll[k2]) mark(U[k2], 'mine', 'conn-ways', cite(c2));
+          else if (!inAny[k2]) mark(U[k2], 'safe', 'conn-ways', cite(c2));
+        }
+      }
+    }
+
     /* How far the group can still stretch. Reaching a cell d steps off
        through ground not yet known safe costs d mines — the cells passed
        through and the cell itself — so anything standing further away than
@@ -967,6 +1187,79 @@ function rulesetMoves(known, find) {
         if (g.some(isM))
           for (const u of cutCells(known, g, x => id[x] === id[g[0]], edgOf, rimC, isM, 'strand'))
             mark(u, 'mine', 'outside-cut', [...edgOf(u)]);
+      }
+    }
+  }
+
+
+  /* The same question put to the crowding laws, and it reaches what the
+     counts above cannot. Every rule so far asks the ceiling of a mine
+     already found — how much company it may still keep. None of them asks
+     it of a covered cell, because a covered cell's own ceiling only binds
+     if it turns out to be a mine, and a conditional truth is not a count
+     that can be traded.
+
+     Laid out as cases it binds perfectly well. Two covered cells side by
+     side, each already touching two found mines, cannot both be mines:
+     either one would take the other as a third companion and be crowded
+     past the law. No bound written over found mines says so, since the two
+     cells need share no mine at all. So a number's cells are laid every
+     way it allows, and a way is thrown out where some mine — found or just
+     laid — is crowded past the ceiling by what is certainly beside it, or
+     cannot reach the floor even if every cell still open around it came in
+     as a mine. Both refusals are certain, so the ways kept can only be too
+     many, and what they all agree on is agreed by the truth among them. */
+  if (!moved && (dLo || dHi < 99) && allowRule('deg-ways')) {
+    for (const c2 of constraintsWithTotal(known)) {
+      const U = c2.cells, need = c2.left;
+      // as above: the counter may speak over more ground than any number
+      if (need < 1 || need > U.length || U.length > 8) continue;
+      let ways2 = 1;
+      for (let a2 = 0; a2 < need; a2++) ways2 = ways2 * (U.length - a2) / (a2 + 1);
+      if (ways2 > 40) continue;
+
+      const inAll = new Array(U.length).fill(true);
+      const inAny = new Array(U.length).fill(false);
+      let live = 0;
+      const fitsDeg = (add, clear) => {
+        /* Certainly a mine, against certainly still able to become one:
+           the first counts against the ceiling, the two together against
+           the floor. Cells outside this number stay open on both counts. */
+        const judge = c3 => {
+          let sure = 0, may = 0;
+          for (const j2 of corOf(c3)) {
+            if (isM(j2) || add.has(j2)) sure++;
+            else if (known[j2] === UNKNOWN && !clear.has(j2)) may++;
+          }
+          return sure <= dHi && sure + may >= dLo;
+        };
+        for (const c3 of add) if (!judge(c3)) return false;
+        // and every mine already found whose company this laying changed
+        for (const c3 of add)
+          for (const j2 of corOf(c3)) if (isM(j2) && !judge(j2)) return false;
+        for (const c3 of clear)
+          for (const j2 of corOf(c3)) if (isM(j2) && !judge(j2)) return false;
+        return true;
+      };
+      const lay = (at, chosen) => {
+        if (chosen.length === need) {
+          const add = new Set(chosen);
+          const clear = new Set(U.filter(x => !add.has(x)));
+          if (!fitsDeg(add, clear)) return;
+          live++;
+          for (let k2 = 0; k2 < U.length; k2++)
+            if (add.has(U[k2])) inAny[k2] = true; else inAll[k2] = false;
+          return;
+        }
+        if (at >= U.length || U.length - at < need - chosen.length) return;
+        chosen.push(U[at]); lay(at + 1, chosen); chosen.pop();
+        lay(at + 1, chosen);
+      };
+      lay(0, []);
+      if (!live) continue;          // no way at all: the position is past saving
+      for (let k2 = 0; k2 < U.length; k2++) {
+        if (inAll[k2]) mark(U[k2], 'mine', 'deg-ways', cite(c2));
+        else if (!inAny[k2]) mark(U[k2], 'safe', 'deg-ways', cite(c2));
       }
     }
   }
@@ -1099,7 +1392,7 @@ function rulesetMoves(known, find) {
          bite at all: more mines wanted than one group may hold, or laid
          ground already against the number's cells. */
       const waysRule = gCap ? 'cap-ways' : 'group-ways';
-      for (const c2 of allowRule(waysRule) ? constraintsOf(known) : []) {
+      for (const c2 of allowRule(waysRule) ? constraintsWithTotal(known) : []) {
         const U = c2.cells, need = c2.left;
         if (need < 2 || need >= U.length || U.length > 12) continue;
         const nearMine = U.some(u2 => [...edgOf(u2)].some(isM));
@@ -1135,7 +1428,7 @@ function rulesetMoves(known, find) {
         };
         lay(0, []);
         if (!ways) continue;      // no laying passes: the position is past saving
-        const wClues = [c2.from];
+        const wClues = cite(c2);
         for (const u2 of U) for (const j2 of edgOf(u2))
           if (isM(j2) && !wClues.includes(j2)) wClues.push(j2);
         for (let k2 = 0; k2 < U.length; k2++) {
@@ -1235,6 +1528,19 @@ function rulesetMoves(known, find) {
        among its covered neighbours is a count over exactly those cells. The
        degree rules above spend it when it settles the whole set; written as
        a bound it also trades with any number watching the same ground. */
+    /* The same two facts as counts over named cells, so they can be set
+       against a number watching the same ground: what a mine still owes its
+       floor, and what room the ceiling leaves it. */
+    if (dLo || dHi < 99) {
+      for (let i2 = 0; i2 < n; i2++) {
+        if (!isM(i2)) continue;
+        const near = [...corOf(i2)];
+        const mn = near.filter(isM).length;
+        const unk = near.filter(j2 => known[j2] === UNKNOWN);
+        bound(unk, dLo - mn, dHi - mn, 'deg-count', [i2]);
+      }
+    }
+
     if (has('snake') || has('loop')) {
       const ring = has('loop');
       /* Two mines already worn down to one mine neighbour and no covered
@@ -1273,7 +1579,7 @@ function rulesetMoves(known, find) {
        bare ground. A cell whose removal strands the far end entirely is a
        cut of one, which reach-cut already forces, and is left to it. */
     if ((has('connected') || has('snake') || has('loop') || has('outside'))) {
-      const chainAdj = has('connected') ? corOf : edgOf;
+      const chainAdj = has('connected') ? joinAdj() : edgOf;
       const passable = c => known[c] === UNKNOWN || isM(c);
       const { id: pid, comps: pieces } = compsOver(isM, chainAdj);
       const toRim = has('outside');
@@ -1355,7 +1661,7 @@ function rulesetMoves(known, find) {
        reach it, and so do more mines remaining than the number holds. The
        rim needs no such promise: every mine owes it a chain regardless. */
     if (has('connected') || has('snake') || has('loop') || has('outside')) {
-      const chainAdj = has('connected') ? corOf : edgOf;
+      const chainAdj = has('connected') ? joinAdj() : edgOf;
       let foundAll = 0;
       for (let i2 = 0; i2 < n; i2++) if (isM(i2)) foundAll++;
       const binds = has('outside') || foundAll > 0;
@@ -1513,23 +1819,23 @@ function rulesetMoves(known, find) {
        in it holds for the true routes too. Under Outside the far end is the
        rim itself, which every piece owes a chain regardless. */
     if (!moved && (has('connected') || has('snake') || has('loop') || has('outside')) &&
-        allowRule('reach-way')) {
-      const chainAdj = has('connected') ? corOf : edgOf;
+        (allowRule('reach-way') || allowRule('reach-fare'))) {
+      const chainAdj = has('connected') ? joinAdj() : edgOf;
       const passable = c => known[c] === UNKNOWN || isM(c);
       const { id: pid, comps: pieces } = compsOver(isM, chainAdj);
       const toRim = has('outside');
-      /* Wide-open ground holds no funnels worth asking after — routes
-         abound — so the pricing waits until the covered part has narrowed
-         to where a corridor can actually exist. Generation's stalls on wide
-         boards skip it whole, which is most of what it would cost. */
+      /* Wide-open ground holds no funnels worth asking after when the coin
+         is a number's count — routes abound at that price — so that pricing
+         waits until the covered part has narrowed to where a corridor could
+         exist at all. Paying in mines is a tighter purse, and finds its
+         funnels on open ground too, so it does not wait. */
       let unknownLeft = 0;
       for (let i2 = 0; i2 < n; i2++) if (known[i2] === UNKNOWN) unknownLeft++;
-      if (unknownLeft <= 140 &&
-          pieces.length >= (toRim ? 1 : 2) && pieces.length <= 6) {
+      if (pieces.length >= (toRim ? 1 : 2) && pieces.length <= 6) {
         /* Fewest crossings of the watched cells on any chain from the seed.
            Costs run in small layers, so a bucket a crossing dearer than the
            budget is far enough to look. */
-        const price = (seeds, inU2, cap2) => {
+        const price = (seeds, costOf, cap2) => {
           const dist = new Int32Array(n).fill(127);
           const q = Array.from({ length: cap2 + 2 }, () => []);
           for (const [c, d0] of seeds)
@@ -1540,12 +1846,15 @@ function rulesetMoves(known, find) {
               if (dist[c] < d0) continue;
               for (const j2 of chainAdj(c)) {
                 if (!passable(j2)) continue;
-                const nd = d0 + (inU2.has(j2) ? 1 : 0);
+                const nd = d0 + costOf(j2);
                 if (nd < dist[j2] && nd <= cap2 + 1) { dist[j2] = nd; q[nd].push(j2); }
               }
             }
           return dist;
         };
+        // what a route pays: a number's cells for reach-way, every fresh mine for the fare
+        const tollOf = inU2 => c => (inU2.has(c) ? 1 : 0);
+        const fareOf = c => (isM(c) ? 0 : 1);
 
         const seedsOf = p => pieces[p].map(c => [c, 0]);
         const pairs = [];
@@ -1556,12 +1865,13 @@ function rulesetMoves(known, find) {
             for (let p2 = p + 1; p2 < pieces.length; p2++) pairs.push([p, p2]);
         }
 
-        for (const c2 of constraintsOf(known)) {
+        for (const c2 of allowRule('reach-way') && unknownLeft <= 140
+                         ? constraintsOf(known) : []) {
           const k = c2.left;
           if (k < 1 || k > 2 || c2.cells.length <= k) continue;
           const inU2 = new Set(c2.cells);
           for (const [pa, pb] of pairs) {
-            const dA = price(seedsOf(pa), inU2, k);
+            const dA = price(seedsOf(pa), tollOf(inU2), k);
             const seedsB = pb >= 0 ? seedsOf(pb)
               : (() => {                     // the rim, wherever a chain could end
                   const s = [];
@@ -1571,7 +1881,7 @@ function rulesetMoves(known, find) {
                   return s;
                 })();
             if (!seedsB.length) continue;
-            const dB = price(seedsB, inU2, k);
+            const dB = price(seedsB, tollOf(inU2), k);
 
             // the ground on some route the number can afford
             const inK = c =>
@@ -1590,6 +1900,51 @@ function rulesetMoves(known, find) {
             for (const u of cutCells(known, nodes, c => seen2[c] === 1,
                                      chainAdj, isA2, isB2, 'strand'))
               mark(u, 'mine', 'reach-way', [c2.from, ...pieces[pa]]);
+          }
+        }
+
+        /* And the same routes priced in the plainer coin: not what a number
+           can pay, but what the board can. Every covered cell a route runs
+           through is a mine spent, and only so many are left — so a way of
+           five cells cannot be walked with three mines in hand. Keep the
+           ground on some route the purse can afford, and where that ground
+           funnels through one cell, the join has no other way.
+
+           Mines already found cost nothing to pass, being spent already.
+           The purse is what is left after them, and it is the same purse for
+           every pair, so a pair that cannot be afforded at all simply says
+           nothing here — some other pair is meeting the cost. */
+        if (allowRule('reach-fare')) {
+          let found = 0;
+          for (let i2 = 0; i2 < n; i2++) if (isM(i2)) found++;
+          const purse = mines - found;
+          if (purse >= 1) for (const [pa, pb] of pairs) {
+            const dA = price(seedsOf(pa), fareOf, purse);
+            const seedsB = pb >= 0 ? seedsOf(pb)
+              : (() => {
+                  const s = [];
+                  for (let i2 = 0; i2 < n; i2++)
+                    if (!interior[i2] && passable(i2)) s.push([i2, isM(i2) ? 0 : 1]);
+                  return s;
+                })();
+            if (!seedsB.length) continue;
+            const dB = price(seedsB, fareOf, purse);
+            const inK = c =>
+              passable(c) && dA[c] + dB[c] - (isM(c) ? 0 : 1) <= purse;
+            const start = pieces[pa][0];
+            if (!inK(start)) continue;
+            const nodes = [start];
+            const seen2 = new Uint8Array(n);
+            seen2[start] = 1;
+            for (let h2 = 0; h2 < nodes.length; h2++)
+              for (const j2 of chainAdj(nodes[h2]))
+                if (!seen2[j2] && inK(j2)) { seen2[j2] = 1; nodes.push(j2); }
+            const isA2 = pb >= 0 ? (c => pid[c] === pb) : (c => !interior[c]);
+            const isB2 = c => pid[c] === pa;
+            if (!nodes.some(isA2)) continue;
+            for (const u of cutCells(known, nodes, c => seen2[c] === 1,
+                                     chainAdj, isA2, isB2, 'strand'))
+              mark(u, 'mine', 'reach-fare', pieces[pa]);
           }
         }
       }
@@ -1874,6 +2229,35 @@ function constraintsOf(known) {
     }
     if (cells.length) cons.push({ from: i, cells, left });
   }
+  return cons;
+}
+
+/* The mine counter, set among the numbers. The rules that lay a number's
+   mines every way its law allows treat each number as a statement about
+   named cells; the count of mines still out there is exactly such a
+   statement, over all the covered ground at once, and towards the end of a
+   board it is often the only one still saying anything.
+
+   Four mines left over five covered cells, four of which all touch each
+   other under a law that forbids a huddle that size, settles the fifth —
+   and no number on the board says so, because the reasoning is the
+   counter's and not any number's. Handed over only while the ground left is
+   small enough to lay out, which is precisely what the endgame is. */
+function constraintsWithTotal(known) {
+  const cons = constraintsOf(known);
+  let left = mines;
+  const cells = [];
+  for (let i = 0; i < n; i++) {
+    if (known[i] === KNOWN_MINE) left--;
+    else if (known[i] === UNKNOWN) cells.push(i);
+  }
+  /* Eight cells and no more. The rules that take this statement lay it out
+     case by case, and the cases double with every cell — at eight there are
+     seventy at the worst, which is nothing, and at twelve there are nine
+     hundred, which is felt in every deal. Eight is well past the size of
+     endgame the counter is wanted for. */
+  if (cells.length && cells.length <= 8 && left >= 0 && left <= cells.length)
+    cons.push({ from: -1, cells, left });
   return cons;
 }
 
@@ -2242,6 +2626,14 @@ const HINTWORDS = {
   'reach-cut': 'Connectedness. This is the only cell the group has to pass through.',
   'reach-room': 'Connectedness. Take this cell away and no piece of ground left has both the mines already found and room for all of them — so the group must come through here.',
   'reach-owed': 'Connectedness. A number here is still owed a mine, and wherever that mine turns out to be it must join the group — which leaves it only this way through.',
+  'conn-ways': 'Connectedness. Take a number — or the mine counter itself, once little ground is left — and lay its mines every way it allows; throw out the ways that would strand the group, and every way left agrees about this cell.',
+  'deg-full': 'The crowding. This mine already touches as many mines as the law allows, so everything else beside it is clear.',
+  'deg-grow': 'The huddle. This mine is short of the companions it must have, and only just enough covered cells are left to give them.',
+  'deg-over': 'The crowding. A mine here would touch more mines than the law allows.',
+  'deg-room': 'The huddle. There are too few cells around this one that could ever hold a mine for it to find the companions it would need.',
+  'deg-count': 'The huddle. How many companions this mine still owes, or has room for, is a count over the covered cells beside it — and a number watching the same cells trades against it.',
+  'deg-ways': 'The crowding, laid out. Take a number — or the mine counter itself, once little ground is left — and lay its mines every way it allows; throw out the ways that crowd some mine past the law, or that leave one unable ever to find its companions, and every way left agrees about this cell. Two cells beside each other that each already touch their fill cannot both be mines, however little else connects them.',
+  'reach-fare': 'Connectedness. Every covered cell a route runs through is a mine spent, and only one way of joining these pieces can be paid for with the mines that are left — it comes through here.',
   'reach-toll': 'The chain, priced. A mine here could only chain out through more of this number’s cells than the number has mines to give, so no chain can carry it.',
   'reach-way': 'The one affordable way. Of every route the pieces could still join by, all that this number can pay for pass through here — so the chain does too.',
   'reach-need': 'The narrow join. The pieces can only meet through one of two cells, so between them those two owe a mine — and what watches them spends it.',
@@ -2254,8 +2646,8 @@ const HINTWORDS = {
   'group-count': 'The groups. A piece short of its size must take from the cells beside it, and a number watching those cells has that much of its answer spoken for.',
   'snake-count': 'The path. How many mines this mine must still find beside it is a count over its covered neighbours, and a number watching the same cells trades against it.',
   'loop-count': 'The loop. A mine’s covered neighbours must hold exactly what brings it to two, and a number watching the same cells has the difference settled for it.',
-  'cap-ways': "The groups. Lay this number's mines every way that does not weld a group past the law, and every way agrees about this cell.",
-  'group-ways': "The groups. Lay this number's mines every way that does not swell a group past its size, and every way agrees about this cell.",
+  'cap-ways': 'The groups. Take a number — or the mine counter itself, once little ground is left — and lay its mines every way that does not weld a group past the law; every way agrees about this cell.',
+  'group-ways': 'The groups. Take a number — or the mine counter itself, once little ground is left — and lay its mines every way that does not swell a group past its size; every way agrees about this cell.',
   'search': 'Exhaustion. Every board the clues still allow has been tried, and in all of them this cell comes out the same way.',
   'replay': 'The deal remembers. Solved from the opening cells alone, the board settles this — retrace it from what was first shown.',
 };
@@ -2373,6 +2765,36 @@ function pickGiven(known, opening) {
 }
 
 // How much of the board a set of handouts actually puts on show, cascades and all.
+/* Ground the board gives away before a cell is clicked. A box reading
+   nought hands over every cell it holds — they can be clicked straight
+   away — and a box wanting as many mines as it has cells left hands them
+   over just as surely. On the boxed laws that free start can be half again
+   what the opening shows, so a level asking for a small opening was getting
+   a large one in disguise. Counted here so the judging can see it. */
+function freeByBoxes(shown) {
+  const law = boxLaw();
+  if (!boxes.length) return 0;
+  let free = 0;
+  for (let b = 0; b < boxes.length; b++) {
+    const left = [];
+    let held = 0;
+    for (const c of boxes[b]) {
+      if (mine[c]) held++;
+      else if (!shown || shown[c] !== SAFE) left.push(c);
+    }
+    if (!left.length) continue;
+    let lo, hi;
+    if (law === 'exact' || law === 'irregular') {
+      if (!boxShown) continue;
+      [lo, hi] = boxRange(b);
+    } else if (law) ({ lo, hi } = boxBounds());
+    else return 0;
+    // settled outright: no room for another mine, or only room for mines
+    if (held >= hi || lo - held >= left.length) free += left.length;
+  }
+  return free;
+}
+
 function shownBy(list) {
   const shown = new Uint8Array(n);
   for (const g of list) markOpen(shown, g);

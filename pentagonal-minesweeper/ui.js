@@ -61,10 +61,16 @@ function boxSegments() {
       return [...rim.values()];
     });
   }
-  const numbered = boxLaw() === 'exact' || boxLaw() === 'irregular';
+  /* A box that keeps its number to itself is left unlined only where the
+     line was the only thing pointing at a number: the irregular cut, whose
+     boxes are of no fixed shape, so a line round a silent one sends the eye
+     somewhere there is nothing to read. Where the boxes come of the tiling's
+     own repeat they are all lined, silent or not — the grid is part of how
+     the board reads, and half a grid reads worse than none. */
+  const hideSilent = boxLaw() === 'irregular';
   const out = [];
   for (let b = 0; b < boxes.length; b++) {
-    if (numbered && boxMuted && boxMuted[b]) continue;
+    if (hideSilent && boxMuted && boxMuted[b]) continue;
     for (const seg of boxSeg[b]) out.push(seg);
   }
   return out;
