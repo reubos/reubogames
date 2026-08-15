@@ -1114,7 +1114,7 @@ function rulesetMoves(known, find) {
         const home = id[withM[0][0]];
         const owed = [];
         for (const c2 of constraintsOf(known))
-          if (c2.left >= 1) {
+          if (c2.lo >= 1) {
             const inHome = c2.cells.filter(x => id[x] === home);
             if (inHome.length) owed.push({ cells: inHome, from: c2.from });
           }
@@ -1173,6 +1173,7 @@ function rulesetMoves(known, find) {
       const chainAdj = joinAdj();
       for (const c2 of constraintsWithTotal(known)) {
         const U = c2.cells, need = c2.left;
+        if (need === undefined) continue;      // a clue speaking from one side
         // the counter is allowed a wider set than a number, since it is the
         // one statement worth asking when little ground is left
         if (need < 1 || need > U.length || U.length > (c2.from < 0 ? 8 : 6)) continue;
@@ -1271,6 +1272,7 @@ function rulesetMoves(known, find) {
   if (!moved && (dLo || dHi < 99) && allowRule('deg-ways')) {
     for (const c2 of constraintsWithTotal(known)) {
       const U = c2.cells, need = c2.left;
+      if (need === undefined) continue;        // a clue speaking from one side
       // as above: the counter may speak over more ground than any number
       if (need < 1 || need > U.length || U.length > 8) continue;
       let ways2 = 1;
@@ -1453,6 +1455,7 @@ function rulesetMoves(known, find) {
       const waysRule = gCap ? 'cap-ways' : 'group-ways';
       for (const c2 of allowRule(waysRule) ? constraintsWithTotal(known) : []) {
         const U = c2.cells, need = c2.left;
+        if (need === undefined) continue;      // a clue speaking from one side
         if (need < 2 || need >= U.length || U.length > 12) continue;
         const nearMine = U.some(u2 => [...edgOf(u2)].some(isM));
         if (need <= limit && !nearMine) continue;
@@ -1742,7 +1745,7 @@ function rulesetMoves(known, find) {
       const binds = has('outside') || foundAll > 0;
       for (const c2 of allowRule('reach-toll') ? constraintsOf(known) : []) {
         const U = c2.cells, k = c2.left;
-        if (k < 1 || k >= U.length) continue;
+        if (k === undefined || k < 1 || k >= U.length) continue;
         if (!binds && mines - foundAll <= k) continue;
         const inU = new Map();
         U.forEach((u2, ix) => inU.set(u2, ix));
@@ -1788,7 +1791,7 @@ function rulesetMoves(known, find) {
     if (bounds.length) {
       const pool = bounds.slice();
       for (const c of constraintsOf(known))
-        pool.push({ cells: c.cells, lo: c.left, hi: c.left, rule: '', clues: [c.from] });
+        pool.push({ cells: c.cells, lo: c.lo, hi: c.hi, rule: '', clues: [c.from] });
 
       // one entry per distinct set, kept at the tightest range yet known
       const keyOf = cells => cells.slice().sort((x, y) => x - y).join(',');
@@ -1943,7 +1946,7 @@ function rulesetMoves(known, find) {
         for (const c2 of allowRule('reach-way') && unknownLeft <= 140
                          ? constraintsOf(known) : []) {
           const k = c2.left;
-          if (k < 1 || k > 2 || c2.cells.length <= k) continue;
+          if (k === undefined || k < 1 || k > 2 || c2.cells.length <= k) continue;
           const inU2 = new Set(c2.cells);
           for (const [pa, pb] of pairs) {
             const dA = price(seedsOf(pa), tollOf(inU2), k);
@@ -2296,18 +2299,32 @@ function markOpen(known, i) {
    must be held to the cells actually uncovered. */
 let visibleOnly = false;
 
+/* Every clue as an interval over the cells it still watches. A plain number
+   says the same thing from both sides at once, so its floor and its ceiling
+   are the one figure and `left` is that figure; a cell speaking from one side
+   only leaves the other side open, and has no `left` at all — which is what
+   the rules needing an exact count test for before they take a clue up. */
 function constraintsOf(known) {
   const cons = [];
   for (let i = 0; i < n; i++) {
     if (known[i] !== SAFE || muted[i]) continue;    // a muted cell states nothing
     if (visibleOnly && state[i] !== OPEN) continue;  // nor does one still covered
     const cells = [];
-    let left = count[i];
+    let found = 0;
     for (const j of nbOf(i)) {
       if (known[j] === UNKNOWN) cells.push(j);
-      else if (known[j] === KNOWN_MINE) left--;
+      else if (known[j] === KNOWN_MINE) found++;
     }
-    if (cells.length) cons.push({ from: i, cells, left });
+    if (!cells.length) continue;
+    /* What the mines already found leave for the cells still covered. A
+       floor worn away by them is a floor of nothing and still true; a
+       ceiling so worn is a ceiling of nought, which clears the rest. */
+    const left = (weak[i] ? weakAt[i] : count[i]) - found;
+    const c = { from: i, cells };
+    if (!weak[i]) { c.left = left; c.lo = left; c.hi = left; }
+    else if (weak[i] === 1) { c.lo = Math.max(0, left); c.hi = cells.length; }
+    else { if (left < 0) continue; c.lo = 0; c.hi = Math.min(cells.length, left); }
+    cons.push(c);
   }
   return cons;
 }
@@ -2337,7 +2354,7 @@ function constraintsWithTotal(known) {
      hundred, which is felt in every deal. Eight is well past the size of
      endgame the counter is wanted for. */
   if (cells.length && cells.length <= 8 && left >= 0 && left <= cells.length)
-    cons.push({ from: -1, cells, left });
+    cons.push({ from: -1, cells, left, lo: left, hi: left });
   return cons;
 }
 
@@ -2351,9 +2368,12 @@ function deduce(known, mode) {
   const counting = () => {
     let moved = false;
     for (const c of constraintsOf(known)) {
-      if (c.left === 0 && allowRule('counting-clear'))
+      /* A ceiling of nought clears the ground under it, and a floor as high
+         as the ground is wide fills it. A plain number is both at once, and
+         so reaches whichever of the two applies, exactly as before. */
+      if (c.hi === 0 && allowRule('counting-clear'))
         for (const j of c.cells) { if (setSafe(j)) { moved = true; tallyRule('counting-clear'); } }
-      else if (c.left === c.cells.length && allowRule('counting-full'))
+      else if (c.lo === c.cells.length && allowRule('counting-full'))
         for (const j of c.cells) { if (setMine(j)) { moved = true; tallyRule('counting-full'); } }
     }
     return moved;
@@ -2374,9 +2394,14 @@ function deduce(known, mode) {
         seen.add(b);
         if (!a.cells.every(y => b.cells.includes(y))) continue;
         const diff = b.cells.filter(y => !a.cells.includes(y));
-        const d = b.left - a.left;
-        if (d === 0) for (const j of diff) { if (setSafe(j)) { moved = true; tallyRule('subset'); } }
-        else if (d === diff.length) for (const j of diff) { if (setMine(j)) { moved = true; tallyRule('subset'); } }
+        /* What the difference must hold is at least the larger's floor less
+           the smaller's ceiling, and at most the larger's ceiling less the
+           smaller's floor. For two plain numbers both come to the same
+           figure, which is the old rule unchanged. */
+        if (b.hi - a.lo <= 0)
+          for (const j of diff) { if (setSafe(j)) { moved = true; tallyRule('subset'); } }
+        else if (b.lo - a.hi >= diff.length)
+          for (const j of diff) { if (setMine(j)) { moved = true; tallyRule('subset'); } }
       }
     }
     return moved;
@@ -2407,21 +2432,21 @@ function deduce(known, mode) {
         let interN = 0;
         for (const y of b.cells) if (inA.has(y)) interN++;
         const aOut = a.cells.length - interN, bOut = b.cells.length - interN;
-        const inHi = Math.min(a.left, b.left, interN);
-        const inLo = Math.max(a.left - aOut, b.left - bOut, 0);
+        const inHi = Math.min(a.hi, b.hi, interN);
+        const inLo = Math.max(a.lo - aOut, b.lo - bOut, 0);
         if (inLo > inHi) continue;
         if (bOut) {
-          if (b.left - inLo <= 0) {
+          if (b.hi - inLo <= 0) {
             for (const y of b.cells) if (!inA.has(y)) took(setSafe(y));
-          } else if (b.left - inHi >= bOut) {
+          } else if (b.lo - inHi >= bOut) {
             for (const y of b.cells) if (!inA.has(y)) took(setMine(y));
           }
         }
         if (aOut) {
           const inB = new Set(b.cells);
-          if (a.left - inLo <= 0) {
+          if (a.hi - inLo <= 0) {
             for (const y of a.cells) if (!inB.has(y)) took(setSafe(y));
-          } else if (a.left - inHi >= aOut) {
+          } else if (a.lo - inHi >= aOut) {
             for (const y of a.cells) if (!inB.has(y)) took(setMine(y));
           }
         }

@@ -17,6 +17,20 @@ let mine, state, count;
    the cascade would give the blank away. */
 let muted = new Uint8Array(0);
 let muteOn = false;
+
+/* Between showing a number and keeping it back there is a third thing it
+   could do: say which side of itself it is on. A cell can show "at least
+   three" or "at most two" instead of the count it really holds, which is
+   less than the truth and a great deal more than silence.
+
+   weak says which way a cell speaks — nought for the plain number, one for a
+   floor, two for a ceiling — and weakAt says at what figure, which need not
+   be the count itself: a blank shown as "at most one" is honest, is not
+   nothing, and above all does not cascade, which is the whole trouble with
+   blanks. Every cell is plain until something sets otherwise; nothing in the
+   game does yet, and this is here to be measured. */
+let weak = new Uint8Array(0);
+let weakAt = new Uint8Array(0);
 /* Under the strict law a cell may only be uncovered when nothing on the board
    allows it to hold a mine. Click one that merely happens to be empty and it
    turns out to hold one after all — so a lucky guess is no longer lucky. */
@@ -328,6 +342,7 @@ function restoreBoard() {
   if (typeof s.count !== 'string' || s.count.length !== n) return false;
   mine = new Uint8Array(n); state = new Uint8Array(n);
   count = new Uint8Array(n); muted = new Uint8Array(n);
+  weak = new Uint8Array(n); weakAt = new Uint8Array(n);
   for (let i = 0; i < n; i++) {
     mine[i] = +s.mine[i]; state[i] = +s.state[i]; muted[i] = +s.muted[i];
     count[i] = parseInt(s.count[i], 36);
@@ -437,6 +452,7 @@ async function newGameUnder(my, across, down, m) {
   state = new Uint8Array(n);
   count = new Uint8Array(n);
   muted = new Uint8Array(n);
+  weak = new Uint8Array(n); weakAt = new Uint8Array(n);
 
   opened = 0; flags = 0; given = 0; newBest = false;
   mistakes = 0; hintsUsed = 0; historyLost = false;
