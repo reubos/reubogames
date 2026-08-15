@@ -173,6 +173,64 @@ function placeCluster(k) {
   return false;
 }
 
+/* Every mine with exactly three companions, no more and no fewer. This one
+   will not grow the way a clump does. A growing blob is always thinner at
+   its edge than in its middle, and it is the edge that fails a law asking
+   every mine for the same number — so there is no order of laying that keeps
+   the board legal as it fills. It is laid as a packing instead.
+
+   Four cells that all touch one another give each of the four exactly three,
+   and a pentagon's corners afford such fours wherever four tiles meet at a
+   point. If no other mine is ever laid against any of the four, that count
+   is settled for good, whatever happens elsewhere on the board. So the fours
+   go down whole, each one blocking every cell it touches, and the board
+   fills with fours held apart from each other.
+
+   Other shapes obey the law — a ring of six, a ladder — but none can be
+   grown into safely either, and the fours alone pack to about a third of the
+   board, which is where the reasoning is richest. */
+function placeThree(k) {
+  if (k % 4) return false;
+  const near = [];
+  for (let i = 0; i < n; i++) near.push(new Set(corOf(i)));
+  const fours = [];
+  for (let a = 0; a < n; a++)
+    for (const b of near[a]) { if (b <= a) continue;
+      for (const c of near[b]) { if (c <= b || !near[a].has(c)) continue;
+        for (const d of near[c]) { if (d <= c || !near[a].has(d) || !near[b].has(d)) continue;
+          fours.push([a, b, c, d]); } } }
+  if (fours.length * 4 < k) return false;
+
+  const order = fours.map((_, i) => i);
+  for (let attempt = 0; attempt < 24; attempt++) {
+    mine.fill(0);
+    let placed = 0;
+    const blocked = new Uint8Array(n);
+    /* A planted four goes down first and blocks its surroundings like any
+       other; the motif answers for its being a lawful four to begin with. */
+    if (seedMotif) {
+      for (const c of seedMotif.mines) { mine[c] = 1; placed++; }
+      for (const c of seedMotif.mines) {
+        blocked[c] = 1;
+        for (const j of corOf(c)) blocked[j] = 1;
+      }
+    }
+    for (let i = order.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      const t = order[i]; order[i] = order[j]; order[j] = t;
+    }
+    for (const q of order) {
+      if (placed >= k) break;
+      const f = fours[q];
+      if (f.some(c => blocked[c] || !seedOK(c))) continue;
+      for (const c of f) { mine[c] = 1; placed++; }
+      for (const c of f) { blocked[c] = 1; for (const j of corOf(c)) blocked[j] = 1; }
+    }
+    if (placed === k && validRuleset()) return true;
+  }
+  return false;
+}
+
 /* Mines that must not crowd. Anywhere at all, so long as no mine ends with
    more than the ceiling touching it — the cell laid and every cell it
    touches are checked, since laying one raises the count of all of them. */
@@ -567,6 +625,7 @@ function layByRule() {
            : has('loop') ? placeLoop(mines)
            : has('connected') ? placeConnected(mines)
            : g ? placeGroups(mines, g)
+           : (degFloor() && degCap() < 99) ? placeThree(mines)
            : degFloor() ? placeCluster(mines)
            : degCap() < 99 ? placeSparse(mines, degCap())
            : groupCap() ? placeCapped(mines, groupCap())
@@ -1456,14 +1515,30 @@ function rulesetMoves(known, find) {
         for (const g of fcomps) {
           const needMore = gSize - g.length;
           if (needMore < 1 || needMore > 3) continue;
-          /* the ground a completion could use: within reach of the piece */
+          /* The ground a completion could use: every covered cell the piece
+             can reach by laying no more than it still needs. Reach is
+             counted in cells laid, not in steps taken — passing through a
+             mine already found costs nothing, since a way that welds that
+             mine's piece in brings it along for free and carries on from the
+             far side of it. Walking through covered ground alone missed
+             those, and a completion missed is a way missed, which is exactly
+             what makes an agreement between ways unsound. It takes three
+             cells still wanted for the difference to show, so the sizes up
+             to three never revealed it and Quads did at once. */
           const region = [];
           const rSeen = new Map();
+          const walked = new Uint8Array(n);
+          for (const c of g) walked[c] = 1;
           let ring = g.slice();
-          for (let d0 = 0; d0 < needMore; d0++) {
+          for (let spent = 0; spent <= needMore; spent++) {
+            for (let a2 = 0; a2 < ring.length; a2++)
+              for (const j2 of edgOf(ring[a2]))
+                if (!walked[j2] && isM(j2)) { walked[j2] = 1; ring.push(j2); }
+            if (spent === needMore) break;
             const next = [];
             for (const c of ring) for (const j2 of edgOf(c))
-              if (known[j2] === UNKNOWN && !rSeen.has(j2)) {
+              if (!walked[j2] && known[j2] === UNKNOWN) {
+                walked[j2] = 1;
                 rSeen.set(j2, region.length); region.push(j2); next.push(j2);
               }
             ring = next;

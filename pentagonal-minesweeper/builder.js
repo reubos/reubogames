@@ -179,13 +179,16 @@ async function buildPuzzle() {
   const d = DIFF[difficulty];
   const structured = ruleset !== 'none';
   const gSize = groupSize();
+  const gStep = layStep();
   const theBoxLaw = boxLaw();
   /* Whatever count is asked for is bent to what the law can hold at all:
-     groups come in whole groups, a ring needs four cells at the very least,
-     and a box law binds the count between its floors and ceilings. Run
-     again after every change of count, since the nudging below changes it. */
+     groups come in whole groups and Exactly 3 in whole fours, a ring needs
+     four cells at the very least, and a box law binds the count between its
+     floors and ceilings. Run again after every change of count, since the
+     nudging below changes it. */
   const fitCount = () => {
-    if (gSize) mines = Math.max(gSize, gSize * Math.floor(Math.min(n - 9, mines) / gSize));
+    if (gStep > 1)
+      mines = Math.max(gStep, gStep * Math.floor(Math.min(n - 9, mines) / gStep));
     if (has('loop')) mines = Math.max(4, mines);
     if (theBoxLaw && theBoxLaw !== 'exact') {
       const { lo, hi } = boxBounds();
@@ -218,8 +221,8 @@ async function buildPuzzle() {
      the border may simply not exist, while one of 70 does. Each law has a
      floor of its own: a pair needs two cells to be a pair, a ring four to be
      a ring. */
-  const floor = has('loop') ? 4 : gSize ? gSize : 1;
-  const step = gSize ? gSize : 1;
+  const floor = has('loop') ? 4 : gStep;
+  const step = gStep;
   /* Coming down one mine at a time costs a whole failed laying apiece, and on
      a big board asked for a long path that is most of the time there is. So
      the count falls by a share of itself, and only creeps at the very end. */

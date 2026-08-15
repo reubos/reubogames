@@ -46,7 +46,9 @@ let ruleset = 'none';
 const LAWS = {
   none: [], connected: ['connected'], connected2: ['connected'], outside: ['outside'],
   cluster: ['degree'], sparse: ['degree'],
-  singles: ['group'], doubles: ['group'], triples: ['group'], notriples: ['group'], noquads: ['group'],
+  singles: ['group'], doubles: ['group'], triples: ['group'], quads: ['group'],
+  notriples: ['group'], noquads: ['group'],
+  three: ['degree'],
   snake: ['snake'], loop: ['loop'],
   boxed1: ['box'], boxed2: ['box'], boxed3: ['box'], boxed4: ['box'],
   boxedirr: ['box'],
@@ -89,12 +91,23 @@ const joinAdj = () => (CORNERJOIN[ruleset] ? corOf : edgOf);
    hundred, and a density that stays where it is put. Likewise a ceiling of
    four is nearly free at a third-full board; three bites four times as
    hard, and lays without complaint. */
-const DEGFLOOR = { cluster: 3 };
-const DEGCAP = { sparse: 3 };
+/* And a floor and a ceiling set together at three, which is a different kind
+   of law again: not "at least" or "at most" but exactly, so every mine on the
+   board stands at the same number. It will not grow, since a growing blob is
+   always thinner at its edge than in its middle and it is the edge that
+   fails; it is laid instead as a packing. See placeThree. */
+const DEGFLOOR = { cluster: 3, three: 3 };
+const DEGCAP = { sparse: 3, three: 3 };
 const degFloor = () => (lawOff === 'degree' ? 0 : DEGFLOOR[ruleset] || 0);
 const degCap = () => (lawOff === 'degree' ? 99 : (DEGCAP[ruleset] === undefined ? 99 : DEGCAP[ruleset]));
 
-const GROUPSIZE = { singles: 1, doubles: 2, triples: 3 };
+/* The count a laying can actually take. The group laws lay whole groups, and
+   Exactly 3 lays whole fours, so a board asked for a number of the wrong
+   remainder could not be laid at all — the count is snapped to the step
+   before the search starts, and eased by the step thereafter. */
+const layStep = () => groupSize() || ((degFloor() && degCap() < 99) ? 4 : 1);
+
+const GROUPSIZE = { singles: 1, doubles: 2, triples: 3, quads: 4 };
 const GROUPCAP = { notriples: 2, noquads: 3 };
 const groupSize = () => (lawOff === 'group' ? 0 : GROUPSIZE[ruleset] || 0);
 const groupCap = () => (lawOff === 'group' ? 0 : GROUPCAP[ruleset] || 0);
@@ -157,6 +170,9 @@ const RULENOTES = {
            'along an edge.',
   triples: 'Mines come in edge-joined threes; the threes may meet at a corner, but ' +
            'never along an edge.',
+  quads: 'Mines come in edge-joined fours; the fours may meet at a corner, but ' +
+         'never along an edge.',
+  three: 'Every mine has exactly three other mines touching it, by edge or corner.',
   notriples: 'No three mines join up along their edges: they come singly or in ' +
              'pairs, and never more.',
   noquads: 'No four mines join up along their edges: they come in ones, twos or ' +
@@ -205,8 +221,13 @@ const DIFF = {
    board and the sliders were never going to land there by accident. The
    path laws want a little more: a longer path passes through more of the
    board, and their logic is worth the most where it nearly fills it. */
+/* Exactly 3 asks for less than the rest, because it is the one law with a
+   ceiling on how full the board can be at all: separated fours pack to about
+   a third, and asking for that is asking for the perfect packing every time.
+   Aimed short of it, so the laying takes on the first try rather than after
+   the count has been eased down a dozen times. */
 const LAWDENS = { snake: 0.40, loop: 0.40, sbox4: 0.40,
-                  cluster: 0.45, sparse: 0.45, boxed4: 0.45 };
+                  cluster: 0.45, sparse: 0.45, boxed4: 0.45, three: 0.26 };
 /* Boxed 4 asks for more than a third because a thin board leaves boxes
    empty, and a box reading nought hands over every cell it holds before a
    click is made — so a level asking for a small opening was giving a large
