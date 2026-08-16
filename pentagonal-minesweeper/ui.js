@@ -224,6 +224,14 @@ function draw() {
   }
 
   // and the boxes over the top of everything, since they are the ground plan
+  /* The box under the pointer is lifted out of the lattice: its rim drawn
+     brighter, and — where the boxes carry numbers — its clue brightened to
+     match, so a cell can be traced to the clue that speaks for it. The
+     lattice alone cannot say which figure belongs to which box at a glance,
+     the corners being shared ground. A box keeping its number to itself is
+     left unlit, since there would be nothing at the end of the pointing. */
+  const hoverBox = !over && hover >= 0 && boxOf && boxLaw() &&
+                   !(boxMuted && boxMuted[boxOf[hover]]) ? boxOf[hover] : -1;
   if (boxLaw()) {
     ctx.strokeStyle = BOXLINE;
     ctx.lineWidth = cellPitch * 0.11;
@@ -231,6 +239,13 @@ function draw() {
     ctx.beginPath();
     for (const [u, v] of boxSegments()) { ctx.moveTo(u[0], u[1]); ctx.lineTo(v[0], v[1]); }
     ctx.stroke();
+    if (hoverBox >= 0 && boxSeg && boxSeg[hoverBox]) {
+      ctx.strokeStyle = '#f2fbf5';
+      ctx.lineWidth = cellPitch * 0.15;
+      ctx.beginPath();
+      for (const [u, v] of boxSeg[hoverBox]) { ctx.moveTo(u[0], u[1]); ctx.lineTo(v[0], v[1]); }
+      ctx.stroke();
+    }
     ctx.lineWidth = cellPitch * 0.06;
   }
 
@@ -280,6 +295,7 @@ function draw() {
       if (boxMuted && boxMuted[b]) continue;
       const x = boxTop[b][0] * view.s + view.ox, y = boxTop[b][1] * view.s + view.oy;
       const say = (boxRel[b] || '') + boxShown[b];
+      ctx.fillStyle = b === hoverBox ? '#f2fbf5' : BOXNUM;
       ctx.strokeText(say, x, y);
       ctx.fillText(say, x, y);
     }
