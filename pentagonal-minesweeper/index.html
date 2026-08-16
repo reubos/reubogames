@@ -188,15 +188,25 @@
         <p class="note">With this on, resting the pointer on a number lights the
           cells it counts &mdash; which a tiling of pentagons does not make
           obvious by looking.</p>
+        <p class="label" style="margin-top: 14px">Bounds instead of numbers</p>
+        <div class="btn-row">
+          <button data-weaken="" class="on">Off</button>
+          <button data-weaken="1">On</button>
+        </div>
+        <p class="note">With this on, some cells and boxes show a bound &mdash;
+          &ldquo;at least two&rdquo;, &ldquo;at most three&rdquo; &mdash; rather
+          than the number they hold. Only numbers the board cannot spare are
+          offered one, so a bound always has to be read: what it withholds is
+          never something you could have done without. A cell showing a bound
+          does not open its neighbours the way a blank does, and cannot be
+          clicked for its full quota of flags.</p>
         <p class="label" style="margin-top: 14px">Ruleset</p>
         <div class="btn-row three">
           <button data-rule="none" class="on">None</button>
           <button data-rule="connected">Connected</button>
           <button data-rule="connected2">Connected 2</button>
           <button data-rule="outside">Outside</button>
-          <button data-rule="cluster">Cluster</button>
           <button data-rule="sparse">Sparse</button>
-          <button data-rule="three">Exactly 3</button>
           <button data-rule="singles">Singles</button>
           <button data-rule="doubles">Doubles</button>
           <button data-rule="triples">Triples</button>

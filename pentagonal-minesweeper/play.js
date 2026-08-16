@@ -31,6 +31,10 @@ let muteOn = false;
    game does yet, and this is here to be measured. */
 let weak = new Uint8Array(0);
 let weakAt = new Uint8Array(0);
+/* Whether the dealing offers a number a bound in place of its figure. Off
+   unless asked for: it changes how a board reads more than anything else
+   here, and is new enough to be worth trying rather than being given. */
+let weakenOn = false;
 /* Under the strict law a cell may only be uncovered when nothing on the board
    allows it to hold a mine. Click one that merely happens to be empty and it
    turns out to hold one after all — so a lucky guess is no longer lucky. */
@@ -73,10 +77,9 @@ let ruleset = 'none';
    what is in force rather than match on the name of a combination. */
 const LAWS = {
   none: [], connected: ['connected'], connected2: ['connected'], outside: ['outside'],
-  cluster: ['degree'], sparse: ['degree'],
+  sparse: ['degree'],
   singles: ['group'], doubles: ['group'], triples: ['group'], quads: ['group'],
   notriples: ['group'], noquads: ['group'],
-  three: ['degree'],
   snake: ['snake'], loop: ['loop'],
   boxed1: ['box'], boxed2: ['box'], boxed3: ['box'], boxed4: ['box'],
   boxedirr: ['box'],
@@ -101,39 +104,22 @@ const joinAdj = () => (CORNERJOIN[ruleset] ? corOf : edgOf);
    says what every group must be; a cap says only what none may exceed, which
    leaves the smaller groups free and can therefore never force a mine — only
    ever clear the ground round one. */
-/* How many mines a mine must, or may, have beside it — counting every cell
-   it touches, edge or corner. A floor makes the mines huddle: no mine may
-   stand with fewer than two companions, so the field comes in thick clumps
-   and long braids rather than scattered dots. A ceiling does the opposite,
-   forbidding the dense heart of a clump while leaving its edges free. The
-   two are opposite in what they can prove, as a floor and a ceiling always
-   are: a floor forces mines and a ceiling clears ground. */
-/* The numbers were measured rather than guessed, and the floor was measured
-   twice. A floor of two is met by almost any arrangement at these densities
-   and the law barely speaks — one part of the solving in a hundred, where
-   connectedness does five. Four speaks loudly but cannot be laid: a blob
-   thick enough that every cell of it, edge included, touches four others is
-   so rare that the generator thrashes between giving up and filling the
-   board, and the density came out anywhere from a twelfth to nineteen
-   twentieths. Three is the one that both speaks and lays — five parts in a
-   hundred, and a density that stays where it is put. Likewise a ceiling of
-   four is nearly free at a third-full board; three bites four times as
-   hard, and lays without complaint. */
-/* And a floor and a ceiling set together at three, which is a different kind
-   of law again: not "at least" or "at most" but exactly, so every mine on the
-   board stands at the same number. It will not grow, since a growing blob is
-   always thinner at its edge than in its middle and it is the edge that
-   fails; it is laid instead as a packing. See placeThree. */
-const DEGFLOOR = { cluster: 3, three: 3 };
-const DEGCAP = { sparse: 3, three: 3 };
+/* How many mines a mine may have beside it — counting every cell it
+   touches, edge or corner. Only the ceiling is in force now: Sparse forbids
+   the dense heart of a clump while leaving its edges free, and a ceiling of
+   three was measured to bite four times as hard as one of four while laying
+   without complaint. The floor machinery stays, since the solver's crowding
+   rules read both ends and a future law may want it, but no ruleset sets
+   one. */
+const DEGFLOOR = {};
+const DEGCAP = { sparse: 3 };
 const degFloor = () => (lawOff === 'degree' ? 0 : DEGFLOOR[ruleset] || 0);
 const degCap = () => (lawOff === 'degree' ? 99 : (DEGCAP[ruleset] === undefined ? 99 : DEGCAP[ruleset]));
 
-/* The count a laying can actually take. The group laws lay whole groups, and
-   Exactly 3 lays whole fours, so a board asked for a number of the wrong
-   remainder could not be laid at all — the count is snapped to the step
-   before the search starts, and eased by the step thereafter. */
-const layStep = () => groupSize() || ((degFloor() && degCap() < 99) ? 4 : 1);
+/* The count a laying can actually take: the group laws lay whole groups, so
+   the count is snapped to the group before the search starts, and eased by
+   the group thereafter. */
+const layStep = () => groupSize() || 1;
 
 const GROUPSIZE = { singles: 1, doubles: 2, triples: 3, quads: 4 };
 const GROUPCAP = { notriples: 2, noquads: 3 };
@@ -197,7 +183,6 @@ const RULENOTES = {
   connected: 'All mines form a single group, touching by edge or corner.',
   connected2: 'All mines form a single group, joined edge to edge — a corner between two of them does not join them.',
   outside: 'Every mine chains edge to edge to the border.',
-  cluster: 'Every mine has at least three other mines touching it, by edge or corner.',
   sparse: 'No mine has more than three other mines touching it, by edge or corner.',
   singles: 'Every mine stands alone: no two share an edge, though they may meet ' +
            'at a corner.',
@@ -207,7 +192,6 @@ const RULENOTES = {
            'never along an edge.',
   quads: 'Mines come in edge-joined fours; the fours may meet at a corner, but ' +
          'never along an edge.',
-  three: 'Every mine has exactly three other mines touching it, by edge or corner.',
   notriples: 'No three mines join up along their edges: they come singly or in ' +
              'pairs, and never more.',
   noquads: 'No four mines join up along their edges: they come in ones, twos or ' +
@@ -256,13 +240,8 @@ const DIFF = {
    board and the sliders were never going to land there by accident. The
    path laws want a little more: a longer path passes through more of the
    board, and their logic is worth the most where it nearly fills it. */
-/* Exactly 3 asks for less than the rest, because it is the one law with a
-   ceiling on how full the board can be at all: separated fours pack to about
-   a third, and asking for that is asking for the perfect packing every time.
-   Aimed short of it, so the laying takes on the first try rather than after
-   the count has been eased down a dozen times. */
 const LAWDENS = { snake: 0.40, loop: 0.40, sbox4: 0.40,
-                  cluster: 0.45, sparse: 0.45, boxed4: 0.45, three: 0.26 };
+                  sparse: 0.45, boxed4: 0.45 };
 /* Boxed 4 asks for more than a third because a thin board leaves boxes
    empty, and a box reading nought hands over every cell it holds before a
    click is made — so a level asking for a small opening was giving a large
@@ -299,7 +278,7 @@ function saveBoard() {
       v: 1, tiling: tiling.id,
       across: builtAcross, down: builtDown, ask: +rngMines.value,
       size: sizeName, diff: difficulty, rule: ruleset,
-      mute: muteOn, strict: strict, adj: adjOn,
+      mute: muteOn, strict: strict, adj: adjOn, weaken: weakenOn,
       miss: mistakes, hints: hintsUsed, lost: historyLost,
       n: n, mines: mines, given: given, exploded: exploded, over: over, won: won,
       /* opened and flags are kept rather than counted back, and so are the
@@ -313,7 +292,9 @@ function saveBoard() {
       elapsed: startTime ? Math.round((over ? endTime : performance.now()) - startTime) : 0,
       // the opening as dealt, kept for the hint of very last resort
       dealt: dealt.join(','),
-      mine: pack(mine), state: pack(state), muted: pack(muted)
+      mine: pack(mine), state: pack(state), muted: pack(muted),
+      // which numbers speak from one side, and at what figure
+      weak: pack(weak), weakAt: pack(weakAt)
     }));
   } catch (e) {}
 }
@@ -328,7 +309,7 @@ function restoreBoard() {
   // the settings go back first, since the board is built out of them
   tiling = t;
   difficulty = s.diff; ruleset = s.rule; muteOn = s.mute;
-  strict = s.strict; adjOn = s.adj; sizeName = s.size;
+  strict = s.strict; adjOn = s.adj; sizeName = s.size; weakenOn = !!s.weaken;
   mistakes = s.miss || 0;
   hintsUsed = s.hints || 0;
   historyLost = s.miss === undefined || !!s.lost;
@@ -345,6 +326,10 @@ function restoreBoard() {
   weak = new Uint8Array(n); weakAt = new Uint8Array(n);
   for (let i = 0; i < n; i++) {
     mine[i] = +s.mine[i]; state[i] = +s.state[i]; muted[i] = +s.muted[i];
+    // a save from before one-sided numbers has none, and every cell reads plain
+    if (typeof s.weak === 'string' && s.weak.length === n) {
+      weak[i] = +s.weak[i]; weakAt[i] = parseInt(s.weakAt[i], 36);
+    }
     count[i] = parseInt(s.count[i], 36);
   }
   /* An irregular cut is not worked out from the tiling, so it comes back off
@@ -385,6 +370,7 @@ function paintToggles() {
   mark('[data-diff]', x => x.dataset.diff === difficulty);
   mark('[data-rule]', x => x.dataset.rule === ruleset);
   mark('[data-strict]', x => !!x.dataset.strict === strict);
+  mark('[data-weaken]', x => !!x.dataset.weaken === weakenOn);
   mark('[data-adj]', x => !!x.dataset.adj === adjOn);
   selTiling.value = TILINGS.indexOf(tiling);
 }
@@ -553,6 +539,52 @@ function clueFor(b, held, size) {
     if (lo <= hi) return ['\u2264', lo + roll % (hi - lo + 1)];
   }
   return ['', held];
+}
+
+/* The figure a bound names, for a cell as much as a box. Two faults have to
+   be avoided at once, and they pull in opposite directions.
+
+   Sit the figure on the true count and the bound is the count in disguise:
+   every "at most three" meaning exactly three teaches the player to read it
+   as three within a board or two, and it has given away all it pretended to
+   withhold. But spread the figure across the whole of its true range and the
+   other fault arrives — "at most five" beside three covered cells forbids
+   nothing that was not already forbidden, and a clue that forbids nothing is
+   clutter wearing the clothes of information.
+
+   So the figure is drawn near the truth but not on it: within two either
+   way, and never past the point where it would stop binding. A ceiling must
+   stay below the covered ground it watches or it says nothing; a floor must
+   stay above nought for the same reason. Three figures to choose from on
+   each side means the count itself comes up about a third of the time, which
+   is a coincidence rather than a tell.
+
+   `held` is what the cell really holds and `cov` the covered ground it
+   watches. The roll is taken from the cell itself, so the same board always
+   wears the same clue however often it is read off. */
+function looseClue(id, held, cov, salt) {
+  const h = (((id + 1) * 2654435761) + held * 40503 + (salt || 0) * 2246822519) >>> 0;
+  /* How far the figure sits from the count: nought, one or two. Nought has to
+     stay possible — a bound that never names its count is read with one
+     subtracted, the same tell turned inside out — but it cannot be left to an
+     even draw either, because the draw is not what decides what appears: a
+     figure is only worn if the board can still be finished under it, and a
+     tighter figure withholds less, so what survives skews tight however
+     evenly it was drawn. Walking down through candidates skewed it all the
+     way to four in five naming the truth. One draw, no second figure on the
+     same side, and the count dealt in scarce is what keeps the outcome
+     mixed — and it is measured, not assumed. */
+  const r = h % 5;
+  const slack = r === 0 ? 0 : r <= 2 ? 1 : 2;
+  const wantFloor = ((h >>> 8) % 2) === 0;
+  const fv = held - slack;             // "at least" — a true floor while one or more
+  const cv = held + slack;             // "at most" — binding only under the covered ground
+  const floorOK = fv >= 1;
+  const ceilOK = cv <= cov - 1;
+  if (wantFloor && floorOK) return ['≥', fv];
+  if (ceilOK) return ['≤', cv];
+  if (floorOK) return ['≥', fv];
+  return null;                         // this cell keeps its plain number
 }
 
 // what a box's clue allows: the fewest mines it may hold, and the most

@@ -252,6 +252,14 @@ function draw() {
       ctx.font = '600 ' + (inr[i] * view.s * 1.15).toFixed(1) + 'px "Segoe UI", sans-serif';
       ctx.fillStyle = MUTE;
       ctx.fillText('?', x, y);
+    } else if (weak[i]) {
+      /* A number speaking from one side only. Written a little smaller, since
+         it carries a sign as well as a figure, and in the colour the figure
+         itself would have worn — so the eye still reads its weight at a
+         glance and only then notices which way it leans. */
+      ctx.font = '600 ' + (inr[i] * view.s * 0.92).toFixed(1) + 'px "Segoe UI", sans-serif';
+      ctx.fillStyle = NUMS[Math.min(weakAt[i], NUMS.length - 1)];
+      ctx.fillText((weak[i] === 1 ? '≥' : '≤') + weakAt[i], x, y);
     } else if (count[i]) {
       ctx.font = '600 ' + (inr[i] * view.s * 1.15).toFixed(1) + 'px "Segoe UI", sans-serif';
       ctx.fillStyle = NUMS[Math.min(count[i], NUMS.length - 1)];
@@ -554,6 +562,14 @@ for (const b of document.querySelectorAll('[data-adj]'))
     for (const x of document.querySelectorAll('[data-adj]')) x.classList.toggle('on', x === b);
     saveBoard();
     draw();
+  };
+
+/* Bounds change how a board is dealt, so a new one is dealt when it changes */
+for (const b of document.querySelectorAll('[data-weaken]'))
+  b.onclick = () => {
+    weakenOn = !!b.dataset.weaken;
+    for (const x of document.querySelectorAll('[data-weaken]')) x.classList.toggle('on', x === b);
+    startFromControls();
   };
 
 for (const b of document.querySelectorAll('[data-rule]'))

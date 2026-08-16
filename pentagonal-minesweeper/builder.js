@@ -547,6 +547,18 @@ async function muteNumbers(share) {
     tierCap = 0;
     return r;
   };
+  /* The other promise: past the first rung a board must still resist a solver
+     capped one rung below it. Hiding a clue can never break that, so the
+     hiding above never asks; giving one back can, so everything below does. */
+  const holdsTier = () => {
+    if (DIFF[difficulty].tier < 2) return true;
+    tierCap = DIFF[difficulty].tier - 1;
+    const known = new Uint8Array(n);
+    for (const g of start) markOpen(known, g);
+    const r = deduce(known) < n - mines;
+    tierCap = 0;
+    return r;
+  };
 
   const target = Math.round(cand.length * share);
   const deadline = performance.now() +
@@ -568,6 +580,124 @@ async function muteNumbers(share) {
     else {
       for (const c of slice) muted[c] = 0;
       if (batch > 1) batch >>= 1; else at++;
+    }
+  }
+
+  /* And then the middle voice, offered to the numbers the board is keeping.
+
+     The first way round of this was wrong, and wrong by construction rather
+     than by degree. It took the numbers just hidden and offered them back as
+     bounds — but those are precisely the numbers the board has proved it can
+     do without, so a bound in their place could never be leaned on. Measured,
+     they won nought cells on every law but one. A clue restored where nothing
+     needed it is decoration.
+
+     So it goes the other way. The numbers still showing are the ones the
+     board could not spare; each is offered a bound in place of its figure,
+     and keeps it wherever the board can still be finished. Such a bound is
+     load-bearing by construction — the number was needed, and now the weaker
+     form of it is what carries the reasoning.
+
+     Both promises are asked. Taking information away cannot ordinarily let a
+     board fall to the tier below, but this solver is not monotone — the rules
+     that lean on a bottleneck can find one where a fuller board had none — so
+     the floor is asked as well as the solving, as it is everywhere else here. */
+  if (weakenOn) {
+    /* One figure offered, and no second try.
+
+       Offering several and keeping the first the board could afford looked
+       generous and was the opposite: a tighter bound withholds less, so it is
+       likelier to be affordable, and the choosing walked down to the count
+       itself almost every time. Four bounds in five ended up naming the truth
+       — the very fault this was rebuilt to cure, arriving by the back door of
+       selection rather than of drawing.
+
+       So the figure is drawn once and stands or falls on its own. A cell whose
+       board cannot afford what it drew keeps its plain number instead of being
+       offered something tighter until one sticks. Fewer bounds, and each one
+       drawn rather than settled for. */
+    const saysFor = c => {
+      let cov = 0;
+      for (const j of nbOf(c)) if (state[j] !== OPEN) cov++;
+      const said = looseClue(c, count[c], cov, 0);
+      return said ? [said] : [];
+    };
+    /* The numbers the hiding left standing, in the order it tried them, so a
+       board that ran out of clock hides and weakens the same ground. */
+    const kept = cand.filter(c => !muted[c]);
+    const until = performance.now() + (n > 300 ? 3000 : 1200);
+    let spoke = 0;
+    const spares = [];         // the clues the board could do without, held for after
+    for (const c of kept) {
+      if (performance.now() > until) break;
+      if (performance.now() - drew > 100) {
+        drew = performance.now();
+        dealNote = 'Letting some numbers speak from one side…';
+        paintStatus();
+        await breath();
+        dealCheck(my);
+      }
+      /* Two kinds of clue get a bound, and it is the blend that makes the
+         figures unreadable as counts. On a clue the board cannot spare, only
+         a bound whose figure is the count itself ever proves enough — that
+         was measured, not guessed: with slack figures alone, nothing stuck.
+         Such a bound must be read, since taking it away strands the board,
+         but on its own the whole population would name the truth and "at
+         most" would come to mean "exactly" again.
+
+         So the spare clues carry the slack. A spare clue is offered a bound
+         only when its figure sits off the count, and no more of them speak
+         than the needed ones do. A player facing "at most three" now holds a
+         clue that is sometimes tight and sometimes loose, with nothing on
+         its face to say which — reading it as its figure is a gamble, and
+         reading it as it stands is the only safe thing left. */
+      muted[c] = 1;
+      const needed = !solves();
+      muted[c] = 0;
+      if (!needed) { spares.push(c); continue; }
+      for (const [rel, val] of saysFor(c)) {
+        weak[c] = rel === '≥' ? 1 : 2; weakAt[c] = val;
+        if (solves() && holdsTier()) { spoke++; break; }
+        weak[c] = 0;
+      }
+    }
+
+    /* The spare clues, up to twice the needed ones' number, never at the
+       count, and on a clock of their own — the needed loop pays an extra
+       solve per clue to prove its need and tends to spend the shared clock
+       whole, which left the blend two-thirds exact. These are cheap: a spare
+       clue affords almost anything, so the quota is what stops them. */
+    let quota = Math.max(6, 2 * spoke);
+    const lull = performance.now() + 800;
+    for (const c of spares) {
+      if (quota <= 0 || performance.now() > lull) break;
+      const said = saysFor(c)[0];
+      if (!said || said[1] === count[c]) continue;
+      weak[c] = said[0] === '≥' ? 1 : 2; weakAt[c] = said[1];
+      if (solves() && holdsTier()) quota--;
+      else weak[c] = 0;
+    }
+
+    /* And where the spares run short, the camouflage is drawn from the
+       hidden numbers instead. Harder hides every number the board can spare
+       — that is what harder means — so its spare population is empty, and
+       without this its every bound named its count: the tell, back on one
+       difficulty. A muted cell is given back not as its figure but as a
+       bound that sits off it — the restored-decoration idea that failed as
+       the feature's whole point, returned in small numbers for a different
+       job, since an ignorable bound with a loose figure is exactly what
+       keeps the readable ones from being read. Giving information back can
+       drop a board to the tier below — that cost a drift once already — so
+       both promises are asked of every single one. */
+    for (const c of cand) {
+      if (quota <= 0 || performance.now() > lull) break;
+      if (!muted[c]) continue;
+      const said = saysFor(c)[0];
+      if (!said || said[1] === count[c]) continue;
+      muted[c] = 0;
+      weak[c] = said[0] === '≥' ? 1 : 2; weakAt[c] = said[1];
+      if (solves() && holdsTier()) quota--;
+      else { weak[c] = 0; muted[c] = 1; }
     }
   }
 
@@ -605,6 +735,63 @@ async function muteNumbers(share) {
       if (hidden >= most || performance.now() > deadline + 200) break;
       boxMuted[b] = 1;
       if (solves()) hidden++; else boxMuted[b] = 0;
+    }
+
+    /* And the same third voice offered to the boxes, where it does something
+       the numbers' version cannot. A box already says its figure one of three
+       ways — exactly, or at least, or at most — so nothing new is needed to
+       make one speak from a single side; boxRange has always read all three.
+
+       Two different gains here. A box that was kept back can be given its
+       voice again weakly, as a hidden number is. But more to the point, a box
+       reading nought hands over every cell it holds before a click is made,
+       and so does one wanting all the cells it has left — and that giveaway
+       is what makes a small opening on the boxed laws a fiction. Such a box
+       shown as "at most one" is honest, still says something, and hands over
+       nothing. So those are weakened whether or not they were hidden, and
+       kept weak wherever the board still comes out. */
+    if (weakenOn) {
+      for (const b of order) {
+        if (performance.now() > deadline + 600) break;
+        /* Only the boxes still showing. A muted box gives nothing away —
+           its clue is hidden — and restoring one as a bound is spare
+           information in a costume, ignorable by construction. The shown
+           generous ones are the quarry: the muting could not remove them,
+           and weakened they stop handing their contents over. */
+        const free = givesAway(b);
+        if (boxMuted[b] || !free) continue;
+        const wasMuted = boxMuted[b], rel = boxRel[b], val = boxShown[b];
+        /* Counted from the mines, not read off the clue. Under the irregular
+           law what a box shows is already one of three readings and need not
+           be the figure it holds, so taking the shown value for the count
+           would weaken against the wrong number. */
+        let held = 0;
+        for (const c of boxes[b]) if (mine[c]) held++;
+        const size = boxes[b].length;
+        /* Drawn from the whole of the true range, by the same hand that draws
+           the irregular law's clues and the cells' — never a step off the
+           count, which is the mistake that makes a bound the count in
+           disguise. Two draws offered, salted apart, so a figure the board
+           cannot afford is not the end of it. */
+        const tries = [];
+        let cov = 0;
+        for (const c of boxes[b]) if (state[c] !== OPEN) cov++;
+        // one draw only, for the reason given against the cells above
+        const said = looseClue(b, held, cov, 0);
+        if (said) tries.push(said);
+        /* Both promises asked here, unlike the numbers' pass. A weakened box
+           is not always less than what stood before it: under the irregular
+           law the box may already have been speaking from one side, loosely,
+           and a tighter bound in its place would be more information than the
+           board was judged on — which could drop it to the tier below. So the
+           floor is asked as well as the solving. */
+        let took = false;
+        for (const [r, v] of tries) {
+          boxMuted[b] = 0; boxRel[b] = r; boxShown[b] = v;
+          if (solves() && holdsTier()) { took = true; break; }
+        }
+        if (!took) { boxMuted[b] = wasMuted; boxRel[b] = rel; boxShown[b] = val; }
+      }
     }
   }
 }

@@ -95,142 +95,6 @@ function placeCapped(k, cap) {
   return false;
 }
 
-/* Mines that must huddle. A lone mine is illegal from the moment it is laid,
-   so the laying never makes one: it starts from three cells that all touch
-   each other — which a pentagon's corners always afford — and every cell
-   after that goes down against two mines already there. Every mine so laid
-   has its two from the start, and the ones already down only ever gain, so
-   the law holds throughout rather than being repaired at the end. */
-function placeCluster(k) {
-  if (k < 3) return false;
-  for (let attempt = 0; attempt < 24; attempt++) {
-    mine.fill(0);
-    let placed = 0;
-    if (seedMotif) { for (const c of seedMotif.mines) { mine[c] = 1; placed++; } }
-    else {
-      // a seed of three, each touching the other two
-      const start = Math.floor(Math.random() * n);
-      let laid = false;
-      for (let o = 0; o < n && !laid; o++) {
-        const a = (start + o) % n;
-        if (!seedOK(a)) continue;
-        const ring = [...corOf(a)].filter(seedOK);
-        for (let x = 0; x < ring.length && !laid; x++)
-          for (let y = x + 1; y < ring.length && !laid; y++)
-            if ([...corOf(ring[x])].includes(ring[y])) {
-              mine[a] = mine[ring[x]] = mine[ring[y]] = 1; placed = 3; laid = true;
-            }
-      }
-      if (!laid) return false;
-    }
-    /* Grown at its thickest: of the cells that would come in with the most
-       mines already touching them, one at random. A floor of two is met by
-       almost any growth, but a floor of three or four is met only by a blob
-       that stays fat — a straggling one leaves its own edge short, and it is
-       the edge that fails the law. Ties are broken at random so the same
-       board is never grown twice. */
-    let stuck = 0;
-    while (placed < k && stuck < 400) {
-      let best = -1, bestD = -1;
-      for (let c = 0; c < n; c++) {
-        if (mine[c] || !seedOK(c)) continue;
-        let d = 0;
-        for (const j of corOf(c)) if (mine[j]) d++;
-        if (d < 2) continue;
-        const score = d + Math.random();
-        if (score > bestD) { bestD = score; best = c; }
-      }
-      if (best < 0) { stuck = 400; break; }
-      mine[best] = 1;
-      placed++; stuck = 0;
-    }
-    /* The last cells laid may still stand short of a deep floor, and a mine
-       short of it is no legal board — so the thin ones are lifted away and
-       laid again where the blob is fatter, as often as it takes. */
-    for (let mend = 0; mend < 60 && placed === k; mend++) {
-      let thin = -1;
-      for (let c = 0; c < n && thin < 0; c++) {
-        if (!mine[c]) continue;
-        let d = 0;
-        for (const j of corOf(c)) if (mine[j]) d++;
-        if (d < degFloor()) thin = c;
-      }
-      if (thin < 0) break;
-      mine[thin] = 0;
-      let best = -1, bestD = -1;
-      for (let c = 0; c < n; c++) {
-        if (mine[c] || c === thin || !seedOK(c)) continue;
-        let d = 0;
-        for (const j of corOf(c)) if (mine[j]) d++;
-        const score = d + Math.random();
-        if (d >= degFloor() && score > bestD) { bestD = score; best = c; }
-      }
-      if (best < 0) { mine[thin] = 1; break; }
-      mine[best] = 1;
-    }
-    if (placed === k && validRuleset()) return true;
-  }
-  return false;
-}
-
-/* Every mine with exactly three companions, no more and no fewer. This one
-   will not grow the way a clump does. A growing blob is always thinner at
-   its edge than in its middle, and it is the edge that fails a law asking
-   every mine for the same number — so there is no order of laying that keeps
-   the board legal as it fills. It is laid as a packing instead.
-
-   Four cells that all touch one another give each of the four exactly three,
-   and a pentagon's corners afford such fours wherever four tiles meet at a
-   point. If no other mine is ever laid against any of the four, that count
-   is settled for good, whatever happens elsewhere on the board. So the fours
-   go down whole, each one blocking every cell it touches, and the board
-   fills with fours held apart from each other.
-
-   Other shapes obey the law — a ring of six, a ladder — but none can be
-   grown into safely either, and the fours alone pack to about a third of the
-   board, which is where the reasoning is richest. */
-function placeThree(k) {
-  if (k % 4) return false;
-  const near = [];
-  for (let i = 0; i < n; i++) near.push(new Set(corOf(i)));
-  const fours = [];
-  for (let a = 0; a < n; a++)
-    for (const b of near[a]) { if (b <= a) continue;
-      for (const c of near[b]) { if (c <= b || !near[a].has(c)) continue;
-        for (const d of near[c]) { if (d <= c || !near[a].has(d) || !near[b].has(d)) continue;
-          fours.push([a, b, c, d]); } } }
-  if (fours.length * 4 < k) return false;
-
-  const order = fours.map((_, i) => i);
-  for (let attempt = 0; attempt < 24; attempt++) {
-    mine.fill(0);
-    let placed = 0;
-    const blocked = new Uint8Array(n);
-    /* A planted four goes down first and blocks its surroundings like any
-       other; the motif answers for its being a lawful four to begin with. */
-    if (seedMotif) {
-      for (const c of seedMotif.mines) { mine[c] = 1; placed++; }
-      for (const c of seedMotif.mines) {
-        blocked[c] = 1;
-        for (const j of corOf(c)) blocked[j] = 1;
-      }
-    }
-    for (let i = order.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      const t = order[i]; order[i] = order[j]; order[j] = t;
-    }
-    for (const q of order) {
-      if (placed >= k) break;
-      const f = fours[q];
-      if (f.some(c => blocked[c] || !seedOK(c))) continue;
-      for (const c of f) { mine[c] = 1; placed++; }
-      for (const c of f) { blocked[c] = 1; for (const j of corOf(c)) blocked[j] = 1; }
-    }
-    if (placed === k && validRuleset()) return true;
-  }
-  return false;
-}
-
 /* Mines that must not crowd. Anywhere at all, so long as no mine ends with
    more than the ceiling touching it — the cell laid and every cell it
    touches are checked, since laying one raises the count of all of them. */
@@ -625,8 +489,6 @@ function layByRule() {
            : has('loop') ? placeLoop(mines)
            : has('connected') ? placeConnected(mines)
            : g ? placeGroups(mines, g)
-           : (degFloor() && degCap() < 99) ? placeThree(mines)
-           : degFloor() ? placeCluster(mines)
            : degCap() < 99 ? placeSparse(mines, degCap())
            : groupCap() ? placeCapped(mines, groupCap())
            : has('outside') ? placeOutside(mines)
@@ -2191,7 +2053,10 @@ function reveal(i) {
     const j = stack.pop();
     if (state[j] !== COVERED) continue;
     state[j] = OPEN; opened++;
-    if (count[j] === 0 && !muted[j])
+    /* Only a plain nought cascades. A blank kept back cannot, since the
+       cascade would give it away, and a blank shown as "at most one" must
+       not either — not showing its nought is the whole point of it. */
+    if (count[j] === 0 && !muted[j] && !weak[j])
       for (const m of nbOf(j)) if (state[m] === COVERED) stack.push(m);
   }
   if (opened === n - mines) win();
@@ -2202,7 +2067,8 @@ function reveal(i) {
    punishment if the flags are in the wrong places. */
 function chord(i) {
   // nothing to chord on a cell whose number the player cannot see
-  if (over || state[i] !== OPEN || muted[i] || count[i] === 0) return;
+  // and so does chording: there is nothing exact to count the flags against
+  if (over || state[i] !== OPEN || muted[i] || weak[i] || count[i] === 0) return;
   let f = 0;
   for (const j of nbOf(i)) if (state[j] === FLAG) f++;
   if (f !== count[i]) return;
@@ -2284,7 +2150,12 @@ function markOpen(known, i) {
     const j = stack.pop();
     if (known[j] !== UNKNOWN) continue;
     known[j] = SAFE;
-    if (count[j] === 0 && !muted[j] && !visibleOnly)
+    /* The same conditions the uncovering itself applies. A weakened blank
+       does not cascade in play, so the solver must not credit the player
+       with ground the board would never open — leaving this out let it
+       reckon on a cascade that does not happen, which is a board called
+       solvable that is not. */
+    if (count[j] === 0 && !muted[j] && !weak[j] && !visibleOnly)
       for (const m of nbOf(j)) if (known[m] === UNKNOWN) stack.push(m);
   }
 }
@@ -2593,9 +2464,9 @@ function findHintAt(known) {
   const cons = constraintsOf(known);
 
   for (const c of cons) {
-    if (c.left === 0)
+    if (c.hi === 0)
       return { cells: c.cells.slice(), kind: 'safe', rule: 'counting-clear', clues: [c.from] };
-    if (c.left === c.cells.length)
+    if (c.lo === c.cells.length)
       return { cells: c.cells.slice(), kind: 'mine', rule: 'counting-full', clues: [c.from] };
   }
 
@@ -2615,9 +2486,8 @@ function findHintAt(known) {
       seen.add(b);
       if (!a.cells.every(y => b.cells.includes(y))) continue;
       const diff = b.cells.filter(y => !a.cells.includes(y));
-      const d = b.left - a.left;
-      if (d === 0) return { cells: diff, kind: 'safe', rule: 'subset', clues: [a.from, b.from] };
-      if (d === diff.length) return { cells: diff, kind: 'mine', rule: 'subset', clues: [a.from, b.from] };
+      if (b.hi - a.lo <= 0) return { cells: diff, kind: 'safe', rule: 'subset', clues: [a.from, b.from] };
+      if (b.lo - a.hi >= diff.length) return { cells: diff, kind: 'mine', rule: 'subset', clues: [a.from, b.from] };
     }
   }
 
@@ -2630,21 +2500,21 @@ function findHintAt(known) {
       seen.add(b);
       const inter = b.cells.filter(y => inA.has(y));
       const aOut = a.cells.length - inter.length, bOut = b.cells.length - inter.length;
-      const inHi = Math.min(a.left, b.left, inter.length);
-      const inLo = Math.max(a.left - aOut, b.left - bOut, 0);
+      const inHi = Math.min(a.hi, b.hi, inter.length);
+      const inLo = Math.max(a.lo - aOut, b.lo - bOut, 0);
       if (inLo > inHi) continue;
       const say = (cells, kind) =>
         ({ cells, kind, rule: 'crossed', clues: [a.from, b.from] });
       if (bOut) {
         const diff = b.cells.filter(y => !inA.has(y));
-        if (b.left - inLo <= 0) return say(diff, 'safe');
-        if (b.left - inHi >= bOut) return say(diff, 'mine');
+        if (b.hi - inLo <= 0) return say(diff, 'safe');
+        if (b.lo - inHi >= bOut) return say(diff, 'mine');
       }
       if (aOut) {
         const inB = new Set(b.cells);
         const diff = a.cells.filter(y => !inB.has(y));
-        if (a.left - inLo <= 0) return say(diff, 'safe');
-        if (a.left - inHi >= aOut) return say(diff, 'mine');
+        if (a.hi - inLo <= 0) return say(diff, 'safe');
+        if (a.lo - inHi >= aOut) return say(diff, 'mine');
       }
       if (inter.length && inLo >= inter.length) return say(inter, 'mine');
     }
