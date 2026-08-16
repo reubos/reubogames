@@ -2053,10 +2053,8 @@ function reveal(i) {
     const j = stack.pop();
     if (state[j] !== COVERED) continue;
     state[j] = OPEN; opened++;
-    /* Only a plain nought cascades. A blank kept back cannot, since the
-       cascade would give it away, and a blank shown as "at most one" must
-       not either — not showing its nought is the whole point of it. */
-    if (count[j] === 0 && !muted[j] && !weak[j])
+    // only a plain nought cascades: a blank kept back would be given away by it
+    if (count[j] === 0 && !muted[j])
       for (const m of nbOf(j)) if (state[m] === COVERED) stack.push(m);
   }
   if (opened === n - mines) win();
@@ -2067,8 +2065,7 @@ function reveal(i) {
    punishment if the flags are in the wrong places. */
 function chord(i) {
   // nothing to chord on a cell whose number the player cannot see
-  // and so does chording: there is nothing exact to count the flags against
-  if (over || state[i] !== OPEN || muted[i] || weak[i] || count[i] === 0) return;
+  if (over || state[i] !== OPEN || muted[i] || count[i] === 0) return;
   let f = 0;
   for (const j of nbOf(i)) if (state[j] === FLAG) f++;
   if (f !== count[i]) return;
@@ -2150,12 +2147,8 @@ function markOpen(known, i) {
     const j = stack.pop();
     if (known[j] !== UNKNOWN) continue;
     known[j] = SAFE;
-    /* The same conditions the uncovering itself applies. A weakened blank
-       does not cascade in play, so the solver must not credit the player
-       with ground the board would never open — leaving this out let it
-       reckon on a cascade that does not happen, which is a board called
-       solvable that is not. */
-    if (count[j] === 0 && !muted[j] && !weak[j] && !visibleOnly)
+    // the same conditions the uncovering itself applies
+    if (count[j] === 0 && !muted[j] && !visibleOnly)
       for (const m of nbOf(j)) if (known[m] === UNKNOWN) stack.push(m);
   }
 }
@@ -2170,11 +2163,10 @@ function markOpen(known, i) {
    must be held to the cells actually uncovered. */
 let visibleOnly = false;
 
-/* Every clue as an interval over the cells it still watches. A plain number
-   says the same thing from both sides at once, so its floor and its ceiling
-   are the one figure and `left` is that figure; a cell speaking from one side
-   only leaves the other side open, and has no `left` at all — which is what
-   the rules needing an exact count test for before they take a clue up. */
+/* Every clue as an interval over the cells it still watches. A number says
+   the same thing from both sides at once, so its floor and its ceiling are
+   the one figure; the trades and the ways rules read the two ends, which is
+   what lets the box laws' looser statements sit beside the numbers. */
 function constraintsOf(known) {
   const cons = [];
   for (let i = 0; i < n; i++) {
@@ -2187,15 +2179,8 @@ function constraintsOf(known) {
       else if (known[j] === KNOWN_MINE) found++;
     }
     if (!cells.length) continue;
-    /* What the mines already found leave for the cells still covered. A
-       floor worn away by them is a floor of nothing and still true; a
-       ceiling so worn is a ceiling of nought, which clears the rest. */
-    const left = (weak[i] ? weakAt[i] : count[i]) - found;
-    const c = { from: i, cells };
-    if (!weak[i]) { c.left = left; c.lo = left; c.hi = left; }
-    else if (weak[i] === 1) { c.lo = Math.max(0, left); c.hi = cells.length; }
-    else { if (left < 0) continue; c.lo = 0; c.hi = Math.min(cells.length, left); }
-    cons.push(c);
+    const left = count[i] - found;
+    cons.push({ from: i, cells, left, lo: left, hi: left });
   }
   return cons;
 }

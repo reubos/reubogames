@@ -651,13 +651,24 @@ function finishBoxes(irregular) {
      box wears its number at that same remove from its own centre. */
   boxTop = [];
   if (irregular) {
-    // no two boxes are alike, so each finds its own highest corner
+    /* No two boxes are alike, so each finds its own highest corner — but two
+       neighbours can share one, where the same meeting of cells is the
+       highest point of both, and then their numbers land on top of each
+       other and neither can be read. So the corners are claimed in turn:
+       each box takes its highest corner still standing clear of every label
+       already placed, and a box whose favourite is spoken for settles for
+       its next. Half a cell's width is what "clear" means, which is about
+       what the written figure occupies. */
+    const claimed = [];
+    const clearOf = q =>
+      claimed.every(p => Math.hypot(q[0] - p[0], q[1] - p[1]) > cellPitch * 0.55);
     boxTop = boxes.map(g => {
-      let top = null;
-      for (const i of g) for (const q of poly[i])
-        if (!top || q[1] < top[1] - 1e-6 ||
-            (Math.abs(q[1] - top[1]) <= 1e-6 && q[0] < top[0])) top = q;
-      return top;
+      const corners = [];
+      for (const i of g) for (const q of poly[i]) corners.push(q);
+      corners.sort((u, v) => (u[1] - v[1]) || (u[0] - v[0]));
+      const pick = corners.find(clearOf) || corners[0];
+      claimed.push(pick);
+      return pick;
     });
   } else if (boxes.length) {
     let cx = 0, cy = 0;

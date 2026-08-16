@@ -18,22 +18,10 @@ let mine, state, count;
 let muted = new Uint8Array(0);
 let muteOn = false;
 
-/* Between showing a number and keeping it back there is a third thing it
-   could do: say which side of itself it is on. A cell can show "at least
-   three" or "at most two" instead of the count it really holds, which is
-   less than the truth and a great deal more than silence.
-
-   weak says which way a cell speaks — nought for the plain number, one for a
-   floor, two for a ceiling — and weakAt says at what figure, which need not
-   be the count itself: a blank shown as "at most one" is honest, is not
-   nothing, and above all does not cascade, which is the whole trouble with
-   blanks. Every cell is plain until something sets otherwise; nothing in the
-   game does yet, and this is here to be measured. */
-let weak = new Uint8Array(0);
-let weakAt = new Uint8Array(0);
-/* Whether the dealing offers a number a bound in place of its figure. Off
-   unless asked for: it changes how a board reads more than anything else
-   here, and is new enough to be worth trying rather than being given. */
+/* Whether the dealing may loosen a box's clue — "at least", "at most" — in
+   place of the exact count. What it buys is the ground the boxes give away:
+   a box reading nought hands over its every cell before a click is made, and
+   weakened it hands over none of them. Off unless asked for. */
 let weakenOn = false;
 /* Under the strict law a cell may only be uncovered when nothing on the board
    allows it to hold a mine. Click one that merely happens to be empty and it
@@ -292,9 +280,7 @@ function saveBoard() {
       elapsed: startTime ? Math.round((over ? endTime : performance.now()) - startTime) : 0,
       // the opening as dealt, kept for the hint of very last resort
       dealt: dealt.join(','),
-      mine: pack(mine), state: pack(state), muted: pack(muted),
-      // which numbers speak from one side, and at what figure
-      weak: pack(weak), weakAt: pack(weakAt)
+      mine: pack(mine), state: pack(state), muted: pack(muted)
     }));
   } catch (e) {}
 }
@@ -323,13 +309,8 @@ function restoreBoard() {
   if (typeof s.count !== 'string' || s.count.length !== n) return false;
   mine = new Uint8Array(n); state = new Uint8Array(n);
   count = new Uint8Array(n); muted = new Uint8Array(n);
-  weak = new Uint8Array(n); weakAt = new Uint8Array(n);
   for (let i = 0; i < n; i++) {
     mine[i] = +s.mine[i]; state[i] = +s.state[i]; muted[i] = +s.muted[i];
-    // a save from before one-sided numbers has none, and every cell reads plain
-    if (typeof s.weak === 'string' && s.weak.length === n) {
-      weak[i] = +s.weak[i]; weakAt[i] = parseInt(s.weakAt[i], 36);
-    }
     count[i] = parseInt(s.count[i], 36);
   }
   /* An irregular cut is not worked out from the tiling, so it comes back off
@@ -438,7 +419,6 @@ async function newGameUnder(my, across, down, m) {
   state = new Uint8Array(n);
   count = new Uint8Array(n);
   muted = new Uint8Array(n);
-  weak = new Uint8Array(n); weakAt = new Uint8Array(n);
 
   opened = 0; flags = 0; given = 0; newBest = false;
   mistakes = 0; hintsUsed = 0; historyLost = false;
