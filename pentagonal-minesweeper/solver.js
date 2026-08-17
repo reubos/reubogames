@@ -2690,7 +2690,17 @@ function askHint() {
   }
 
   const h = findHint(known);
-  if (!h) { say('Everything left is already settled by what is on the board.'); return; }
+  /* Nothing found is not the same as nothing left. Every board this build
+     deals proves itself as it is made, so on one of those the hints cannot
+     run dry before the end — when they do, the board is almost certainly
+     from an older save, resumed across an update that changed what its
+     clues meant. Saying "all settled" here was wrong twice over. */
+  if (!h) {
+    say('No hint was found — which should not happen on a freshly dealt ' +
+        'board. This one may predate an update; a new game will always ' +
+        'see itself through.');
+    return;
+  }
 
   const sig = opened + ':' + flags + ':' + h.rule + ':' + h.cells.join(',');
   hintLevel = sig === hintAt ? Math.min(2, hintLevel + 1) : 1;
