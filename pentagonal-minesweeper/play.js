@@ -262,8 +262,14 @@ function saveBoard() {
   // one character a cell; counts can reach eight, so they go in base thirty-six
   const pack = a => { let out = ''; for (let i = 0; i < n; i++) out += a[i].toString(36); return out; };
   try {
+    /* The version stamps what a save means, not just how it is shaped. The
+       one-sided cell clues were dealt into boards and then removed from the
+       game; a board saved with them loses them on restore, and what remains
+       may not be finishable without guessing — an open blank that never
+       cascaded, a muting that leaned on a bound no longer there. Boards from
+       that era are let go rather than half-restored. */
     localStorage.setItem(BOARDKEY, JSON.stringify({
-      v: 1, tiling: tiling.id,
+      v: 2, tiling: tiling.id,
       across: builtAcross, down: builtDown, ask: +rngMines.value,
       size: sizeName, diff: difficulty, rule: ruleset,
       mute: muteOn, strict: strict, adj: adjOn, weaken: weakenOn,
@@ -288,7 +294,7 @@ function saveBoard() {
 function restoreBoard() {
   let s = null;
   try { s = JSON.parse(localStorage.getItem(BOARDKEY) || 'null'); } catch (e) {}
-  if (!s || s.v !== 1) return false;
+  if (!s || s.v !== 2) return false;
   const t = TILINGS.find(x => x.id === s.tiling);
   if (!t || !LAWS[s.rule]) return false;      // a law since dropped or renamed
 
