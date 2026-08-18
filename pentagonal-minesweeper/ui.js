@@ -136,6 +136,7 @@ function drawMine(x, y, rad) {
    placed already satisfy, amber for one still short of it — a pair not yet
    paired, a group not yet joined, a chain not yet reaching the rim. Amber
    is not an accusation; it only says the law is not yet met here. */
+const FLAGHUES = ['#ef4444', '#60a5fa', '#c084fc', '#22d3ee', '#f9a8d4', '#fb923c'];
 function drawFlag(x, y, rad, ok) {
   ctx.strokeStyle = '#e2eee2';
   ctx.lineWidth = Math.max(1, rad * 0.2);
@@ -145,7 +146,15 @@ function drawFlag(x, y, rad, ok) {
   ctx.moveTo(x - rad * 0.5, y + rad * 0.85);
   ctx.lineTo(x + rad * 0.9, y + rad * 0.85);
   ctx.stroke();
-  ctx.fillStyle = ok === false ? '#f59e0b' : '#ef4444';
+  /* The pennant's verdict comes in three languages. True and undefined are
+     the plain red of a satisfied or unjudged flag; false is the amber of a
+     law not yet met; and a number is a company colour — under the two-group
+     laws every connected company of flags wears its own, the six largest
+     each distinct and the rest grey, so the pennants map the grouping at a
+     glance. */
+  ctx.fillStyle = typeof ok === 'number'
+    ? (ok < 0 ? '#9ca3af' : FLAGHUES[ok])
+    : ok === false ? '#f59e0b' : '#ef4444';
   ctx.beginPath();
   ctx.moveTo(x + rad * 0.25, y - rad);
   ctx.lineTo(x - rad * 0.85, y - rad * 0.42);
@@ -193,15 +202,13 @@ function flagVerdicts() {
   }
 
   if (has('twogroups')) {
-    /* The two largest companies lead, the rest read amber; and under the
-       equal law a company grown past half the mines reads amber however
-       large it stands, since the halves must come out even. */
-    const sizes = pieces.map(g => g.length).sort((x, y) => y - x);
-    const bar = sizes.length >= 2 ? sizes[1] : sizes[0];
-    const half = twoEqual() ? mines / 2 : Infinity;
-    for (const piece of pieces)
-      if (piece.length < bar || piece.length > half)
-        for (const c of piece) ok.set(c, false);
+    /* Every connected company wears its own colour, the six largest each
+       distinct and any beyond that grey — the pennants are a map of the
+       grouping itself, which under a two-group law is the whole question. */
+    const ranked = pieces.slice().sort((x, y) => y.length - x.length);
+    ranked.forEach((piece, at) => {
+      for (const c of piece) ok.set(c, at < 6 ? at : -1);
+    });
   }
 
   if (has('safeconn')) {
