@@ -79,7 +79,7 @@ let ruleset = 'none';
    the rulesets means the laying, the checking and the deducing can each ask
    what is in force rather than match on the name of a combination. */
 const LAWS = {
-  none: [], connected: ['connected'], connected2: ['connected'], outside: ['outside'],
+  none: [], connected: ['connected'], outside: ['outside'],
   twogroup1: ['twogroups'], safeconn: ['safeconn'],
   sparse: ['degree'],
   singles: ['group'], doubles: ['group'], triples: ['group'], quads: ['group'],
@@ -96,11 +96,10 @@ let lawOff = '';
 const has = law => law !== lawOff && (LAWS[ruleset] || []).includes(law);
 
 /* What counts as joined, where a law speaks of one group. Connected lets
-   mines meet at a corner; Connected 2 asks for a shared edge, which is a far
-   tighter thing to ask of a pentagon — a cell has three or four edge
-   neighbours where it has seven or eight touching it in all — and makes the
-   group a thicker, blunter shape. Everything else that chains, the paths and
-   the border, has always gone edge to edge. */
+   mines meet at a corner; everything else that chains — the paths, the
+   border, the two groups — goes edge to edge. The dial is a map so that an
+   edge-joined variant of connected can return one day by adding a name that
+   is not in it. */
 const CORNERJOIN = { connected: 1, cbox4: 1 };
 const joinAdj = () => (CORNERJOIN[ruleset] ? corOf : edgOf);
 
@@ -210,7 +209,6 @@ const tallyRule = rule => {
 const RULENOTES = {
   none: '',
   connected: 'All mines form a single group, touching by edge or corner.',
-  connected2: 'All mines form a single group, joined edge to edge — a corner between two of them does not join them.',
   twogroup1: 'The mines form exactly two edge-joined groups. The groups may meet at a corner, but never along an edge.',
   safeconn: 'Every safe cell joins every other along edges: the ground you can stand on is one connected piece.',
   outside: 'Every mine chains edge to edge to the border.',

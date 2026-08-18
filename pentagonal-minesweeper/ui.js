@@ -234,8 +234,8 @@ function flagVerdicts() {
   if (has('connected')) {
     /* The largest group leads and the rest read amber: a flag is red while
        it stands with the biggest connected company on the board, by the
-       law's own adjacency. Groups tied for largest all read red — neither
-       has more claim than the other. */
+       law's own adjacency — corners, for connected. Groups tied for largest
+       all read red, neither having more claim than the other. */
     const adj = joinAdj();
     const seen = new Uint8Array(n);
     const groups = [];
