@@ -796,6 +796,22 @@ const selTiling = el('selTiling');
 selTiling.innerHTML = TILINGS.map((t, i) => '<option value="' + i + '">' + t.name + '</option>').join('');
 selTiling.onchange = () => { tiling = TILINGS[+selTiling.value]; startFromControls(); };
 
+/* The dice. Random never lands on what is already chosen — a pick that
+   changes nothing reads as a broken button — and each roll deals afresh
+   through the same road the selects take. */
+el('btnRandTil').onclick = () => {
+  let at = Math.floor(Math.random() * (TILINGS.length - 1));
+  if (at >= +selTiling.value) at++;
+  selTiling.value = at;
+  selTiling.onchange();
+};
+el('btnRandRule').onclick = () => {
+  const sel = el('selRule');
+  const opts = [...sel.options].map(o => o.value).filter(v => v !== sel.value);
+  sel.value = opts[Math.floor(Math.random() * opts.length)];
+  sel.onchange();
+};
+
 el('btnNew').onclick = startFromControls;
 el('btnHint').onclick = askHint;
 el('btnCheck').onclick = checkFlags;
