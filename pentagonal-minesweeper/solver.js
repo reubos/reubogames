@@ -100,13 +100,12 @@ function placeCapped(k, cap) {
    from every cell along the first's edge, so the two may meet at a corner
    but never join. The equal law splits the count in half; the free law cuts
    it anywhere, small pieces allowed, since a group of one is a group. */
-function placeTwoGroups(k, equal) {
-  if (k < 2 || (equal && k % 2)) return false;
+function placeTwoGroups(k) {
+  if (k < 2) return false;
   for (let attempt = 0; attempt < 30; attempt++) {
     mine.fill(0);
-    const sizes = equal
-      ? [k / 2, k / 2]
-      : (() => { const s2 = 1 + Math.floor(Math.random() * (k - 1)); return [s2, k - s2]; })();
+    const s2 = 1 + Math.floor(Math.random() * (k - 1));
+    const sizes = [s2, k - s2];
     const blocked = new Uint8Array(n);
     let ok = true;
     for (const target of sizes) {
@@ -516,7 +515,6 @@ function validRuleset() {
       sizes.push(size);
     }
     if (sizes.length !== 2) return false;
-    if (twoEqual() && sizes[0] !== sizes[1]) return false;
   }
 
   if (has('safeconn')) {
@@ -598,7 +596,7 @@ function layByRule() {
   const ok = has('snake') ? placeSnake(mines)
            : has('loop') ? placeLoop(mines)
            : has('connected') ? placeConnected(mines)
-           : has('twogroups') ? placeTwoGroups(mines, twoEqual())
+           : has('twogroups') ? placeTwoGroups(mines)
            : has('safeconn') ? placeSafeConn(mines)
            : g ? placeGroups(mines, g)
            : degCap() < 99 ? placeSparse(mines, degCap())
@@ -913,42 +911,6 @@ function rulesetMoves(known, find) {
         for (const c of g) inG[c] = 1;
         for (const u of cutCells(known, g, c => inG[c] === 1, edgOf, isM, isM, 'split'))
           mark(u, 'mine', 'two-cut', anchors.slice(0, 4));
-      }
-    }
-    if (twoEqual()) {
-      const half = mines / 2;
-      /* the found pieces, each sized once */
-      const pid = new Int32Array(n).fill(-1);
-      const psize = [];
-      for (let i = 0; i < n; i++) {
-        if (!isM(i) || pid[i] >= 0) continue;
-        const at = psize.length;
-        const st = [i]; pid[i] = at;
-        let size = 0;
-        while (st.length) {
-          const c = st.pop(); size++;
-          for (const j of edgOf(c)) if (isM(j) && pid[j] < 0) { pid[j] = at; st.push(j); }
-        }
-        psize.push(size);
-      }
-      for (let i = 0; i < n; i++) {
-        if (known[i] !== UNKNOWN) continue;
-        const seen2 = new Set();
-        let joint = 1;
-        for (const j of edgOf(i)) {
-          if (!isM(j) || seen2.has(pid[j])) continue;
-          seen2.add(pid[j]); joint += psize[pid[j]];
-        }
-        if (seen2.size && joint > half)
-          mark(i, 'safe', 'two-big', [...edgOf(i)].filter(isM));
-      }
-      for (let at = 0; at < psize.length; at++) {
-        if (psize[at] !== half) continue;
-        for (let i = 0; i < n; i++) {
-          if (pid[i] !== at) continue;
-          for (const j of edgOf(i)) if (known[j] === UNKNOWN)
-            mark(j, 'safe', 'two-full', [i]);
-        }
       }
     }
   }
@@ -1293,7 +1255,6 @@ function rulesetMoves(known, find) {
        agreed by the truth among them. This is what lets the law speak early,
        before the board has split into claimed pieces at all. */
     if (!moved && has('twogroups') && allowRule('two-ways')) {
-      const half = twoEqual() ? mines / 2 : Infinity;
       for (const c2 of constraintsWithTotal(known)) {
         const U = c2.cells, need = c2.left;
         if (need === undefined) continue;
@@ -1308,26 +1269,10 @@ function rulesetMoves(known, find) {
         const canLive2 = (add, clear) => {
           const mineNow = i => isM(i) || add.has(i);
           const openNow = i => !clear.has(i) && (known[i] === UNKNOWN || mineNow(i));
-          const { id, comps } = compsOver(openNow, edgOf);
+          const { id } = compsOver(openNow, edgOf);
           const claimedIds = new Set();
           for (let i2 = 0; i2 < n; i2++) if (mineNow(i2)) claimedIds.add(id[i2]);
-          if (claimedIds.size > 2) return false;
-          if (half < Infinity) {
-            // no welded piece of certain mines may pass half the count
-            const seen2 = new Set();
-            for (let i2 = 0; i2 < n; i2++) {
-              if (!mineNow(i2) || seen2.has(i2)) continue;
-              let size = 0;
-              const st = [i2]; seen2.add(i2);
-              while (st.length) {
-                const c3 = st.pop(); size++;
-                for (const j2 of edgOf(c3))
-                  if (mineNow(j2) && !seen2.has(j2)) { seen2.add(j2); st.push(j2); }
-              }
-              if (size > half) return false;
-            }
-          }
-          return true;
+          return claimedIds.size <= 2;
         };
         const lay = (at, chosen) => {
           if (chosen.length === need) {
@@ -2791,20 +2736,6 @@ function lawBroken(k2) {
       if (room < mines)
         return 'the claimed ground is too small for the mines that remain';
     }
-    if (twoEqual()) {
-      const half = mines / 2;
-      const seen = new Uint8Array(n);
-      for (let i = 0; i < n; i++) {
-        if (k2[i] !== KNOWN_MINE || seen[i]) continue;
-        let size = 0;
-        const st = [i]; seen[i] = 1;
-        while (st.length) {
-          const c = st.pop(); size++;
-          for (const j of edgOf(c)) if (k2[j] === KNOWN_MINE && !seen[j]) { seen[j] = 1; st.push(j); }
-        }
-        if (size > half) return 'a group grows past half the mines';
-      }
-    }
   }
   if (has('safeconn')) {
     const openS = i => k2[i] !== KNOWN_MINE;
@@ -3154,11 +3085,9 @@ const HINTWORDS = {
   'reach-cut': 'Connectedness. This is the only cell the group has to pass through.',
   'reach-room': 'Connectedness. Take this cell away and no piece of ground left has both the mines already found and room for all of them — so the group must come through here.',
   'reach-owed': 'Connectedness. A number here is still owed a mine, and wherever that mine turns out to be it must join the group — which leaves it only this way through.',
-  'two-ways': "The two groups. Lay this number's mines every way it allows, throw out the ways that would strand the mines in three pieces — or weld a group past its half — and every way left agrees about this cell.",
+  'two-ways': "The two groups. Lay this number's mines every way it allows, throw out the ways that would strand the mines in three pieces, and every way left agrees about this cell.",
   'two-pocket': 'The two groups. Both groups have staked their ground, and this piece of the board holds neither — nothing here can be a mine.',
   'two-cut': 'The two groups. The fragments in this piece of ground must join into one group — a third is forbidden — and this is the only cell that can join them.',
-  'two-big': 'The two groups. A mine here would swell a group past half the mines, and the halves must come out even.',
-  'two-full': 'The two groups. This group holds its full half of the mines, so nothing beside it can be a mine.',
   'safe-cut': 'The safe ground. Were this a mine, the safe world would be cut in two — and it must hold together.',
   'safe-pocket': 'The safe ground. No safe cell here could reach the rest of the safe world, so every cell in this pocket is a mine.',
   'conn-ways': 'Connectedness. Take a number — or the mine counter itself, once little ground is left — and lay its mines every way it allows; throw out the ways that would strand the group, and every way left agrees about this cell.',

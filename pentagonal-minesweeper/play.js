@@ -80,7 +80,7 @@ let ruleset = 'none';
    what is in force rather than match on the name of a combination. */
 const LAWS = {
   none: [], connected: ['connected'], connected2: ['connected'], outside: ['outside'],
-  twogroup1: ['twogroups'], twogroup2: ['twogroups'], safeconn: ['safeconn'],
+  twogroup1: ['twogroups'], safeconn: ['safeconn'],
   sparse: ['degree'],
   singles: ['group'], doubles: ['group'], triples: ['group'], quads: ['group'],
   notriples: ['group'], noquads: ['group'],
@@ -105,14 +105,12 @@ const CORNERJOIN = { connected: 1, cbox4: 1 };
 const joinAdj = () => (CORNERJOIN[ruleset] ? corOf : edgOf);
 
 /* Two groups instead of one, and one law about the safe ground instead of
-   the mines. Both group laws speak of edge-joined groups that may meet at a
-   corner but never along an edge; the second asks the two groups to hold
-   the same number of mines, which is a far sharper thing — half the counter
-   is a ceiling on every weld. Safe connected turns the whole idea over:
-   the mines may lie anyhow, but the uncovered ground must remain one
+   the mines. Two Groups speaks of edge-joined groups that may meet at a
+   corner but never along an edge. Safe connected turns the whole idea
+   over: the mines may lie anyhow, but the uncovered ground must remain one
    edge-joined piece, so a mine is forbidden exactly where it would cut the
-   safe world in two. */
-const twoEqual = () => (lawOff === 'twogroups' ? false : ruleset === 'twogroup2');
+   safe world in two. An equal-size variant of the two groups was built and
+   removed at the user's request; the dial for it is gone with it. */
 
 /* How many cells to a group, where the law speaks of groups at all. A size
    says what every group must be; a cap says only what none may exceed, which
@@ -133,7 +131,7 @@ const degCap = () => (lawOff === 'degree' ? 99 : (DEGCAP[ruleset] === undefined 
 /* The count a laying can actually take: the group laws lay whole groups, so
    the count is snapped to the group before the search starts, and eased by
    the group thereafter. */
-const layStep = () => groupSize() || (twoEqual() ? 2 : 1);
+const layStep = () => groupSize() || 1;
 
 const GROUPSIZE = { singles: 1, doubles: 2, triples: 3, quads: 4 };
 const GROUPCAP = { notriples: 2, noquads: 3 };
@@ -162,7 +160,7 @@ const TIER = {
   'cap-over': 1, 'snake-body': 1, 'snake-end': 1, 'loop-degree': 1,
   'deg-full': 1, 'deg-grow': 1, 'deg-over': 1, 'deg-room': 1,
   'box-exact': 1, 'box-full': 1, 'box-short': 1,
-  'two-pocket': 2, 'two-cut': 2, 'two-big': 1, 'two-full': 1, 'two-ways': 3,
+  'two-pocket': 2, 'two-cut': 2, 'two-ways': 3,
   'safe-cut': 2, 'safe-pocket': 2,
   'subset': 2, 'snake-touch': 2, 'loop-short': 2, 'loop-close': 2,
   'reach-pocket': 2, 'outside-pocket': 2, 'reach-cut': 2, 'outside-cut': 2,
@@ -214,7 +212,6 @@ const RULENOTES = {
   connected: 'All mines form a single group, touching by edge or corner.',
   connected2: 'All mines form a single group, joined edge to edge — a corner between two of them does not join them.',
   twogroup1: 'The mines form exactly two edge-joined groups. The groups may meet at a corner, but never along an edge.',
-  twogroup2: 'The mines form exactly two edge-joined groups of equal size. The groups may meet at a corner, but never along an edge.',
   safeconn: 'Every safe cell joins every other along edges: the ground you can stand on is one connected piece.',
   outside: 'Every mine chains edge to edge to the border.',
   sparse: 'No mine has more than three other mines touching it, by edge or corner.',
