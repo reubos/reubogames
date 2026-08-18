@@ -18,6 +18,21 @@ let mine, state, count;
 let muted = new Uint8Array(0);
 let muteOn = false;
 
+/* Ghost marks: the player's own supposed world, sketched onto covered
+   cells. A ghost flag imagines a mine, a ghost ring imagines safe ground,
+   and neither is real — the counters ignore them, the solver never sees
+   them, a chord does not count them, and opening a cell wipes its ghost.
+   The right button cycles flag, ghost flag, ghost ring, bare. */
+let ghost = new Uint8Array(0);      // 0 none, 1 imagined mine, 2 imagined safe
+
+function cycleMark(i) {
+  if (over || state[i] === OPEN) return;
+  if (state[i] === FLAG) { state[i] = COVERED; flags--; ghost[i] = 1; }
+  else if (ghost[i] === 1) ghost[i] = 2;
+  else if (ghost[i] === 2) ghost[i] = 0;
+  else { state[i] = FLAG; flags++; }
+}
+
 /* Whether the dealing may loosen a box's clue — "at least", "at most" — in
    place of the exact count. What it buys is the ground the boxes give away:
    a box reading nought hands over its every cell before a click is made, and
@@ -65,6 +80,7 @@ let ruleset = 'none';
    what is in force rather than match on the name of a combination. */
 const LAWS = {
   none: [], connected: ['connected'], connected2: ['connected'], outside: ['outside'],
+  twogroup1: ['twogroups'], twogroup2: ['twogroups'], safeconn: ['safeconn'],
   sparse: ['degree'],
   singles: ['group'], doubles: ['group'], triples: ['group'], quads: ['group'],
   notriples: ['group'], noquads: ['group'],
@@ -88,6 +104,16 @@ const has = law => law !== lawOff && (LAWS[ruleset] || []).includes(law);
 const CORNERJOIN = { connected: 1, cbox4: 1 };
 const joinAdj = () => (CORNERJOIN[ruleset] ? corOf : edgOf);
 
+/* Two groups instead of one, and one law about the safe ground instead of
+   the mines. Both group laws speak of edge-joined groups that may meet at a
+   corner but never along an edge; the second asks the two groups to hold
+   the same number of mines, which is a far sharper thing — half the counter
+   is a ceiling on every weld. Safe connected turns the whole idea over:
+   the mines may lie anyhow, but the uncovered ground must remain one
+   edge-joined piece, so a mine is forbidden exactly where it would cut the
+   safe world in two. */
+const twoEqual = () => (lawOff === 'twogroups' ? false : ruleset === 'twogroup2');
+
 /* How many cells to a group, where the law speaks of groups at all. A size
    says what every group must be; a cap says only what none may exceed, which
    leaves the smaller groups free and can therefore never force a mine — only
@@ -107,7 +133,7 @@ const degCap = () => (lawOff === 'degree' ? 99 : (DEGCAP[ruleset] === undefined 
 /* The count a laying can actually take: the group laws lay whole groups, so
    the count is snapped to the group before the search starts, and eased by
    the group thereafter. */
-const layStep = () => groupSize() || 1;
+const layStep = () => groupSize() || (twoEqual() ? 2 : 1);
 
 const GROUPSIZE = { singles: 1, doubles: 2, triples: 3, quads: 4 };
 const GROUPCAP = { notriples: 2, noquads: 3 };
@@ -136,6 +162,8 @@ const TIER = {
   'cap-over': 1, 'snake-body': 1, 'snake-end': 1, 'loop-degree': 1,
   'deg-full': 1, 'deg-grow': 1, 'deg-over': 1, 'deg-room': 1,
   'box-exact': 1, 'box-full': 1, 'box-short': 1,
+  'two-pocket': 2, 'two-cut': 2, 'two-big': 1, 'two-full': 1, 'two-ways': 3,
+  'safe-cut': 2, 'safe-pocket': 2,
   'subset': 2, 'snake-touch': 2, 'loop-short': 2, 'loop-close': 2,
   'reach-pocket': 2, 'outside-pocket': 2, 'reach-cut': 2, 'outside-cut': 2,
   'cap-count': 2, 'group-count': 2, 'box-count': 2, 'snake-count': 2,
@@ -185,6 +213,9 @@ const RULENOTES = {
   none: '',
   connected: 'All mines form a single group, touching by edge or corner.',
   connected2: 'All mines form a single group, joined edge to edge — a corner between two of them does not join them.',
+  twogroup1: 'The mines form exactly two edge-joined groups. The groups may meet at a corner, but never along an edge.',
+  twogroup2: 'The mines form exactly two edge-joined groups of equal size. The groups may meet at a corner, but never along an edge.',
+  safeconn: 'Every safe cell joins every other along edges: the ground you can stand on is one connected piece.',
   outside: 'Every mine chains edge to edge to the border.',
   sparse: 'No mine has more than three other mines touching it, by edge or corner.',
   singles: 'Every mine stands alone: no two share an edge, though they may meet ' +
@@ -309,7 +340,8 @@ function saveBoard() {
       elapsed: startTime ? Math.round((over ? endTime : performance.now()) - startTime) : 0,
       // the opening as dealt, kept for the hint of very last resort
       dealt: dealt.join(','),
-      mine: pack(mine), state: pack(state), muted: pack(muted)
+      mine: pack(mine), state: pack(state), muted: pack(muted),
+      ghost: pack(ghost)
     }));
   } catch (e) {}
 }
@@ -338,8 +370,10 @@ function restoreBoard() {
   if (typeof s.count !== 'string' || s.count.length !== n) return false;
   mine = new Uint8Array(n); state = new Uint8Array(n);
   count = new Uint8Array(n); muted = new Uint8Array(n);
+  ghost = new Uint8Array(n);
   for (let i = 0; i < n; i++) {
     mine[i] = +s.mine[i]; state[i] = +s.state[i]; muted[i] = +s.muted[i];
+    if (typeof s.ghost === 'string' && s.ghost.length === n) ghost[i] = +s.ghost[i];
     count[i] = parseInt(s.count[i], 36);
   }
   /* An irregular cut is not worked out from the tiling, so it comes back off
@@ -448,6 +482,7 @@ async function newGameUnder(my, across, down, m) {
   state = new Uint8Array(n);
   count = new Uint8Array(n);
   muted = new Uint8Array(n);
+  ghost = new Uint8Array(n);
 
   opened = 0; flags = 0; given = 0; newBest = false;
   mistakes = 0; hintsUsed = 0; historyLost = false;

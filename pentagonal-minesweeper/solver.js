@@ -95,6 +95,84 @@ function placeCapped(k, cap) {
   return false;
 }
 
+/* Two edge-joined blobs, grown apart. Each grows from its own seed by the
+   frontier walk any blob grows by; the second is barred from the first and
+   from every cell along the first's edge, so the two may meet at a corner
+   but never join. The equal law splits the count in half; the free law cuts
+   it anywhere, small pieces allowed, since a group of one is a group. */
+function placeTwoGroups(k, equal) {
+  if (k < 2 || (equal && k % 2)) return false;
+  for (let attempt = 0; attempt < 30; attempt++) {
+    mine.fill(0);
+    const sizes = equal
+      ? [k / 2, k / 2]
+      : (() => { const s2 = 1 + Math.floor(Math.random() * (k - 1)); return [s2, k - s2]; })();
+    const blocked = new Uint8Array(n);
+    let ok = true;
+    for (const target of sizes) {
+      const start = Math.floor(Math.random() * n);
+      let seed = -1;
+      for (let o = 0; o < n; o++) {
+        const c = (start + o) % n;
+        if (!blocked[c] && seedOK(c) && !mine[c]) { seed = c; break; }
+      }
+      if (seed < 0) { ok = false; break; }
+      /* Grown at its thinnest, and neither at random nor compact — both
+         were tried and both flooded the opening, each its own way. A random
+         frontier encloses one-cell holes, and a hole is legal here (the law
+         binds the mines, not the safes) so nothing can ever prove it and it
+         must be handed over. A compact blob has the least wall and the
+         greatest blank sea, and one given blank cascades the whole sea
+         open — measured at up to six safes in seven shown before a click.
+         A tendril has the most wall, and the wall is where the game lives:
+         the perimeter numbers are the board's information, and a thin blob
+         strings them everywhere while enclosing nothing. */
+      const blob = [seed];
+      mine[seed] = 1;
+      while (blob.length < target) {
+        let best = -1, bestD = -1;
+        for (const c of blob) for (const j of edgOf(c)) {
+          if (mine[j] || blocked[j] || !seedOK(j)) continue;
+          let d = 0;
+          for (const j2 of edgOf(j)) if (mine[j2]) d++;
+          const score = -d + Math.random();
+          if (score > bestD) { bestD = score; best = j; }
+        }
+        if (best < 0) break;
+        mine[best] = 1; blob.push(best);
+      }
+      if (blob.length < target) { ok = false; break; }
+      for (const c of blob) { blocked[c] = 1; for (const j of edgOf(c)) blocked[j] = 1; }
+    }
+    if (ok && validRuleset()) return true;
+  }
+  return false;
+}
+
+/* Mines laid anyhow, so long as the ground they leave holds together. The
+   safe cells are the law's subject here, and at these densities a random
+   scattering usually leaves them whole — so the laying is by rejection,
+   with the walls the usual remedy when it is not. */
+function placeSafeConn(k) {
+  const order = [...Array(n).keys()];
+  for (let attempt = 0; attempt < 60; attempt++) {
+    mine.fill(0);
+    let placed = 0;
+    if (seedMotif) for (const c of seedMotif.mines) { mine[c] = 1; placed++; }
+    for (let i = order.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      const t = order[i]; order[i] = order[j]; order[j] = t;
+    }
+    for (const c of order) {
+      if (placed === k) break;
+      if (mine[c] || !seedOK(c)) continue;
+      mine[c] = 1; placed++;
+    }
+    if (placed === k && validRuleset()) return true;
+  }
+  return false;
+}
+
 /* Mines that must not crowd. Anywhere at all, so long as no mine ends with
    more than the ceiling touching it — the cell laid and every cell it
    touches are checked, since laying one raises the count of all of them. */
@@ -424,6 +502,38 @@ function validRuleset() {
     if (d < dLo || d > dHi) return false;
   }
 
+  if (has('twogroups')) {
+    const seen = new Uint8Array(n);
+    const sizes = [];
+    for (let i = 0; i < n; i++) {
+      if (!mine[i] || seen[i]) continue;
+      let size = 0;
+      const st = [i]; seen[i] = 1;
+      while (st.length) {
+        const c = st.pop(); size++;
+        for (const j of edgOf(c)) if (mine[j] && !seen[j]) { seen[j] = 1; st.push(j); }
+      }
+      sizes.push(size);
+    }
+    if (sizes.length !== 2) return false;
+    if (twoEqual() && sizes[0] !== sizes[1]) return false;
+  }
+
+  if (has('safeconn')) {
+    let first = -1, total = 0;
+    for (let i = 0; i < n; i++) if (!mine[i]) { total++; if (first < 0) first = i; }
+    if (first >= 0) {
+      const seen = new Uint8Array(n);
+      const st = [first]; seen[first] = 1;
+      let got = 0;
+      while (st.length) {
+        const c = st.pop(); got++;
+        for (const j of edgOf(c)) if (!mine[j] && !seen[j]) { seen[j] = 1; st.push(j); }
+      }
+      if (got !== total) return false;
+    }
+  }
+
   if (has('snake')) {
     const { comps } = compsOver(isMine, edgOf);
     if (comps.length !== 1) return false;
@@ -488,6 +598,8 @@ function layByRule() {
   const ok = has('snake') ? placeSnake(mines)
            : has('loop') ? placeLoop(mines)
            : has('connected') ? placeConnected(mines)
+           : has('twogroups') ? placeTwoGroups(mines, twoEqual())
+           : has('safeconn') ? placeSafeConn(mines)
            : g ? placeGroups(mines, g)
            : degCap() < 99 ? placeSparse(mines, degCap())
            : groupCap() ? placeCapped(mines, groupCap())
@@ -774,6 +886,99 @@ function rulesetMoves(known, find) {
       }
       if (mn > dHi) mark(i2, 'safe', 'deg-over', near.filter(isM));
       else if (could < dLo) mark(i2, 'safe', 'deg-room', near);
+    }
+  }
+
+  if (has('twogroups')) {
+    /* Exactly two edge-joined groups. The pieces of open ground are the
+       skeleton of every reading: a component holding a found mine is
+       claimed, and the mines can claim at most two. With both claims made,
+       everywhere else is clear — and inside each claimed piece, every found
+       fragment must join its housemates, since a third group is forbidden,
+       so the one cell standing between two fragments is a mine. Under the
+       equal law half the counter caps every group besides. */
+    const open = i => known[i] === UNKNOWN || known[i] === KNOWN_MINE;
+    const { id, comps } = compsOver(open, edgOf);
+    const claimed = comps.filter(g => g.some(isM));
+    if (claimed.length === 2) {
+      for (const g of comps) {
+        if (g.some(isM)) continue;
+        for (const c of g) if (known[c] === UNKNOWN)
+          mark(c, 'safe', 'two-pocket', claimed.map(g2 => g2.find(isM)));
+      }
+      for (const g of claimed) {
+        const anchors = g.filter(isM);
+        if (anchors.length < 2) continue;
+        const inG = new Uint8Array(n);
+        for (const c of g) inG[c] = 1;
+        for (const u of cutCells(known, g, c => inG[c] === 1, edgOf, isM, isM, 'split'))
+          mark(u, 'mine', 'two-cut', anchors.slice(0, 4));
+      }
+    }
+    if (twoEqual()) {
+      const half = mines / 2;
+      /* the found pieces, each sized once */
+      const pid = new Int32Array(n).fill(-1);
+      const psize = [];
+      for (let i = 0; i < n; i++) {
+        if (!isM(i) || pid[i] >= 0) continue;
+        const at = psize.length;
+        const st = [i]; pid[i] = at;
+        let size = 0;
+        while (st.length) {
+          const c = st.pop(); size++;
+          for (const j of edgOf(c)) if (isM(j) && pid[j] < 0) { pid[j] = at; st.push(j); }
+        }
+        psize.push(size);
+      }
+      for (let i = 0; i < n; i++) {
+        if (known[i] !== UNKNOWN) continue;
+        const seen2 = new Set();
+        let joint = 1;
+        for (const j of edgOf(i)) {
+          if (!isM(j) || seen2.has(pid[j])) continue;
+          seen2.add(pid[j]); joint += psize[pid[j]];
+        }
+        if (seen2.size && joint > half)
+          mark(i, 'safe', 'two-big', [...edgOf(i)].filter(isM));
+      }
+      for (let at = 0; at < psize.length; at++) {
+        if (psize[at] !== half) continue;
+        for (let i = 0; i < n; i++) {
+          if (pid[i] !== at) continue;
+          for (const j of edgOf(i)) if (known[j] === UNKNOWN)
+            mark(j, 'safe', 'two-full', [i]);
+        }
+      }
+    }
+  }
+
+  if (has('safeconn')) {
+    /* The safe ground is the group here. Every cell not yet known a mine is
+       ground a safe cell could stand on; the known safes are the anchors.
+       A pocket of that ground holding no anchor can hold no safe cell at
+       all — a safe cell there would be cut off from the safe world — so
+       the whole pocket is mines. And the one cell joining two anchored
+       shores must be safe, or the safe world is cut in two. */
+    const openS = i => known[i] !== KNOWN_MINE;
+    const anchor = i => known[i] === SAFE;
+    const { id, comps } = compsOver(openS, edgOf);
+    const holding = comps.filter(g => g.some(anchor));
+    if (holding.length >= 1) {
+      for (const g of comps) {
+        if (g.some(anchor)) continue;
+        for (const c of g) if (known[c] === UNKNOWN)
+          mark(c, 'mine', 'safe-pocket', []);
+      }
+    }
+    if (holding.length === 1) {
+      const g = holding[0];
+      const inG = new Uint8Array(n);
+      for (const c of g) inG[c] = 1;
+      const anchors = g.filter(anchor);
+      if (anchors.length >= 2)
+        for (const u of cutCells(known, g, c => inG[c] === 1, edgOf, anchor, anchor, 'split'))
+          mark(u, 'safe', 'safe-cut', anchors.slice(0, 4));
     }
   }
 
@@ -1076,6 +1281,73 @@ function rulesetMoves(known, find) {
         for (let k2 = 0; k2 < U.length; k2++) {
           if (inAll[k2]) mark(U[k2], 'mine', 'conn-ways', cite(c2));
           else if (!inAny[k2]) mark(U[k2], 'safe', 'conn-ways', cite(c2));
+        }
+      }
+    }
+
+    /* The same exhaustive question under the two-group laws: lay the
+       number's mines every way, and refuse a way outright only where it is
+       certainly impossible — the mines end up claiming three pieces of open
+       ground with no road between them, or, under the equal law, a weld
+       grows past half the mines. What every surviving way agrees on is
+       agreed by the truth among them. This is what lets the law speak early,
+       before the board has split into claimed pieces at all. */
+    if (!moved && has('twogroups') && allowRule('two-ways')) {
+      const half = twoEqual() ? mines / 2 : Infinity;
+      for (const c2 of constraintsWithTotal(known)) {
+        const U = c2.cells, need = c2.left;
+        if (need === undefined) continue;
+        if (need < 1 || need > U.length || U.length > (c2.from < 0 ? 8 : 6)) continue;
+        let ways2 = 1;
+        for (let a2 = 0; a2 < need; a2++) ways2 = ways2 * (U.length - a2) / (a2 + 1);
+        if (ways2 > 20) continue;
+
+        const inAll = new Array(U.length).fill(true);
+        const inAny = new Array(U.length).fill(false);
+        let live = 0;
+        const canLive2 = (add, clear) => {
+          const mineNow = i => isM(i) || add.has(i);
+          const openNow = i => !clear.has(i) && (known[i] === UNKNOWN || mineNow(i));
+          const { id, comps } = compsOver(openNow, edgOf);
+          const claimedIds = new Set();
+          for (let i2 = 0; i2 < n; i2++) if (mineNow(i2)) claimedIds.add(id[i2]);
+          if (claimedIds.size > 2) return false;
+          if (half < Infinity) {
+            // no welded piece of certain mines may pass half the count
+            const seen2 = new Set();
+            for (let i2 = 0; i2 < n; i2++) {
+              if (!mineNow(i2) || seen2.has(i2)) continue;
+              let size = 0;
+              const st = [i2]; seen2.add(i2);
+              while (st.length) {
+                const c3 = st.pop(); size++;
+                for (const j2 of edgOf(c3))
+                  if (mineNow(j2) && !seen2.has(j2)) { seen2.add(j2); st.push(j2); }
+              }
+              if (size > half) return false;
+            }
+          }
+          return true;
+        };
+        const lay = (at, chosen) => {
+          if (chosen.length === need) {
+            const add = new Set(chosen);
+            const clear = new Set(U.filter(x => !add.has(x)));
+            if (!canLive2(add, clear)) return;
+            live++;
+            for (let k2 = 0; k2 < U.length; k2++)
+              if (add.has(U[k2])) inAny[k2] = true; else inAll[k2] = false;
+            return;
+          }
+          if (at >= U.length || U.length - at < need - chosen.length) return;
+          chosen.push(U[at]); lay(at + 1, chosen); chosen.pop();
+          lay(at + 1, chosen);
+        };
+        lay(0, []);
+        if (!live) continue;
+        for (let k2 = 0; k2 < U.length; k2++) {
+          if (inAll[k2]) mark(U[k2], 'mine', 'two-ways', cite(c2));
+          else if (!inAny[k2]) mark(U[k2], 'safe', 'two-ways', cite(c2));
         }
       }
     }
@@ -2053,7 +2325,7 @@ function reveal(i) {
   while (stack.length) {
     const j = stack.pop();
     if (state[j] !== COVERED) continue;
-    state[j] = OPEN; opened++;
+    state[j] = OPEN; opened++; ghost[j] = 0;   // open ground carries no ghosts
     // only a plain nought cascades: a blank kept back would be given away by it
     if (count[j] === 0 && !muted[j])
       for (const m of nbOf(j)) if (state[m] === COVERED) stack.push(m);
@@ -2079,7 +2351,7 @@ function chord(i) {
 function flag(i) {
   if (over || state[i] === OPEN) return;
   if (state[i] === FLAG) { state[i] = COVERED; flags--; }
-  else { state[i] = FLAG; flags++; }
+  else { state[i] = FLAG; flags++; ghost[i] = 0; }
 }
 
 /* Giving up. Nothing on the board can end a game any more, so this is the
@@ -2504,6 +2776,52 @@ function lawBroken(k2) {
         return 'the mines are shut in a piece too small to hold them all';
     }
   }
+  if (has('twogroups')) {
+    const open = i => k2[i] === UNKNOWN || k2[i] === KNOWN_MINE;
+    const { comps } = compsOver(open, edgOf);
+    const claimed = comps.filter(g => g.some(c => k2[c] === KNOWN_MINE));
+    if (claimed.length > 2) return 'the mines are split three ways with no road between';
+    /* The room is only tellable once BOTH groups are placed. With a single
+       piece of ground claimed, the second group may live in ground not yet
+       claimed at all, so a small first piece proves nothing — reading it as
+       a contradiction made the supposition lie, and the sweep caught it. */
+    if (claimed.length === 2) {
+      let room = 0;
+      for (const g of claimed) room += g.length;
+      if (room < mines)
+        return 'the claimed ground is too small for the mines that remain';
+    }
+    if (twoEqual()) {
+      const half = mines / 2;
+      const seen = new Uint8Array(n);
+      for (let i = 0; i < n; i++) {
+        if (k2[i] !== KNOWN_MINE || seen[i]) continue;
+        let size = 0;
+        const st = [i]; seen[i] = 1;
+        while (st.length) {
+          const c = st.pop(); size++;
+          for (const j of edgOf(c)) if (k2[j] === KNOWN_MINE && !seen[j]) { seen[j] = 1; st.push(j); }
+        }
+        if (size > half) return 'a group grows past half the mines';
+      }
+    }
+  }
+  if (has('safeconn')) {
+    const openS = i => k2[i] !== KNOWN_MINE;
+    const { id, comps } = compsOver(openS, edgOf);
+    let anchorId = -1, split = false;
+    for (let i = 0; i < n && !split; i++) {
+      if (k2[i] !== SAFE) continue;
+      if (anchorId < 0) anchorId = id[i];
+      else if (id[i] !== anchorId) split = true;
+    }
+    if (split) return 'the safe ground is cut in two';
+    if (anchorId >= 0) {
+      const home = comps.find(g => id[g[0]] === anchorId);
+      if (home && home.length < n - mines)
+        return 'the safe ground is shut in a piece too small for every safe cell';
+    }
+  }
   return '';
 }
 
@@ -2836,6 +3154,13 @@ const HINTWORDS = {
   'reach-cut': 'Connectedness. This is the only cell the group has to pass through.',
   'reach-room': 'Connectedness. Take this cell away and no piece of ground left has both the mines already found and room for all of them — so the group must come through here.',
   'reach-owed': 'Connectedness. A number here is still owed a mine, and wherever that mine turns out to be it must join the group — which leaves it only this way through.',
+  'two-ways': "The two groups. Lay this number's mines every way it allows, throw out the ways that would strand the mines in three pieces — or weld a group past its half — and every way left agrees about this cell.",
+  'two-pocket': 'The two groups. Both groups have staked their ground, and this piece of the board holds neither — nothing here can be a mine.',
+  'two-cut': 'The two groups. The fragments in this piece of ground must join into one group — a third is forbidden — and this is the only cell that can join them.',
+  'two-big': 'The two groups. A mine here would swell a group past half the mines, and the halves must come out even.',
+  'two-full': 'The two groups. This group holds its full half of the mines, so nothing beside it can be a mine.',
+  'safe-cut': 'The safe ground. Were this a mine, the safe world would be cut in two — and it must hold together.',
+  'safe-pocket': 'The safe ground. No safe cell here could reach the rest of the safe world, so every cell in this pocket is a mine.',
   'conn-ways': 'Connectedness. Take a number — or the mine counter itself, once little ground is left — and lay its mines every way it allows; throw out the ways that would strand the group, and every way left agrees about this cell.',
   'deg-full': 'The crowding. This mine already touches as many mines as the law allows, so everything else beside it is clear.',
   'deg-grow': 'The huddle. This mine is short of the companions it must have, and only just enough covered cells are left to give them.',
@@ -2868,8 +3193,10 @@ const HINTIDLE = 'Asking once marks what to look at; asking again names the reas
 /* What is lit and what has been said. Asking twice about the same position
    says more; touching the board puts the marks out again. */
 let hintClues = [], hintLevel = 0, hintAt = '', hintNote = false;
+let hintGhosts = [];         // the supposed world the walked hint has shown so far
 
 function clearHint() {
+  hintGhosts = [];
   hintAt = '';
   hintClues = [];
   if (hintNote) { hintNote = false; el('noteHint').textContent = HINTIDLE; }
@@ -2966,23 +3293,45 @@ function askHint() {
   if (hintLevel === 1) hintsUsed++;
   // the clues if the rule named any, and otherwise the ground it is talking about
   hintClues = (h.clues.length ? h.clues : h.cells).slice();
+  /* A supposition names its own assumption: the conclusion is the opposite
+     of what was imagined, so a hint that settles the cell safe imagined the
+     mine, and the other way about. */
+  const imagined = h.kind === 'safe'
+    ? 'Imagine this cell contained a mine'
+    : 'Imagine this cell did not contain a mine';
+  /* The walked story sketches its supposed world in ghost marks — the
+     assumption first, then everything imagined so far, cumulatively, so
+     the board shows the state of the supposition at the step on screen. */
+  hintGhosts = [];
+  if (h.rule === 'suppose' && hintLevel >= 2) {
+    hintGhosts.push({ cell: h.cells[0], kind: h.kind === 'safe' ? 'mine' : 'safe' });
+    if (walked && hintLevel > 2) {
+      const upTo = Math.min(hintLevel - 2, h.steps.length);
+      for (let t = 0; t < upTo; t++)
+        for (const c of h.steps[t].cells)
+          hintGhosts.push({ cell: c, kind: h.steps[t].kind });
+    }
+  }
   if (walked && hintLevel > 2) {
     const at = hintLevel - 3;               // the steps, then the verdict
     if (at < h.steps.length) {
       const st = h.steps[at];
       hintClues = (st.clues && st.clues.length ? st.clues.concat(st.cells) : st.cells).slice();
-      el('noteHint').textContent = 'Under the supposition, step ' + (at + 1) +
-        ' of ' + h.steps.length + ': ' + (HINTWORDS[st.rule] || st.rule);
+      el('noteHint').textContent = (h.kind === 'safe' ? 'Imagining the mine' : 'Imagining no mine') +
+        ' — step ' + (at + 1) + ' of ' + h.steps.length + ': ' +
+        (HINTWORDS[st.rule] || st.rule);
     } else {
       hintClues = h.cells.slice();
       el('noteHint').textContent = 'And there it breaks: ' + h.why +
-        '. The supposition was false, so this cell is ' +
+        '. What was imagined cannot be, so this cell is ' +
         (h.kind === 'safe' ? 'clear.' : 'a mine.');
     }
-  } else if (hintLevel >= 2 && h.rule === 'suppose' && !walked) {
-    el('noteHint').textContent = (HINTWORDS.suppose || '') +
-      ' (This one keeps its working to itself: suppose it, follow the rules, and ' +
-      (h.why ? 'find that ' + h.why + '.' : 'watch them break.') + ')';
+  } else if (hintLevel >= 2 && h.rule === 'suppose') {
+    el('noteHint').textContent = 'The supposition. ' + imagined +
+      ', and follow the ordinary rules: they break against the board.' +
+      (walked
+        ? ' Keep pressing to walk the story one step at a time.'
+        : (h.why ? ' What breaks: ' + h.why + '.' : ''));
   } else {
     el('noteHint').textContent = hintLevel >= 2
       ? HINTWORDS[h.rule] || HINTIDLE

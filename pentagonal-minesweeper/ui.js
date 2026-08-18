@@ -192,6 +192,38 @@ function flagVerdicts() {
     }
   }
 
+  if (has('twogroups')) {
+    /* The two largest companies lead, the rest read amber; and under the
+       equal law a company grown past half the mines reads amber however
+       large it stands, since the halves must come out even. */
+    const sizes = pieces.map(g => g.length).sort((x, y) => y - x);
+    const bar = sizes.length >= 2 ? sizes[1] : sizes[0];
+    const half = twoEqual() ? mines / 2 : Infinity;
+    for (const piece of pieces)
+      if (piece.length < bar || piece.length > half)
+        for (const c of piece) ok.set(c, false);
+  }
+
+  if (has('safeconn')) {
+    /* The law binds the ground, so the flags answer together: red while the
+       open cells all stand in one sea of unflagged ground, amber the moment
+       the flags cut that sea in two. */
+    const seen = new Uint8Array(n);
+    let start = -1;
+    for (let i = 0; i < n; i++) if (state[i] === OPEN) { start = i; break; }
+    if (start >= 0) {
+      const st = [start]; seen[start] = 1;
+      while (st.length) {
+        const c = st.pop();
+        for (const j of edgOf(c))
+          if (!seen[j] && state[j] !== FLAG) { seen[j] = 1; st.push(j); }
+      }
+      let cut = false;
+      for (let i = 0; i < n; i++) if (state[i] === OPEN && !seen[i]) { cut = true; break; }
+      if (cut) for (const f of flagged) ok.set(f, false);
+    }
+  }
+
   if (has('connected')) {
     /* The largest group leads and the rest read amber: a flag is red while
        it stands with the biggest connected company on the board, by the
@@ -262,6 +294,23 @@ function flagVerdicts() {
   }
 
   return ok;
+}
+
+/* A ghost: the same marks at half presence. An imagined mine wears the
+   flag's own shape faded; imagined safe ground wears a pale ring, the
+   nearest thing to an open cell that is not one. */
+function drawGhost(x, y, rad, kind) {
+  ctx.save();
+  ctx.globalAlpha = 0.45;
+  if (kind === 'mine') drawFlag(x, y, rad);
+  else {
+    ctx.strokeStyle = '#a7e3b4';
+    ctx.lineWidth = Math.max(1.5, rad * 0.22);
+    ctx.beginPath();
+    ctx.arc(x, y, rad * 0.6, 0, TAU);
+    ctx.stroke();
+  }
+  ctx.restore();
 }
 
 // A cross, for a flag that turned out to be planted on nothing.
@@ -370,7 +419,13 @@ function draw() {
 
   const verdicts = flagVerdicts();
   for (let i = 0; i < n; i++) {
-    if (state[i] === COVERED) continue;
+    if (state[i] === COVERED) {
+      if (ghost[i]) {
+        const x = mids[i][0] * view.s + view.ox, y = mids[i][1] * view.s + view.oy;
+        drawGhost(x, y, inr[i] * view.s * 0.55, ghost[i] === 1 ? 'mine' : 'safe');
+      }
+      continue;
+    }
     const x = mids[i][0] * view.s + view.ox, y = mids[i][1] * view.s + view.oy;
     const rad = inr[i] * view.s * 0.55;
     if (state[i] === FLAG) {
@@ -417,6 +472,13 @@ function draw() {
     ctx.textBaseline = 'middle';
   }
 
+  // the hint's supposed world, in the same ghost marks the player sketches with
+  for (const g of hintGhosts)
+    if (state[g.cell] === COVERED)
+      drawGhost(mids[g.cell][0] * view.s + view.ox,
+                mids[g.cell][1] * view.s + view.oy,
+                inr[g.cell] * view.s * 0.55, g.kind);
+
   // the forgiven mine, shown on its covered cell for as long as the flash lasts
   if (flashing)
     drawMine(mids[flashCell][0] * view.s + view.ox,
@@ -460,6 +522,11 @@ function fmtTime(ms) {
 
 function paintStatus() {
   el('statMines').textContent = mines - flags;
+  {
+    let waiting = 0;
+    for (let i = 0; i < n; i++) if (state[i] === COVERED) waiting++;
+    el('statCells').textContent = n ? waiting : '\u2014';
+  }
   const ms = !startTime ? 0 : (over ? endTime : performance.now()) - startTime;
   el('statTime').textContent = fmtTime(ms);
   const key = bestKey();
@@ -481,6 +548,14 @@ function paintStatus() {
     let waiting = 0;
     for (let i = 0; i < n; i++) if (state[i] === COVERED) waiting++;
     btnC.style.display = n > 0 && !over && mines - flags === 0 && waiting > 0 ? '' : 'none';
+  }
+
+  // and the ghost-sweeper, whenever there are ghosts to sweep
+  const btnG = el('btnGhosts');
+  if (btnG) {
+    let haunting = 0;
+    for (let i = 0; i < n; i++) if (ghost[i]) haunting++;
+    btnG.style.display = n > 0 && !over && haunting > 0 ? '' : 'none';
   }
 
   const run = el('noteRun');
@@ -540,7 +615,7 @@ canvas.addEventListener('pointerdown', e => {
   if (e.pointerType === 'touch') return;
   const i = cellAt(e.clientX, e.clientY);
   if (i < 0) return;
-  if (e.button === 2) { clearHint(); startClock(); flag(i); paintStatus(); saveBoard(); draw(); }
+  if (e.button === 2) { clearHint(); startClock(); cycleMark(i); paintStatus(); saveBoard(); draw(); }
   else dig(i, e.button === 1);
 });
 
@@ -719,6 +794,12 @@ selTiling.onchange = () => { tiling = TILINGS[+selTiling.value]; startFromContro
 el('btnNew').onclick = startFromControls;
 el('btnHint').onclick = askHint;
 el('btnCheck').onclick = checkFlags;
+el('btnGhosts').onclick = () => {
+  for (let i = 0; i < n; i++) ghost[i] = 0;
+  paintStatus();
+  saveBoard();
+  draw();
+};
 el('btnClear').onclick = () => {
   if (over || !n || mines - flags !== 0) return;
   clearHint();

@@ -81,7 +81,7 @@
   .btn-row.three { grid-template-columns: repeat(3, 1fr); }
   .btn-row button.on { background: #2c6b3c; border-color: #3d8a51; color: #fff; }
 
-  .stat-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  .stat-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
   .stat { background: var(--panel); border: 1px solid var(--line); border-radius: 7px; padding: 8px 10px; }
   .stat .v { font-size: 1.25rem; color: #fff; font-weight: 600; line-height: 1.2; font-variant-numeric: tabular-nums; }
   .stat .k { font-size: 0.7rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
@@ -124,6 +124,7 @@
       <div class="panel">
         <div class="stat-grid">
           <div class="stat"><div class="v" id="statMines">10</div><div class="k">Mines remaining</div></div>
+          <div class="stat"><div class="v" id="statCells">&mdash;</div><div class="k">Cells remaining</div></div>
           <div class="stat"><div class="v" id="statTime">0:00</div><div class="k">Time</div></div>
           <div class="stat"><div class="v" id="statBest">&mdash;</div><div class="k">Best</div></div>
         </div>
@@ -143,11 +144,15 @@
           <button class="full" id="btnCheck">Check flags</button>
           <button class="full" id="btnReveal">Reveal board</button>
           <button class="full" id="btnClear" style="display: none">Clear remaining cells</button>
+          <button class="full" id="btnGhosts" style="display: none">Clear ghost markings</button>
         </div>
         <p class="note" id="noteHint">Asking once marks what to look at; asking again
           names the reasoning.</p>
-        <p class="note">Click to uncover. Right-click to plant a flag. Clicking a number that already
-          has its full quota of flags beside it uncovers everything else it touches.</p>
+        <p class="note">Click to uncover. Right-click cycles a flag, then a ghost
+          flag, then a ghost ring, then bare again &mdash; the ghosts are for
+          sketching a supposition's what-ifs, and the counters never count
+          them. Clicking a number that already has its full quota of flags
+          beside it uncovers everything else it touches.</p>
         <p class="note">Under a ruleset, a flag's pennant answers for the law:
           red where the flags as placed already satisfy it, amber where they do
           not yet &mdash; a pair unpaired, a group unjoined, a chain shy of the
@@ -213,6 +218,9 @@
           <button data-rule="none" class="on">None</button>
           <button data-rule="connected">Connected</button>
           <button data-rule="connected2">Connected 2</button>
+          <button data-rule="twogroup1">Two Groups 1</button>
+          <button data-rule="twogroup2">Two Groups 2</button>
+          <button data-rule="safeconn">Safe Connected</button>
           <button data-rule="outside">Outside</button>
           <button data-rule="sparse">Sparse</button>
           <button data-rule="singles">Singles</button>
@@ -265,10 +273,10 @@
      throws on a name that moved between them, and the game half-works in
      ways no fresh copy can. The version token forces every cached set to be
      whole. Bump it in all five lines together whenever any script changes. -->
-<script src="tiling.js?v=20260818b"></script>
-<script src="play.js?v=20260818b"></script>
-<script src="solver.js?v=20260818b"></script>
-<script src="builder.js?v=20260818b"></script>
-<script src="ui.js?v=20260818b"></script>
+<script src="tiling.js?v=20260818f"></script>
+<script src="play.js?v=20260818f"></script>
+<script src="solver.js?v=20260818f"></script>
+<script src="builder.js?v=20260818f"></script>
+<script src="ui.js?v=20260818f"></script>
 </body>
 </html>
