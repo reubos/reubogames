@@ -131,8 +131,12 @@ function drawMine(x, y, rad) {
   ctx.fill();
 }
 
-// A flag: a pole on a foot with a pennant.
-function drawFlag(x, y, rad) {
+/* A flag: a pole on a foot with a pennant. The pennant wears the law's
+   verdict where a law is on: red for a flag whose requirement the flags as
+   placed already satisfy, amber for one still short of it — a pair not yet
+   paired, a group not yet joined, a chain not yet reaching the rim. Amber
+   is not an accusation; it only says the law is not yet met here. */
+function drawFlag(x, y, rad, ok) {
   ctx.strokeStyle = '#e2eee2';
   ctx.lineWidth = Math.max(1, rad * 0.2);
   ctx.beginPath();
@@ -141,13 +145,113 @@ function drawFlag(x, y, rad) {
   ctx.moveTo(x - rad * 0.5, y + rad * 0.85);
   ctx.lineTo(x + rad * 0.9, y + rad * 0.85);
   ctx.stroke();
-  ctx.fillStyle = '#ef4444';
+  ctx.fillStyle = ok === false ? '#f59e0b' : '#ef4444';
   ctx.beginPath();
   ctx.moveTo(x + rad * 0.25, y - rad);
   ctx.lineTo(x - rad * 0.85, y - rad * 0.42);
   ctx.lineTo(x + rad * 0.25, y + rad * 0.15);
   ctx.closePath();
   ctx.fill();
+}
+
+/* Whether each flag's law-requirement is met by the flags as placed —
+   nothing guessed, nothing peeked: only the flags and the geometry. Under
+   the laws that speak of the whole board at once, the reading is global, as
+   chosen: on connected every flag is red only while all the flags form one
+   joined group, since two tidy pairs on a connected board are still a board
+   the law refuses. Returns null where no law watches the flags. */
+function flagVerdicts() {
+  if (ruleset === 'none') return null;
+  const flagged = [];
+  for (let i = 0; i < n; i++) if (state[i] === FLAG) flagged.push(i);
+  if (!flagged.length) return null;
+  const isF = new Uint8Array(n);
+  for (const f of flagged) isF[f] = 1;
+  const ok = new Map();
+  for (const f of flagged) ok.set(f, true);
+
+  // the edge-joined pieces of the flags, reused by most of the laws
+  const pieces = [];
+  {
+    const seen = new Uint8Array(n);
+    for (const f of flagged) {
+      if (seen[f]) continue;
+      const piece = [f]; seen[f] = 1;
+      for (let at = 0; at < piece.length; at++)
+        for (const j of edgOf(piece[at]))
+          if (isF[j] && !seen[j]) { seen[j] = 1; piece.push(j); }
+      pieces.push(piece);
+    }
+  }
+
+  const gSize = groupSize(), gCap = groupCap();
+  if (gSize || gCap) {
+    for (const piece of pieces) {
+      const good = gSize ? piece.length === gSize : piece.length <= gCap;
+      if (!good) for (const c of piece) ok.set(c, false);
+    }
+  }
+
+  if (has('connected')) {
+    // one group of all the flags, by the law's own adjacency
+    const adj = joinAdj();
+    const seen = new Uint8Array(n);
+    const walk = [flagged[0]]; seen[flagged[0]] = 1;
+    for (let at = 0; at < walk.length; at++)
+      for (const j of adj(walk[at]))
+        if (isF[j] && !seen[j]) { seen[j] = 1; walk.push(j); }
+    if (walk.length !== flagged.length) for (const f of flagged) ok.set(f, false);
+  }
+
+  if (has('outside')) {
+    // a flag stands right while its piece reaches the rim
+    for (const piece of pieces)
+      if (!piece.some(c => !interior[c]))
+        for (const c of piece) ok.set(c, false);
+  }
+
+  if (has('snake') || has('loop')) {
+    /* One path, or one ring: a single piece, no flag with three neighbours,
+       and for the path no ring closed, for the loop nothing but the ring.
+       A lone segment mid-board reads amber until the whole shape is one. */
+    const ring = has('loop');
+    let edges = 0, worst = 0;
+    for (const f of flagged) {
+      let d = 0;
+      for (const j of edgOf(f)) if (isF[j]) d++;
+      if (d > worst) worst = d;
+      edges += d;
+    }
+    edges /= 2;
+    const one = pieces.length === 1;
+    const shape = ring
+      ? one && worst <= 2 && edges === flagged.length && flagged.length >= 3
+      : one && worst <= 2 && edges === flagged.length - 1;
+    if (!shape) for (const f of flagged) ok.set(f, false);
+  }
+
+  const dHi = degCap();
+  if (dHi < 99) {
+    for (const f of flagged) {
+      let d = 0;
+      for (const j of corOf(f)) if (isF[j]) d++;
+      if (d > dHi) ok.set(f, false);
+    }
+  }
+
+  if (boxLaw() && boxes.length && boxOf) {
+    const inBox = new Array(boxes.length).fill(0);
+    for (const f of flagged) if (boxOf[f] >= 0) inBox[boxOf[f]]++;
+    for (const f of flagged) {
+      const b = boxOf[f];
+      if (b < 0) continue;
+      if (boxMuted && boxMuted[b]) continue;      // a silent box asks nothing
+      const [lo, hi] = boxRange(b);
+      if (inBox[b] < lo || inBox[b] > hi) ok.set(f, false);
+    }
+  }
+
+  return ok;
 }
 
 // A cross, for a flag that turned out to be planted on nothing.
@@ -254,12 +358,13 @@ function draw() {
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
 
+  const verdicts = flagVerdicts();
   for (let i = 0; i < n; i++) {
     if (state[i] === COVERED) continue;
     const x = mids[i][0] * view.s + view.ox, y = mids[i][1] * view.s + view.oy;
     const rad = inr[i] * view.s * 0.55;
     if (state[i] === FLAG) {
-      drawFlag(x, y, rad);
+      drawFlag(x, y, rad, verdicts ? verdicts.get(i) : undefined);
       if (over && !mine[i]) drawCross(x, y, rad * 1.3);
     } else if (mine[i]) {
       drawMine(x, y, rad * 0.62);
@@ -357,6 +462,17 @@ function paintStatus() {
     if (hintsUsed) bits.push(hintsUsed + (hintsUsed === 1 ? ' hint' : ' hints'));
     return bits.join(' · ');
   };
+  /* The clear button appears exactly when it means something: every mine
+     accounted for by the counter, covered ground still waiting. It opens
+     that ground as if each cell were clicked — a wrong flag's mine flashes
+     and counts, exactly as it would under the finger. */
+  const btnC = el('btnClear');
+  if (btnC) {
+    let waiting = 0;
+    for (let i = 0; i < n; i++) if (state[i] === COVERED) waiting++;
+    btnC.style.display = n > 0 && !over && mines - flags === 0 && waiting > 0 ? '' : 'none';
+  }
+
   const run = el('noteRun');
   if (run) run.textContent = !n ? ''
     : (mistakes || hintsUsed) ? tallyWords() + ' — this board sets no best time.'
@@ -593,6 +709,15 @@ selTiling.onchange = () => { tiling = TILINGS[+selTiling.value]; startFromContro
 el('btnNew').onclick = startFromControls;
 el('btnHint').onclick = askHint;
 el('btnCheck').onclick = checkFlags;
+el('btnClear').onclick = () => {
+  if (over || !n || mines - flags !== 0) return;
+  clearHint();
+  startClock();
+  for (let i = 0; i < n; i++) if (state[i] === COVERED) reveal(i);
+  paintStatus();
+  saveBoard();
+  draw();
+};
 
 /* Giving up asks twice, as the hint does. One press is easy to make by
    accident and there is no taking it back — the board is spent. */
