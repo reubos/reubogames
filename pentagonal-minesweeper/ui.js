@@ -193,14 +193,24 @@ function flagVerdicts() {
   }
 
   if (has('connected')) {
-    // one group of all the flags, by the law's own adjacency
+    /* The largest group leads and the rest read amber: a flag is red while
+       it stands with the biggest connected company on the board, by the
+       law's own adjacency. Groups tied for largest all read red — neither
+       has more claim than the other. */
     const adj = joinAdj();
     const seen = new Uint8Array(n);
-    const walk = [flagged[0]]; seen[flagged[0]] = 1;
-    for (let at = 0; at < walk.length; at++)
-      for (const j of adj(walk[at]))
-        if (isF[j] && !seen[j]) { seen[j] = 1; walk.push(j); }
-    if (walk.length !== flagged.length) for (const f of flagged) ok.set(f, false);
+    const groups = [];
+    for (const f of flagged) {
+      if (seen[f]) continue;
+      const walk = [f]; seen[f] = 1;
+      for (let at = 0; at < walk.length; at++)
+        for (const j of adj(walk[at]))
+          if (isF[j] && !seen[j]) { seen[j] = 1; walk.push(j); }
+      groups.push(walk);
+    }
+    const most = Math.max(...groups.map(g => g.length));
+    for (const g of groups)
+      if (g.length < most) for (const f of g) ok.set(f, false);
   }
 
   if (has('outside')) {
