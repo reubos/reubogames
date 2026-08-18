@@ -144,7 +144,7 @@ const TIER = {
   'reach-budget': 3, 'piece-budget': 3, 'reach-room': 3, 'reach-toll': 3,
   'reach-way': 3, 'cap-ways': 3, 'group-ways': 3,
   'reach-need': 3, 'group-fit': 3, 'reach-owed': 3, 'conn-ways': 3, 'reach-fare': 3,
-  'deg-ways': 3, 'replay': 3
+  'deg-ways': 3, 'suppose': 3, 'replay': 3
 };
 
 /* The generator's dials on the solver: a ceiling on the tier it may reason
@@ -154,6 +154,13 @@ const TIER = {
 let tierCap = 0;
 let ruleOff = '';
 let ruleTally = null;
+/* Whether deduce may reach for the supposition on its own. Off in ordinary
+   dealing — the generator solves every board hundreds of times, and a
+   supposition scan multiplies each solve by its candidates — and turned on
+   by the measurements, and one day by the qualification of boards that must
+   need chains. The hint path is not gated by this: a player who asks for a
+   supposition's help is answered. */
+let supposeOn = false;
 /* And a dial on the opening. The first cell handed out is normally a nought,
    because a nought cascades and gives the player somewhere to stand. But a
    cascade is a great deal of one-glance information at once, and under a law
@@ -163,8 +170,16 @@ let ruleTally = null;
 let openTight = 0;
 const allowRule = rule =>
   (!tierCap || (TIER[rule] || 1) <= tierCap) && rule !== ruleOff;
+/* While a supposition's story is being taken down, every mark is logged as
+   it is made. The batch rules mark first and name their rule a breath
+   later, so the log entry is pushed unnamed and stamped here — the calls
+   come in matched pairs, one tally per mark. */
+let chainLog = null;
 const tallyRule = rule => {
   if (ruleTally) ruleTally[rule] = (ruleTally[rule] || 0) + 1;
+  if (chainLog)
+    for (let i = chainLog.length - 1; i >= 0 && !chainLog[i].rule; i--)
+      chainLog[i].rule = rule;
 };
 const RULENOTES = {
   none: '',
@@ -215,12 +230,20 @@ let difficulty = 'easy';
    many different rules as it can find, and hides every number it can spare.
    None of it touches the guarantee: every board can still be finished
    without guessing. */
+/* The ladder climbed a rung. What was harder is now hard — every sparable
+   number hidden, variety hunted, the deep rules demanded — and harder stands
+   above it on a new kind of requirement: chain, which admits only boards the
+   flat rules cannot finish at all. Somewhere on such a board a supposition
+   must be granted and followed to its contradiction, and the whole deal is
+   reasoned with suppositions in the room so the promise of no guessing is
+   made about the same solver the player's hints will use. */
 const DIFF = {
   easy:   { mines: 1.0,  open: 0.25, tier: 1 },
   medium: { mines: 1.15, open: 0.14, tier: 2, mute: 0.45 },
-  hard:   { mines: 1.3,  open: 0.07, tier: 3, mute: 0.45, skew: true, dens: 0.35 },
+  hard:   { mines: 1.3,  open: 0.07, tier: 3, mute: 1, skew: true, dens: 0.35,
+            variety: true, slow: true },
   harder: { mines: 1.3,  open: 0.07, tier: 3, mute: 1, skew: true, dens: 0.35,
-            variety: true, slow: true }
+            variety: true, slow: true, chain: true }
 };
 
 /* Hard aims at a density of its own rather than scaling whatever the slider
@@ -437,17 +460,25 @@ async function newGameUnder(my, across, down, m) {
      since what it starts with showing is part of the answer. */
   seeded = true;
   dealing = true;
-  const opening = await buildPuzzle();
-  dealCheck(my);
-  dealt = opening.slice();
-  for (const g of opening) reveal(g);
-  dealing = false;
-  /* Hidden numbers follow the level now, not a setting of their own: none
-     on easy, a share on medium and hard, and on harder every number the
-     board can spare. muteOn is kept abreast only for the saved game's sake. */
-  muteOn = !!d.mute;
-  if (d.mute) { await muteNumbers(d.mute); dealCheck(my); }
-  given = opened;
+  /* A chain deal thinks with suppositions from the first card: the handing
+     out stops as soon as chains can finish the board, the muting is judged
+     against the same strength, and the qualification then asks the flat
+     rules alone and requires them to fail. Restored to rest whatever
+     happens, since play holds the dial off and the hints have their own. */
+  if (d.chain) supposeOn = true;
+  try {
+    const opening = await buildPuzzle();
+    dealCheck(my);
+    dealt = opening.slice();
+    for (const g of opening) reveal(g);
+    dealing = false;
+    /* Hidden numbers follow the level now, not a setting of their own: none
+       on easy, a share on medium, and from hard up every number the board
+       can spare. muteOn is kept abreast only for the saved game's sake. */
+    muteOn = !!d.mute;
+    if (d.mute) { await muteNumbers(d.mute); dealCheck(my); }
+    given = opened;
+  } finally { supposeOn = false; }
 
   dealNote = '';
   paintStatus();

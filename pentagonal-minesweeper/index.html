@@ -164,13 +164,16 @@
         <p class="note">Each level stands on a ladder of reasoning. Easy asks
           only one-glance rules &mdash; counting, full groups, boxes read like
           numbers. Medium hides some of the numbers and asks two-fact rules
-          besides: overlaps, bottlenecks, sealed pockets. Hard hides numbers too
-          and needs the deep ones &mdash; crossed numbers, budgets, the endgame
-          against the mine counter. Harder hides every number the board can
-          spare and hunts for boards that need as many different kinds of
-          reasoning as it can find, so a large one takes a few seconds to deal.
-          A cell that never shows its count still proves itself safe, and every
-          board on every level can be finished without guessing.</p>
+          besides: overlaps, bottlenecks, sealed pockets. Hard hides every
+          number the board can spare and hunts for boards that need as many
+          different kinds of reasoning as it can find &mdash; crossed numbers,
+          budgets, the endgame against the mine counter &mdash; so a large one
+          takes a few seconds to deal. Harder deals only boards the ordinary
+          rules cannot finish at all: somewhere a supposition must be granted
+          and followed to a contradiction, and the hint will walk that chain
+          with you step by step. A cell that never shows its count still
+          proves itself safe, and every board on every level can be finished
+          without guessing.</p>
         <p class="label" style="margin-top: 14px">Strict</p>
         <div class="btn-row">
           <button data-strict="" class="on">Off</button>
@@ -179,7 +182,8 @@
         <p class="note">With this on, uncovering a cell that the board does not
           yet rule out as a mine finds a mine there. Only cells you can actually
           prove safe are safe, so guessing never pays. Every board can still be
-          finished, and boards played this way set no best time.</p>
+          finished, and a clean run played this way sets a best time like any
+          other &mdash; a strict pseudo-mine counts as a mine touched.</p>
         <p class="label" style="margin-top: 14px">Show neighbours</p>
         <div class="btn-row">
           <button data-adj="" class="on">Off</button>
@@ -255,10 +259,10 @@
      throws on a name that moved between them, and the game half-works in
      ways no fresh copy can. The version token forces every cached set to be
      whole. Bump it in all five lines together whenever any script changes. -->
-<script src="tiling.js?v=20260817"></script>
-<script src="play.js?v=20260817"></script>
-<script src="solver.js?v=20260817"></script>
-<script src="builder.js?v=20260817"></script>
-<script src="ui.js?v=20260817"></script>
+<script src="tiling.js?v=20260817c"></script>
+<script src="play.js?v=20260817c"></script>
+<script src="solver.js?v=20260817c"></script>
+<script src="builder.js?v=20260817c"></script>
+<script src="ui.js?v=20260817c"></script>
 </body>
 </html>

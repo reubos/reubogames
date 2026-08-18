@@ -200,7 +200,8 @@ async function buildPuzzle() {
   let target = (n - mines) * d.open;
   // the deep tiers get longer to search, and so do the laws: what they ask for is rarer
   const clock =
-    (n > 300 ? 300 : 120) * ((d.tier >= 3 ? 2 : 1) + (structured ? 1 : 0));
+    (n > 300 ? 300 : 120) * ((d.tier >= 3 ? 2 : 1) + (structured ? 1 : 0)) *
+    (d.chain ? 2 : 1);           // chain boards are rarer, and each try dearer
   let best = null, spare = null;
   const shortlist = [];          // harder's finalists, for the variety judging
   dealSeeds = { hunted: 0, laid: 0, kept: 0, qualified: 0 };
@@ -360,6 +361,21 @@ async function buildPuzzle() {
       const resists = deduce(kt) < n - mines;
       tierCap = 0;
       if (!resists) qualifies = false;
+    }
+
+    /* And above every other rung, the chain: a board sold as needing
+       suppositions must stop the flat rules outright. The deal has been
+       reasoning with suppositions throughout, so the handing out stopped
+       the moment chains sufficed — this asks the other half, that nothing
+       short of a chain gets there. */
+    if (qualifies && d.chain) {
+      const kc = new Uint8Array(n);
+      for (const g of list) markOpen(kc, g);
+      const keep = supposeOn;
+      supposeOn = false;
+      const stalls = deduce(kc) < n - mines;
+      supposeOn = keep;
+      if (!stalls) qualifies = false;
     }
 
     if (qualifies && wasSeeded) dealSeeds.qualified++;

@@ -681,6 +681,7 @@ function rulesetMoves(known, find) {
       hintHit = { cells: [j], kind, rule, clues: clues.filter(c => c !== j) };
       throw HINT_STOP;
     }
+    if (chainLog) chainLog.push({ cell: j, kind, rule });
     if (kind === 'safe') markOpen(known, j); else known[j] = KNOWN_MINE;
     tallyRule(rule);
     moved = true;
@@ -2097,9 +2098,11 @@ function win() {
   endTime = performance.now();
   /* A record needs a clock that was really running — startTime is only set by
      the player's own first move — a board from a standard size, and a board
-     played clean: not a mine touched, not a hint asked for. A forgiven mine
-     costs nothing but the record, which is the whole of what it costs. */
-  const key = startTime && !strict && !mistakes && !hintsUsed && !historyLost && bestKey();
+     played clean: not a mine touched, not a hint asked for. Strict is no bar
+     by itself: its pseudo-mines land in the same mistake count as real ones,
+     so a strict board played clean records like any other — if anything it
+     was the harder run, since a lucky click there finds a mine. */
+  const key = startTime && !mistakes && !hintsUsed && !historyLost && bestKey();
   if (key) {
     const t = endTime - startTime;
     if (!(key in bests) || t < bests[key]) { bests[key] = t; newBest = true; saveBests(); }
@@ -2147,8 +2150,10 @@ function markOpen(known, i) {
     const j = stack.pop();
     if (known[j] !== UNKNOWN) continue;
     known[j] = SAFE;
-    // the same conditions the uncovering itself applies
-    if (count[j] === 0 && !muted[j] && !visibleOnly)
+    // the same conditions the uncovering itself applies; and under a
+    // supposition a blank not already proven cannot cascade, for the same
+    // reason its number cannot be read
+    if (count[j] === 0 && !muted[j] && !visibleOnly && (!hypoKnown || hypoKnown[j] === SAFE))
       for (const m of nbOf(j)) if (known[m] === UNKNOWN) stack.push(m);
   }
 }
@@ -2171,6 +2176,11 @@ function constraintsOf(known) {
   const cons = [];
   for (let i = 0; i < n; i++) {
     if (known[i] !== SAFE || muted[i]) continue;    // a muted cell states nothing
+    /* Under a supposition, a number is readable only where the position
+       before the supposing had already proven it: a cell derived safe inside
+       the hypothetical cannot be clicked — the assumption might be false —
+       so its number is not the player's to lean on. */
+    if (hypoKnown && hypoKnown[i] !== SAFE) continue;
     if (visibleOnly && state[i] !== OPEN) continue;  // nor does one still covered
     const cells = [];
     let found = 0;
@@ -2218,8 +2228,18 @@ function constraintsWithTotal(known) {
    With a ruleset on, its logic joins in; mode 'base' keeps it out, which is
    how the generator proves a board cannot be solved while ignoring the law. */
 function deduce(known, mode) {
-  const setSafe = j => { if (known[j] !== UNKNOWN) return false; markOpen(known, j); return true; };
-  const setMine = j => { if (known[j] !== UNKNOWN) return false; known[j] = KNOWN_MINE; return true; };
+  const setSafe = j => {
+    if (known[j] !== UNKNOWN) return false;
+    if (chainLog) chainLog.push({ cell: j, kind: 'safe', rule: '' });
+    markOpen(known, j);
+    return true;
+  };
+  const setMine = j => {
+    if (known[j] !== UNKNOWN) return false;
+    if (chainLog) chainLog.push({ cell: j, kind: 'mine', rule: '' });
+    known[j] = KNOWN_MINE;
+    return true;
+  };
 
   const counting = () => {
     let moved = false;
@@ -2358,7 +2378,27 @@ function deduce(known, mode) {
      worth having now that Harder solves a board over and over to find out
      what it can spare. Crossed numbers earn their keep rarely, so they are
      asked rarest of all. */
-  while (counting() || subsets() || structural() || crossed() || total()) { /* keep going */ }
+  /* And dearest of all, the supposition — one clone of the whole position
+     per candidate, so it runs only where it is asked for: the measurements,
+     and the qualification of boards that must need it. The hints reach it
+     by their own road and are not gated here. */
+  const supposition = () => {
+    if (!supposeOn || supposing || mode === 'base' || !allowRule('suppose')) return false;
+    /* The clock is the deal's own economy and nobody else's. A verifier or
+       the replay floor running clocked scans could miss, by timing alone, a
+       chain the deal found — a promise broken by a stopwatch. Everything
+       outside the dealing runs unclocked, which can only confirm promises,
+       never break them. */
+    supposeStop = dealing ? performance.now() + 250 : 0;
+    const s2 = supposeFind(known);
+    supposeStop = 0;
+    if (!s2) return false;
+    if (s2.kind === 'safe' ? setSafe(s2.cell) : setMine(s2.cell)) { tallyRule('suppose'); return true; }
+    return false;
+  };
+
+  while (counting() || subsets() || structural() || crossed() || total() ||
+         supposition()) { /* keep going */ }
 
   let safe = 0;
   for (let i = 0; i < n; i++) if (known[i] === SAFE) safe++;
@@ -2387,6 +2427,204 @@ function deduce(known, mode) {
    a crossed-number argument where a subset would have done, whatever order
    the rules happen to sit in. The same ceiling the generator reasons under,
    worn here for a different end. */
+/* =====================================================================
+   THE SUPPOSITION — reasoning by granting the opposite.
+
+   Suppose a covered cell held a mine (or did not), and follow the ordinary
+   named rules forward inside that supposed world. If they arrive at
+   something no board could be — a number owed more than its ground, mines
+   cut off from one another, a group grown past its law — the supposition
+   was false, and the cell is settled the other way.
+
+   This is the chain the flat rules cannot make: a disjunction carried
+   through several numbers' arithmetic at once. Its soundness rests on two
+   things. Every rule used inside the supposed world is itself sound, so a
+   contradiction really does condemn the assumption; and the supposed world
+   is told nothing the player could not know — numbers are readable only
+   where the position had already proven them, which is what hypoKnown
+   masks. Its explainability rests on the same design: the refutation is a
+   sequence of named steps, each with its own wording, so the hint can walk
+   a player through the story one press at a time.
+   ===================================================================== */
+let supposing = false;         // no suppositions inside suppositions
+let hypoKnown = null;          // while set, the mask described above
+
+/* What no board could be. Only certainties: every check here must be a law
+   or a count already violated beyond saving, since the whole argument
+   stands on the breaking being real. */
+function lawBroken(k2) {
+  for (const c of constraintsOf(k2))
+    if (c.left < 0 || c.left > c.cells.length)
+      return 'a number is owed more than its ground could ever give';
+  let found = 0, covered = 0;
+  for (let i = 0; i < n; i++) {
+    if (k2[i] === KNOWN_MINE) found++;
+    else if (k2[i] === UNKNOWN) covered++;
+  }
+  if (found > mines) return 'more mines than the board holds';
+  if (found + covered < mines) return 'too little ground is left for the mines that remain';
+  const dHi = degCap();
+  if (dHi < 99) for (let i = 0; i < n; i++) {
+    if (k2[i] !== KNOWN_MINE) continue;
+    let d = 0;
+    for (const j of corOf(i)) if (k2[j] === KNOWN_MINE) d++;
+    if (d > dHi) return 'a mine ends up more crowded than the law allows';
+  }
+  const gLim = groupSize() || groupCap();
+  if (gLim) {
+    const seen = new Uint8Array(n);
+    for (let i = 0; i < n; i++) {
+      if (k2[i] !== KNOWN_MINE || seen[i]) continue;
+      let size = 0;
+      const st = [i]; seen[i] = 1;
+      while (st.length) {
+        const c = st.pop(); size++;
+        for (const j of edgOf(c)) if (k2[j] === KNOWN_MINE && !seen[j]) { seen[j] = 1; st.push(j); }
+      }
+      if (size > gLim) return 'a group grows past what the law allows';
+    }
+  }
+  if (has('snake') || has('loop')) for (let i = 0; i < n; i++) {
+    if (k2[i] !== KNOWN_MINE) continue;
+    let d = 0;
+    for (const j of edgOf(i)) if (k2[j] === KNOWN_MINE) d++;
+    if (d > 2) return 'the path would have to run alongside itself';
+  }
+  if (has('connected')) {
+    const adj = joinAdj();
+    const open = i => k2[i] === UNKNOWN || k2[i] === KNOWN_MINE;
+    const { id, comps } = compsOver(open, adj);
+    const held = [];
+    for (let i = 0; i < n; i++) if (k2[i] === KNOWN_MINE) held.push(i);
+    if (held.length) {
+      if (held.some(m => id[m] !== id[held[0]]))
+        return 'mines end up cut off from one another';
+      const home = comps.find(g => id[g[0]] === id[held[0]]);
+      if (home && home.length < mines)
+        return 'the mines are shut in a piece too small to hold them all';
+    }
+  }
+  return '';
+}
+
+/* The cells worth supposing about. Not all covered ground is equal: a
+   contradiction nearly always starts against a statement that is almost
+   decided — one mine still wanted, or one cell still spare — because there
+   the assumption forces a first domino at once. Cells under such statements
+   are tried first; the rest queue behind, and the cap falls on them. */
+function supposeCands(known) {
+  const seen = new Set(), tight = [], loose = [];
+  for (const c of constraintsOf(known)) {
+    const nearly = c.left === 1 || c.cells.length - c.left === 1;
+    for (const j of c.cells) {
+      if (seen.has(j)) continue;
+      seen.add(j);
+      (nearly ? tight : loose).push(j);
+    }
+  }
+  const out = tight.concat(loose);
+  if (out.length > 40) out.length = 40;
+  return out;
+}
+
+/* One supposition, tried to its end: assume, propagate with the full rule
+   set under the mask, and report what broke — or nothing. */
+/* How hard the supposed world may think, and for how long. The dealing
+   holds hypotheticals to the second tier — the ways rules that make
+   connected's solve dear are left out, and lawBroken sees every law
+   regardless, so most contradictions still land — and gives each scan a
+   clock, so a barren board costs a bounded slice of the deal rather than a
+   minute of it. The hint path lifts both: a player who asks one question
+   deserves the full-strength answer. */
+let supposeDeep = false;       // hints set this: full-tier hypotheticals
+let supposeStop = 0;           // a scan runs until this clock, 0 for no clock
+
+function supposeTry(known, c, bit) {
+  const k2 = known.slice();
+  if (bit) k2[c] = KNOWN_MINE; else k2[c] = SAFE;
+  const keepT = ruleTally, keepCap = tierCap;
+  hypoKnown = known; ruleTally = null; supposing = true;
+  if (!supposeDeep) tierCap = 2;
+  let why = '';
+  try {
+    deduce(k2);
+    why = lawBroken(k2);
+  } finally { hypoKnown = null; ruleTally = keepT; supposing = false; tierCap = keepCap; }
+  return why;
+}
+
+// the first cell a supposition settles, with which way and why
+function supposeFind(known) {
+  for (const c of supposeCands(known)) {
+    if (supposeStop && performance.now() > supposeStop) return null;
+    for (const bit of [1, 0]) {
+      const why = supposeTry(known, c, bit);
+      if (why) return { cell: c, kind: bit ? 'safe' : 'mine', why };
+    }
+  }
+  return null;
+}
+
+/* The story, taken down rather than re-derived. An earlier version walked
+   the refutation again with the hint machinery, one rule at a time, and on
+   the path laws it never arrived: this solver is not monotone, so a walk in
+   a different order can dodge the very cut that broke the law for the batch
+   solve. What cannot diverge is a recording. The batch run keeps a log of
+   every mark it makes inside the supposed world, each stamped with its
+   rule; the log is then replayed from the assumption and cut at the first
+   moment the law is already broken, and what remains — grouped by rule, in
+   the order it truly happened — is the proof itself, step by step. */
+function supposeStory(known, cell, kind) {
+  const k2 = known.slice();
+  if (kind === 'safe') k2[cell] = KNOWN_MINE; else k2[cell] = SAFE;
+  const keepT = ruleTally;
+  hypoKnown = known; ruleTally = null; supposing = true; chainLog = [];
+  let log;
+  try {
+    deduce(k2);
+    log = chainLog;
+  } finally { hypoKnown = null; ruleTally = keepT; supposing = false; chainLog = null; }
+
+  // group the marks into steps: one step per unbroken run of the same rule
+  const steps = [];
+  for (const e of log) {
+    const last = steps[steps.length - 1];
+    if (last && last.rule === e.rule && last.kind === e.kind) last.cells.push(e.cell);
+    else steps.push({ rule: e.rule || 'counting-clear', kind: e.kind, cells: [e.cell], clues: [] });
+  }
+  if (steps.length > 20) return null;      // a saga is no hint; stand without it
+
+  // replay from the assumption and cut where the law is first already broken
+  const k3 = known.slice();
+  if (kind === 'safe') k3[cell] = KNOWN_MINE; else k3[cell] = SAFE;
+  hypoKnown = known;
+  try {
+    let why = lawBroken(k3);
+    let upTo = steps.length;
+    for (let t = 0; t < steps.length && !why; t++) {
+      for (const c of steps[t].cells) {
+        if (steps[t].kind === 'safe') markOpen(k3, c); else k3[c] = KNOWN_MINE;
+      }
+      why = lawBroken(k3);
+      if (why) upTo = t + 1;
+    }
+    if (!why) return null;                 // the log did not carry the break
+    return { steps: steps.slice(0, upTo), why };
+  } finally { hypoKnown = null; }
+}
+
+function supposeHint(known) {
+  supposeDeep = true;
+  let s, tale = null;
+  try {
+    s = supposeFind(known);
+    if (s) tale = supposeStory(known, s.cell, s.kind);
+  } finally { supposeDeep = false; }
+  if (!s) return null;
+  return { cells: [s.cell], kind: s.kind, rule: 'suppose', clues: [],
+           steps: tale ? tale.steps : null, why: tale ? tale.why : s.why };
+}
+
 function findHint(known) {
   for (const cap of [1, 2, 3]) {
     tierCap = cap;
@@ -2436,7 +2674,12 @@ function replayHint(known) {
      handed over. It cannot come home empty on a board this build dealt. */
   const k1 = new Uint8Array(n);
   for (const g of dealt) markOpen(k1, g);
-  deduce(k1);
+  /* The replay must think as the deal thought: a chain board was accepted
+     by a solver with suppositions in the room, and a replay without them
+     would stall on it and wrongly declare the hints dry. */
+  const keepSup = supposeOn;
+  supposeOn = true;
+  try { deduce(k1); } finally { supposeOn = keepSup; }
   for (let c = 0; c < n; c++) {
     if (known[c] !== UNKNOWN || k1[c] === UNKNOWN) continue;
     return { cells: [c], kind: k1[c] === SAFE ? 'safe' : 'mine',
@@ -2527,6 +2770,13 @@ function findHintAt(known) {
     if (left - a.left === covered.length - a.cells.length)
       return { cells: rest, kind: 'mine', rule: 'total-elsewhere-mined', clues: [a.from] };
   }
+  /* Dearest of all, so it is asked last: the supposition. Gated by its
+     tier like every rule, and never inside another supposition's world. */
+  if (!supposing && allowRule('suppose')) {
+    const h = supposeHint(known);
+    if (h) return h;
+  }
+
   return null;
 }
 
@@ -2592,6 +2842,7 @@ const HINTWORDS = {
   'deg-over': 'The crowding. A mine here would touch more mines than the law allows.',
   'deg-room': 'The huddle. There are too few cells around this one that could ever hold a mine for it to find the companions it would need.',
   'deg-count': 'The huddle. How many companions this mine still owes, or has room for, is a count over the covered cells beside it — and a number watching the same cells trades against it.',
+  'suppose': 'The supposition. Grant the opposite for a moment — a mine here, or none — and follow the ordinary rules: they break against the board. Keep pressing to walk the story one step at a time.',
   'deg-ways': 'The crowding, laid out. Take a number — or the mine counter itself, once little ground is left — and lay its mines every way it allows; throw out the ways that crowd some mine past the law, or that leave one unable ever to find its companions, and every way left agrees about this cell. Two cells beside each other that each already touch their fill cannot both be mines, however little else connects them.',
   'reach-fare': 'Connectedness. Every covered cell a route runs through is a mine spent, and only one way of joining these pieces can be paid for with the mines that are left — it comes through here.',
   'reach-toll': 'The chain, priced. A mine here could only chain out through more of this number’s cells than the number has mines to give, so no chain can carry it.',
@@ -2703,16 +2954,41 @@ function askHint() {
   }
 
   const sig = opened + ':' + flags + ':' + h.rule + ':' + h.cells.join(',');
-  hintLevel = sig === hintAt ? Math.min(2, hintLevel + 1) : 1;
+  /* Most hints have two levels: the ground, then the reasoning. A
+     supposition with its story has more — one press per step of the
+     refutation, and a verdict at the end — and stays on the verdict once
+     it gets there. */
+  const walked = h.rule === 'suppose' && h.steps && h.steps.length;
+  const top = walked ? 3 + h.steps.length : 2;
+  hintLevel = sig === hintAt ? Math.min(top, hintLevel + 1) : 1;
   hintAt = sig;
   // asking the same hint again for its reasoning is the one ask, not two
   if (hintLevel === 1) hintsUsed++;
   // the clues if the rule named any, and otherwise the ground it is talking about
   hintClues = (h.clues.length ? h.clues : h.cells).slice();
-  el('noteHint').textContent = hintLevel >= 2
-    ? HINTWORDS[h.rule] || HINTIDLE
-    : 'Marked in gold: the clues to work from — the cells they settle may lie ' +
-      'elsewhere. Ask again to be told how.';
+  if (walked && hintLevel > 2) {
+    const at = hintLevel - 3;               // the steps, then the verdict
+    if (at < h.steps.length) {
+      const st = h.steps[at];
+      hintClues = (st.clues && st.clues.length ? st.clues.concat(st.cells) : st.cells).slice();
+      el('noteHint').textContent = 'Under the supposition, step ' + (at + 1) +
+        ' of ' + h.steps.length + ': ' + (HINTWORDS[st.rule] || st.rule);
+    } else {
+      hintClues = h.cells.slice();
+      el('noteHint').textContent = 'And there it breaks: ' + h.why +
+        '. The supposition was false, so this cell is ' +
+        (h.kind === 'safe' ? 'clear.' : 'a mine.');
+    }
+  } else if (hintLevel >= 2 && h.rule === 'suppose' && !walked) {
+    el('noteHint').textContent = (HINTWORDS.suppose || '') +
+      ' (This one keeps its working to itself: suppose it, follow the rules, and ' +
+      (h.why ? 'find that ' + h.why + '.' : 'watch them break.') + ')';
+  } else {
+    el('noteHint').textContent = hintLevel >= 2
+      ? HINTWORDS[h.rule] || HINTIDLE
+      : 'Marked in gold: the clues to work from — the cells they settle may lie ' +
+        'elsewhere. Ask again to be told how.';
+  }
   draw();
 }
 
