@@ -2384,7 +2384,14 @@ function deduce(known, mode) {
      by their own road and are not gated here. */
   const supposition = () => {
     if (!supposeOn || supposing || mode === 'base' || !allowRule('suppose')) return false;
+    /* The clock is the deal's own economy and nobody else's. A verifier or
+       the replay floor running clocked scans could miss, by timing alone, a
+       chain the deal found — a promise broken by a stopwatch. Everything
+       outside the dealing runs unclocked, which can only confirm promises,
+       never break them. */
+    supposeStop = dealing ? performance.now() + 250 : 0;
     const s2 = supposeFind(known);
+    supposeStop = 0;
     if (!s2) return false;
     if (s2.kind === 'safe' ? setSafe(s2.cell) : setMine(s2.cell)) { tallyRule('suppose'); return true; }
     return false;
@@ -2500,34 +2507,56 @@ function lawBroken(k2) {
   return '';
 }
 
-// the cells worth supposing about: covered ground some number is watching
+/* The cells worth supposing about. Not all covered ground is equal: a
+   contradiction nearly always starts against a statement that is almost
+   decided — one mine still wanted, or one cell still spare — because there
+   the assumption forces a first domino at once. Cells under such statements
+   are tried first; the rest queue behind, and the cap falls on them. */
 function supposeCands(known) {
-  const seen = new Set(), out = [];
-  for (const c of constraintsOf(known))
-    for (const j of c.cells)
-      if (!seen.has(j)) { seen.add(j); out.push(j); }
+  const seen = new Set(), tight = [], loose = [];
+  for (const c of constraintsOf(known)) {
+    const nearly = c.left === 1 || c.cells.length - c.left === 1;
+    for (const j of c.cells) {
+      if (seen.has(j)) continue;
+      seen.add(j);
+      (nearly ? tight : loose).push(j);
+    }
+  }
+  const out = tight.concat(loose);
   if (out.length > 40) out.length = 40;
   return out;
 }
 
 /* One supposition, tried to its end: assume, propagate with the full rule
    set under the mask, and report what broke — or nothing. */
+/* How hard the supposed world may think, and for how long. The dealing
+   holds hypotheticals to the second tier — the ways rules that make
+   connected's solve dear are left out, and lawBroken sees every law
+   regardless, so most contradictions still land — and gives each scan a
+   clock, so a barren board costs a bounded slice of the deal rather than a
+   minute of it. The hint path lifts both: a player who asks one question
+   deserves the full-strength answer. */
+let supposeDeep = false;       // hints set this: full-tier hypotheticals
+let supposeStop = 0;           // a scan runs until this clock, 0 for no clock
+
 function supposeTry(known, c, bit) {
   const k2 = known.slice();
   if (bit) k2[c] = KNOWN_MINE; else k2[c] = SAFE;
-  const keepT = ruleTally;
+  const keepT = ruleTally, keepCap = tierCap;
   hypoKnown = known; ruleTally = null; supposing = true;
+  if (!supposeDeep) tierCap = 2;
   let why = '';
   try {
     deduce(k2);
     why = lawBroken(k2);
-  } finally { hypoKnown = null; ruleTally = keepT; supposing = false; }
+  } finally { hypoKnown = null; ruleTally = keepT; supposing = false; tierCap = keepCap; }
   return why;
 }
 
 // the first cell a supposition settles, with which way and why
 function supposeFind(known) {
   for (const c of supposeCands(known)) {
+    if (supposeStop && performance.now() > supposeStop) return null;
     for (const bit of [1, 0]) {
       const why = supposeTry(known, c, bit);
       if (why) return { cell: c, kind: bit ? 'safe' : 'mine', why };
@@ -2585,9 +2614,13 @@ function supposeStory(known, cell, kind) {
 }
 
 function supposeHint(known) {
-  const s = supposeFind(known);
+  supposeDeep = true;
+  let s, tale = null;
+  try {
+    s = supposeFind(known);
+    if (s) tale = supposeStory(known, s.cell, s.kind);
+  } finally { supposeDeep = false; }
   if (!s) return null;
-  const tale = supposeStory(known, s.cell, s.kind);
   return { cells: [s.cell], kind: s.kind, rule: 'suppose', clues: [],
            steps: tale ? tale.steps : null, why: tale ? tale.why : s.why };
 }
