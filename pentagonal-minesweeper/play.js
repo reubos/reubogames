@@ -144,7 +144,7 @@ const TIER = {
   'reach-budget': 3, 'piece-budget': 3, 'reach-room': 3, 'reach-toll': 3,
   'reach-way': 3, 'cap-ways': 3, 'group-ways': 3,
   'reach-need': 3, 'group-fit': 3, 'reach-owed': 3, 'conn-ways': 3, 'reach-fare': 3,
-  'deg-ways': 3, 'replay': 3
+  'deg-ways': 3, 'suppose': 3, 'replay': 3
 };
 
 /* The generator's dials on the solver: a ceiling on the tier it may reason
@@ -154,6 +154,13 @@ const TIER = {
 let tierCap = 0;
 let ruleOff = '';
 let ruleTally = null;
+/* Whether deduce may reach for the supposition on its own. Off in ordinary
+   dealing — the generator solves every board hundreds of times, and a
+   supposition scan multiplies each solve by its candidates — and turned on
+   by the measurements, and one day by the qualification of boards that must
+   need chains. The hint path is not gated by this: a player who asks for a
+   supposition's help is answered. */
+let supposeOn = false;
 /* And a dial on the opening. The first cell handed out is normally a nought,
    because a nought cascades and gives the player somewhere to stand. But a
    cascade is a great deal of one-glance information at once, and under a law
@@ -163,8 +170,16 @@ let ruleTally = null;
 let openTight = 0;
 const allowRule = rule =>
   (!tierCap || (TIER[rule] || 1) <= tierCap) && rule !== ruleOff;
+/* While a supposition's story is being taken down, every mark is logged as
+   it is made. The batch rules mark first and name their rule a breath
+   later, so the log entry is pushed unnamed and stamped here — the calls
+   come in matched pairs, one tally per mark. */
+let chainLog = null;
 const tallyRule = rule => {
   if (ruleTally) ruleTally[rule] = (ruleTally[rule] || 0) + 1;
+  if (chainLog)
+    for (let i = chainLog.length - 1; i >= 0 && !chainLog[i].rule; i--)
+      chainLog[i].rule = rule;
 };
 const RULENOTES = {
   none: '',
