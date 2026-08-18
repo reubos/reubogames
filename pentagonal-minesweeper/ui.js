@@ -372,7 +372,6 @@ function paintStatus() {
   v.textContent = over
     ? (won ? 'Swept' + (startTime ? ' — ' + fmtTime(endTime - startTime) : '') +
              (newBest ? ' · a new best!'
-              : strict ? ' · strict, not recorded'
               : (mistakes || hintsUsed) ? ' · ' + tallyWords() + ', not recorded'
               : historyLost ? ' · resumed, not recorded' : '')
            : 'Given up — the board as it stood.')

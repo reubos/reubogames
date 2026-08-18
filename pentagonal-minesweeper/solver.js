@@ -2098,9 +2098,11 @@ function win() {
   endTime = performance.now();
   /* A record needs a clock that was really running — startTime is only set by
      the player's own first move — a board from a standard size, and a board
-     played clean: not a mine touched, not a hint asked for. A forgiven mine
-     costs nothing but the record, which is the whole of what it costs. */
-  const key = startTime && !strict && !mistakes && !hintsUsed && !historyLost && bestKey();
+     played clean: not a mine touched, not a hint asked for. Strict is no bar
+     by itself: its pseudo-mines land in the same mistake count as real ones,
+     so a strict board played clean records like any other — if anything it
+     was the harder run, since a lucky click there finds a mine. */
+  const key = startTime && !mistakes && !hintsUsed && !historyLost && bestKey();
   if (key) {
     const t = endTime - startTime;
     if (!(key in bests) || t < bests[key]) { bests[key] = t; newBest = true; saveBests(); }
@@ -2639,7 +2641,12 @@ function replayHint(known) {
      handed over. It cannot come home empty on a board this build dealt. */
   const k1 = new Uint8Array(n);
   for (const g of dealt) markOpen(k1, g);
-  deduce(k1);
+  /* The replay must think as the deal thought: a chain board was accepted
+     by a solver with suppositions in the room, and a replay without them
+     would stall on it and wrongly declare the hints dry. */
+  const keepSup = supposeOn;
+  supposeOn = true;
+  try { deduce(k1); } finally { supposeOn = keepSup; }
   for (let c = 0; c < n; c++) {
     if (known[c] !== UNKNOWN || k1[c] === UNKNOWN) continue;
     return { cells: [c], kind: k1[c] === SAFE ? 'safe' : 'mine',
