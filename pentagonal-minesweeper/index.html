@@ -135,6 +135,32 @@
       <div class="panel">
         <p class="label">Tiling</p>
         <select id="selTiling"></select>
+        <p class="label" style="margin-top: 14px">Ruleset</p>
+        <select id="selRule">
+          <option value="none">None</option>
+          <option value="connected">Connected</option>
+          <option value="connected2">Connected 2</option>
+          <option value="twogroup1">Two Groups</option>
+          <option value="safeconn">Safe Connected</option>
+          <option value="outside">Outside</option>
+          <option value="sparse">Sparse</option>
+          <option value="singles">Singles</option>
+          <option value="doubles">Doubles</option>
+          <option value="triples">Triples</option>
+          <option value="quads">Quads</option>
+          <option value="notriples">No Triples</option>
+          <option value="noquads">No Quads</option>
+          <option value="snake">Snake</option>
+          <option value="loop">Loop</option>
+          <option value="boxed1">Boxed 1</option>
+          <option value="boxed2">Boxed 2</option>
+          <option value="boxed3">Boxed 3</option>
+          <option value="boxed4">Boxed 4</option>
+          <option value="boxedirr">Irregular Boxed</option>
+          <option value="cbox4">Connected + Boxed 4</option>
+          <option value="sbox4">Snake + Boxed 4</option>
+        </select>
+        <p class="note" id="noteRule"></p>
       </div>
 
       <div class="panel">
@@ -215,32 +241,6 @@
           &mdash; may say &ldquo;at least&rdquo; or &ldquo;at most&rdquo;
           instead of its exact count, so its ground stays covered and has to
           be reasoned for. Only the box laws are touched.</p>
-        <p class="label" style="margin-top: 14px">Ruleset</p>
-        <div class="btn-row three">
-          <button data-rule="none" class="on">None</button>
-          <button data-rule="connected">Connected</button>
-          <button data-rule="connected2">Connected 2</button>
-          <button data-rule="twogroup1">Two Groups</button>
-          <button data-rule="safeconn">Safe Connected</button>
-          <button data-rule="outside">Outside</button>
-          <button data-rule="sparse">Sparse</button>
-          <button data-rule="singles">Singles</button>
-          <button data-rule="doubles">Doubles</button>
-          <button data-rule="triples">Triples</button>
-          <button data-rule="quads">Quads</button>
-          <button data-rule="notriples">No Triples</button>
-          <button data-rule="noquads">No Quads</button>
-          <button data-rule="snake">Snake</button>
-          <button data-rule="loop">Loop</button>
-          <button data-rule="boxed1">Boxed 1</button>
-          <button data-rule="boxed2">Boxed 2</button>
-          <button data-rule="boxed3">Boxed 3</button>
-          <button data-rule="boxed4">Boxed 4</button>
-          <button data-rule="boxedirr">Irregular Boxed</button>
-          <button data-rule="cbox4">Connected + Boxed 4</button>
-          <button data-rule="sbox4">Snake + Boxed 4</button>
-        </div>
-        <p class="note" id="noteRule"></p>
       </div>
 
       <div class="panel">
@@ -274,10 +274,10 @@
      throws on a name that moved between them, and the game half-works in
      ways no fresh copy can. The version token forces every cached set to be
      whole. Bump it in all five lines together whenever any script changes. -->
-<script src="tiling.js?v=20260818h"></script>
-<script src="play.js?v=20260818h"></script>
-<script src="solver.js?v=20260818h"></script>
-<script src="builder.js?v=20260818h"></script>
-<script src="ui.js?v=20260818h"></script>
+<script src="tiling.js?v=20260818i"></script>
+<script src="play.js?v=20260818i"></script>
+<script src="solver.js?v=20260818i"></script>
+<script src="builder.js?v=20260818i"></script>
+<script src="ui.js?v=20260818i"></script>
 </body>
 </html>

@@ -409,7 +409,7 @@ function paintToggles() {
     for (const x of document.querySelectorAll(sel)) x.classList.toggle('on', is(x));
   };
   mark('[data-diff]', x => x.dataset.diff === difficulty);
-  mark('[data-rule]', x => x.dataset.rule === ruleset);
+  { const sr = document.getElementById('selRule'); if (sr) sr.value = ruleset; }
   mark('[data-strict]', x => !!x.dataset.strict === strict);
   mark('[data-weaken]', x => !!x.dataset.weaken === weakenOn);
   mark('[data-adj]', x => !!x.dataset.adj === adjOn);

@@ -787,12 +787,10 @@ for (const b of document.querySelectorAll('[data-weaken]'))
     startFromControls();
   };
 
-for (const b of document.querySelectorAll('[data-rule]'))
-  b.onclick = () => {
-    ruleset = b.dataset.rule;
-    for (const x of document.querySelectorAll('[data-rule]')) x.classList.toggle('on', x === b);
-    startFromControls();          // which paints the note, once there are boxes to count
-  };
+el('selRule').onchange = () => {
+  ruleset = el('selRule').value;
+  startFromControls();            // which paints the note, once there are boxes to count
+};
 
 const selTiling = el('selTiling');
 selTiling.innerHTML = TILINGS.map((t, i) => '<option value="' + i + '">' + t.name + '</option>').join('');
