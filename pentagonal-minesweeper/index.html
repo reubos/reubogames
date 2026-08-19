@@ -109,6 +109,27 @@
 
   .note { font-size: 0.78rem; color: var(--muted); line-height: 1.55; margin: 10px 0 0; }
   .note b { color: var(--text); font-weight: 600; }
+
+  /* the explainers live behind a small ? beside each label; hover to read */
+  .help {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 15px; height: 15px; border-radius: 50%;
+    background: var(--panel); border: 1px solid var(--line);
+    color: var(--muted); font-size: 0.66rem; font-weight: 600;
+    cursor: help; margin-left: 6px; position: relative; vertical-align: middle;
+    text-transform: none; letter-spacing: 0;
+  }
+  .help:hover { border-color: var(--accent); color: #fff; }
+  .help::after {
+    content: attr(data-tip);
+    position: absolute; right: -8px; top: 22px; z-index: 9; width: 260px;
+    background: #142a17; border: 1px solid var(--line); border-radius: 8px;
+    padding: 10px 12px; font-size: 0.75rem; line-height: 1.55;
+    color: var(--text); white-space: normal; text-align: left;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+    display: none;
+  }
+  .help:hover::after { display: block; }
 </style>
 </head>
 <body>
@@ -166,7 +187,7 @@
       <div class="panel">
         <p class="label">Tiling</p>
         <select id="selTiling"></select>
-        <p class="label" style="margin-top: 14px">Ruleset</p>
+        <p class="label" style="margin-top: 14px">Ruleset <span class="help" data-tip="Boards are built so the chosen rule is needed to solve them. A flag's pennant answers for the law: red where the flags as placed already satisfy it, amber where they do not yet — a pair unpaired, a chain shy of the rim. Under Two Groups each connected company of flags wears its own colour, the six largest distinct and the rest grey.">?</span></p>
         <select id="selRule">
           <option value="none">None</option>
           <option value="connected">Connected</option>
@@ -198,6 +219,7 @@
       </div>
 
       <div class="panel">
+        <p class="label">Controls <span class="help" data-tip="Click to uncover. Right-click plants or lifts a flag. Hold Shift to sketch a supposition: shift-click draws a ghost ring (imagined safe), shift-right-click a ghost flag (imagined mine), and the same stroke erases it — ghosts never touch the counters. Clicking a number that already has its full quota of flags beside it uncovers everything else it touches. Uncovering a mine shows it for a moment and covers it again; the board is never lost, only given up on. A board finished without touching a mine and without a hint sets a best time. When every mine is accounted for, a button appears to clear the rest of the board in one press.">?</span></p>
         <div class="btn-row">
           <button class="primary full" id="btnNew">New game</button>
           <button class="full" id="btnHint">Hint</button>
@@ -208,75 +230,31 @@
         </div>
         <p class="note" id="noteHint">Asking once marks what to look at; asking again
           names the reasoning.</p>
-        <p class="note">Click to uncover. Right-click plants or lifts a flag.
-          Hold Shift to sketch instead: shift-click draws a ghost ring
-          (imagined safe), shift-right-click a ghost flag (imagined mine), and
-          the same stroke erases its own mark &mdash; the ghosts are for
-          working a supposition's what-ifs, and the counters never count
-          them. Clicking a number that already has its full quota of flags
-          beside it uncovers everything else it touches.</p>
-        <p class="note">Under a ruleset, a flag's pennant answers for the law:
-          red where the flags as placed already satisfy it, amber where they do
-          not yet &mdash; a pair unpaired, a group unjoined, a chain shy of the
-          rim. Under the Two Groups law each connected company of flags wears
-          its own colour instead, the six largest distinct and the rest grey.
-          When every mine is accounted for, a button appears to clear the rest
-          of the board in one press.</p>
-        <p class="note">Uncovering a mine shows it for a moment and covers it again;
-          the board is never lost, only given up on. A board finished without
-          touching a mine and without asking for a hint sets a best time &mdash;
-          any other is played for its own sake.</p>
       </div>
 
       <div class="panel">
-        <p class="label">Difficulty</p>
+        <p class="label">Difficulty <span class="help" data-tip="Each level stands on a ladder of reasoning. Easy asks only one-glance rules — counting, full groups, boxes read like numbers. Medium hides some numbers and asks two-fact rules: overlaps, bottlenecks, sealed pockets. Hard hides every number the board can spare and hunts for boards needing as many kinds of reasoning as it can find, so a large one takes a few seconds to deal. Harder deals only boards the ordinary rules cannot finish at all: somewhere a supposition must be granted and followed to a contradiction, and the hint will walk that chain step by step. Every board on every level can be finished without guessing.">?</span></p>
         <div class="btn-row">
           <button data-diff="easy" class="on">Easy</button>
           <button data-diff="medium">Medium</button>
           <button data-diff="hard">Hard</button>
           <button data-diff="harder">Harder</button>
         </div>
-        <p class="note">Each level stands on a ladder of reasoning. Easy asks
-          only one-glance rules &mdash; counting, full groups, boxes read like
-          numbers. Medium hides some of the numbers and asks two-fact rules
-          besides: overlaps, bottlenecks, sealed pockets. Hard hides every
-          number the board can spare and hunts for boards that need as many
-          different kinds of reasoning as it can find &mdash; crossed numbers,
-          budgets, the endgame against the mine counter &mdash; so a large one
-          takes a few seconds to deal. Harder deals only boards the ordinary
-          rules cannot finish at all: somewhere a supposition must be granted
-          and followed to a contradiction, and the hint will walk that chain
-          with you step by step. A cell that never shows its count still
-          proves itself safe, and every board on every level can be finished
-          without guessing.</p>
-        <p class="label" style="margin-top: 14px">Strict</p>
+        <p class="label" style="margin-top: 14px">Strict <span class="help" data-tip="With this on, uncovering a cell that the board does not yet rule out as a mine finds a mine there. Only cells you can actually prove safe are safe, so guessing never pays. Every board can still be finished, and a clean run played this way sets a best time like any other — a strict pseudo-mine counts as a mine touched.">?</span></p>
         <div class="btn-row">
           <button data-strict="" class="on">Off</button>
           <button data-strict="1">On</button>
         </div>
-        <p class="note">With this on, uncovering a cell that the board does not
-          yet rule out as a mine finds a mine there. Only cells you can actually
-          prove safe are safe, so guessing never pays. Every board can still be
-          finished, and a clean run played this way sets a best time like any
-          other &mdash; a strict pseudo-mine counts as a mine touched.</p>
-        <p class="label" style="margin-top: 14px">Show neighbours</p>
+        <p class="label" style="margin-top: 14px">Show neighbours <span class="help" data-tip="With this on, resting the pointer on a number lights the cells it counts — which a tiling of pentagons does not make obvious by looking.">?</span></p>
         <div class="btn-row">
           <button data-adj="" class="on">Off</button>
           <button data-adj="1">On</button>
         </div>
-        <p class="note">With this on, resting the pointer on a number lights the
-          cells it counts &mdash; which a tiling of pentagons does not make
-          obvious by looking.</p>
-        <p class="label" style="margin-top: 14px">Loose box clues</p>
+        <p class="label" style="margin-top: 14px">Loose box clues <span class="help" data-tip="With this on, a box that would hand over its whole contents — a nought, or a box needing every cell it has left — may say at least or at most instead of its exact count, so its ground stays covered and has to be reasoned for. Only the box laws are touched.">?</span></p>
         <div class="btn-row">
           <button data-weaken="" class="on">Off</button>
           <button data-weaken="1">On</button>
         </div>
-        <p class="note">With this on, a box that would hand over its whole
-          contents &mdash; a nought, or a box needing every cell it has left
-          &mdash; may say &ldquo;at least&rdquo; or &ldquo;at most&rdquo;
-          instead of its exact count, so its ground stays covered and has to
-          be reasoned for. Only the box laws are touched.</p>
       </div>
 
     </div>
@@ -289,10 +267,10 @@
      throws on a name that moved between them, and the game half-works in
      ways no fresh copy can. The version token forces every cached set to be
      whole. Bump it in all five lines together whenever any script changes. -->
-<script src="tiling.js?v=20260818m"></script>
-<script src="play.js?v=20260818m"></script>
-<script src="solver.js?v=20260818m"></script>
-<script src="builder.js?v=20260818m"></script>
-<script src="ui.js?v=20260818m"></script>
+<script src="tiling.js?v=20260818n"></script>
+<script src="play.js?v=20260818n"></script>
+<script src="solver.js?v=20260818n"></script>
+<script src="builder.js?v=20260818n"></script>
+<script src="ui.js?v=20260818n"></script>
 </body>
 </html>
