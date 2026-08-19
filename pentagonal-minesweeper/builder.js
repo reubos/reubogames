@@ -535,24 +535,53 @@ async function muteNumbers(share) {
   const my = dealToken;          // entered before the deal's first breath
   const start = [], cand = [];
   for (let i = 0; i < n; i++) {
-    if (state[i] === OPEN) start.push(i);
+    if (state[i] === OPEN) {
+      start.push(i);
+      /* The opening's own numbers are offered up too. They were held back
+         for a long time, and holding them back was what let a board read
+         easy however little of it was shown: the clues that give everything
+         away for nothing sit in the opening, being the ones with open ground
+         on every side, and none of them could ever be hidden.
+
+         Only numbered ground is offered. A blank muted would read '?' where
+         it now reads plainly empty, which takes away a true thing the player
+         could see; and a muted blank does not cascade, so any reckoning that
+         rebuilds the board from the cells it handed out would come back with
+         less than the board actually shows. */
+      if (count[i]) cand.push(i);
+    }
     else if (!mine[i]) cand.push(i);
   }
   for (let i = cand.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
     const t = cand[i]; cand[i] = cand[j]; cand[j] = t;
   }
-  /* Where a motif was planted, the numbers around it are offered up first.
-     A motif's reasoning is only needed once the cheap readings beside it
-     are gone, and the cheap readings live in exactly those numbers — hiding
-     them first is what turns a planted shape into a required one. The
-     solvability check below is unchanged, so nothing is hidden that the
+  /* Two kinds of clue are offered before the rest, and a clue answering to
+     both goes first of all.
+
+     A number whose covered neighbours come to exactly its own count settles
+     every one of them at a glance and asks nothing for it. On the laws whose
+     mines run in thin lines across the board these are more than half of
+     everything on show, and a board can spare most of them.
+
+     And where a motif was planted, the numbers around it: a motif's
+     reasoning is only needed once the cheap readings beside it are gone, and
+     the cheap readings live in exactly those numbers — hiding them first is
+     what turns a planted shape into a required one.
+
+     The solvability check below is unchanged, so nothing is hidden that the
      board cannot spare. */
-  if (keptGround && keptGround.length) {
-    const near = new Set();
+  const near = new Set();
+  if (keptGround && keptGround.length)
     for (const c of keptGround) { near.add(c); for (const j of nbOf(c)) near.add(j); }
-    cand.sort((a, b) => (near.has(b) ? 1 : 0) - (near.has(a) ? 1 : 0));
-  }
+  const givesAll = i => {
+    if (state[i] !== OPEN || !count[i]) return false;
+    let cov = 0;
+    for (const j of nbOf(i)) if (state[j] !== OPEN) cov++;
+    return cov > 0 && cov === count[i];
+  };
+  const rank = i => (givesAll(i) ? 2 : 0) + (near.has(i) ? 1 : 0);
+  cand.sort((a, b) => rank(b) - rank(a));
 
   const cap = DIFF[difficulty].tier >= 3 ? 0 : DIFF[difficulty].tier;
   const solves = () => {
