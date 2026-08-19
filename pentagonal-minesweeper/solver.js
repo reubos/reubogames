@@ -780,6 +780,89 @@ function tightCells(known, nodes, keep, adjOf, isM, need) {
 let hintHit = null;
 const HINT_STOP = {};
 
+/* Pricing the two-group law in mines, so it can speak before the endgame.
+
+   The mines already found stand in fragments, and every fragment must end
+   inside one of exactly two groups. Joining ground is priced honestly: a
+   path from one fragment toward another spends one remaining mine for every
+   covered cell it enters, rides existing mines for nothing, and cannot pass
+   proven-safe ground at all. Only single connections are ever priced — the
+   cost of joining a whole forest is deliberately never summed, since merge
+   paths may share cells and a summed bound would overcharge, which is the
+   unsound direction.
+
+   From that one price come the early rules. A pair of fragments whose
+   cheapest join costs more than every mine remaining can never join, so
+   they anchor the two final groups; from then on every mine on the board
+   must reach some fragment, and a cell too dear to reach is safe. Three
+   fragments pairwise beyond the budget force three groups, which no board
+   may be — the contradiction the suppositions chain on. */
+function twoFragments(k2) {
+  const frags = [];
+  const seen = new Uint8Array(n);
+  for (let i = 0; i < n; i++) {
+    if (k2[i] !== KNOWN_MINE || seen[i]) continue;
+    const piece = [i]; seen[i] = 1;
+    for (let at = 0; at < piece.length; at++)
+      for (const j of edgOf(piece[at]))
+        if (k2[j] === KNOWN_MINE && !seen[j]) { seen[j] = 1; piece.push(j); }
+    frags.push(piece);
+  }
+  frags.sort((a, b) => b.length - a.length);
+  return frags;
+}
+
+/* The cost, in new mines, of reaching each cell from a set of sources:
+   entering a covered cell spends one, riding a known mine spends nothing,
+   proven-safe ground is a wall. Free steps only ever join mine cells, so
+   a whole mine-piece enters the walk in one flood at one price, and the
+   queue stays a plain one. */
+function twoCost(k2, sources) {
+  const cost = new Int32Array(n).fill(-1);
+  const q = [];
+  const flood = (c, k) => {
+    const st = [c];
+    cost[c] = k;
+    while (st.length) {
+      const u = st.pop();
+      q.push(u);
+      for (const j of edgOf(u))
+        if (k2[j] === KNOWN_MINE && cost[j] < 0) { cost[j] = k; st.push(j); }
+    }
+  };
+  for (const c of sources) {
+    if (cost[c] >= 0) continue;
+    if (k2[c] === KNOWN_MINE) flood(c, 0);
+    else { cost[c] = 0; q.push(c); }
+  }
+  for (let head = 0; head < q.length; head++) {
+    const c = q[head];
+    for (const j of edgOf(c)) {
+      if (cost[j] >= 0) continue;
+      if (k2[j] === KNOWN_MINE) flood(j, cost[c]);
+      else if (k2[j] === UNKNOWN) { cost[j] = cost[c] + 1; q.push(j); }
+    }
+  }
+  return cost;
+}
+
+/* Among the largest fragments, which pairs can never join on the budget.
+   A subset is searched, never the whole field — missing a pair only quiets
+   the rules, which is the sound direction. */
+function twoUnmergeables(k2, frags, budget, most) {
+  const take = frags.slice(0, most);
+  const out = [];
+  for (let a = 0; a < take.length; a++) {
+    const cost = twoCost(k2, take[a]);
+    for (let b = a + 1; b < take.length; b++) {
+      let best = Infinity;
+      for (const c of take[b]) if (cost[c] >= 0 && cost[c] < best) best = cost[c];
+      if (best > budget) out.push([a, b]);
+    }
+  }
+  return out;
+}
+
 function rulesetMoves(known, find) {
   let moved = false;
   const isM = i => known[i] === KNOWN_MINE;
@@ -911,6 +994,32 @@ function rulesetMoves(known, find) {
         for (const c of g) inG[c] = 1;
         for (const u of cutCells(known, g, c => inG[c] === 1, edgOf, isM, isM, 'split'))
           mark(u, 'mine', 'two-cut', anchors.slice(0, 4));
+      }
+    }
+
+    /* And the pricing, which does not wait for the ground to split. Once
+       two fragments can never join on the budget, the two final groups are
+       anchored, and every mine still to come must reach some fragment — so
+       a covered cell too dear to reach from all of them is safe. */
+    {
+      const frags = twoFragments(known);
+      if (frags.length >= 2) {
+        let found = 0;
+        for (const f of frags) found += f.length;
+        const budget = mines - found;
+        const apart = twoUnmergeables(known, frags, budget, 12);
+        if (apart.length) {
+          const all = [];
+          for (const f of frags) for (const c of f) all.push(c);
+          const cost = twoCost(known, all);
+          const [pa, pb] = apart[0];
+          const clue = [frags[pa][0], frags[pb][0]];
+          for (let c = 0; c < n; c++) {
+            if (known[c] !== UNKNOWN) continue;
+            if (cost[c] < 0 || cost[c] > budget)
+              mark(c, 'safe', 'two-far', clue);
+          }
+        }
       }
     }
   }
@@ -2719,6 +2828,30 @@ function lawBroken(k2) {
     const { comps } = compsOver(open, edgOf);
     const claimed = comps.filter(g => g.some(c => k2[c] === KNOWN_MINE));
     if (claimed.length > 2) return 'the mines are split three ways with no road between';
+    /* The priced form of the same fact: three fragments pairwise beyond the
+       budget force three groups even inside one piece of ground. */
+    {
+      const frags = twoFragments(k2);
+      if (frags.length >= 3) {
+        let found = 0;
+        for (const f of frags) found += f.length;
+        const apart = twoUnmergeables(k2, frags, mines - found, 12);
+        if (apart.length >= 3) {
+          const deg = new Map();
+          for (const [a2, b2] of apart) {
+            deg.set(a2, (deg.get(a2) || 0) + 1);
+            deg.set(b2, (deg.get(b2) || 0) + 1);
+          }
+          const pairSet = new Set(apart.map(([a2, b2]) => a2 + ':' + b2));
+          for (const [a2, b2] of apart)
+            for (const [c2] of deg)
+              if (c2 !== a2 && c2 !== b2 &&
+                  (pairSet.has(Math.min(a2, c2) + ':' + Math.max(a2, c2))) &&
+                  (pairSet.has(Math.min(b2, c2) + ':' + Math.max(b2, c2))))
+                return 'three groups are forced, the mines that remain unable to join them';
+        }
+      }
+    }
     /* The room is only tellable once BOTH groups are placed. With a single
        piece of ground claimed, the second group may live in ground not yet
        claimed at all, so a small first piece proves nothing — reading it as
@@ -3083,6 +3216,7 @@ const HINTWORDS = {
   'reach-room': 'Connectedness. Take this cell away and no piece of ground left has both the mines already found and room for all of them — so the group must come through here.',
   'reach-owed': 'Connectedness. A number here is still owed a mine, and wherever that mine turns out to be it must join the group — which leaves it only this way through.',
   'two-ways': "The two groups. Lay this number's mines every way it allows, throw out the ways that would strand the mines in three pieces, and every way left agrees about this cell.",
+  'two-far': 'The two groups, priced. Two fragments already stand too far apart ever to join on the mines that remain, so they anchor the two groups — and reaching this cell from any fragment would cost more mines than are left, so no mine can ever stand here.',
   'two-pocket': 'The two groups. Both groups have staked their ground, and this piece of the board holds neither — nothing here can be a mine.',
   'two-cut': 'The two groups. The fragments in this piece of ground must join into one group — a third is forbidden — and this is the only cell that can join them.',
   'safe-cut': 'The safe ground. Were this a mine, the safe world would be cut in two — and it must hold together.',
