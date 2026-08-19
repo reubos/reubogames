@@ -405,8 +405,8 @@ function paintToggles() {
   const mark = (sel, is) => {
     for (const x of document.querySelectorAll(sel)) x.classList.toggle('on', is(x));
   };
-  mark('[data-diff]', x => x.dataset.diff === difficulty);
   { const sr = document.getElementById('selRule'); if (sr) sr.value = ruleset; }
+  { const sd = document.getElementById('selDiff'); if (sd) sd.value = difficulty; }
   mark('[data-strict]', x => !!x.dataset.strict === strict);
   mark('[data-weaken]', x => !!x.dataset.weaken === weakenOn);
   mark('[data-adj]', x => !!x.dataset.adj === adjOn);

@@ -768,12 +768,10 @@ for (const b of document.querySelectorAll('[data-preset]'))
     startFromControls();
   };
 
-for (const b of document.querySelectorAll('[data-diff]'))
-  b.onclick = () => {
-    difficulty = b.dataset.diff;
-    for (const x of document.querySelectorAll('[data-diff]')) x.classList.toggle('on', x === b);
-    startFromControls();
-  };
+el('selDiff').onchange = () => {
+  difficulty = el('selDiff').value;
+  startFromControls();
+};
 
 for (const b of document.querySelectorAll('[data-strict]'))
   b.onclick = () => {
