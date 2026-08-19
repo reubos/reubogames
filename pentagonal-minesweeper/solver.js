@@ -2384,14 +2384,7 @@ function deduce(known, mode) {
      by their own road and are not gated here. */
   const supposition = () => {
     if (!supposeOn || supposing || mode === 'base' || !allowRule('suppose')) return false;
-    /* The clock is the deal's own economy and nobody else's. A verifier or
-       the replay floor running clocked scans could miss, by timing alone, a
-       chain the deal found — a promise broken by a stopwatch. Everything
-       outside the dealing runs unclocked, which can only confirm promises,
-       never break them. */
-    supposeStop = dealing ? performance.now() + 250 : 0;
     const s2 = supposeFind(known);
-    supposeStop = 0;
     if (!s2) return false;
     if (s2.kind === 'safe' ? setSafe(s2.cell) : setMine(s2.cell)) { tallyRule('suppose'); return true; }
     return false;
@@ -2529,15 +2522,20 @@ function supposeCands(known) {
 
 /* One supposition, tried to its end: assume, propagate with the full rule
    set under the mask, and report what broke — or nothing. */
-/* How hard the supposed world may think, and for how long. The dealing
-   holds hypotheticals to the second tier — the ways rules that make
-   connected's solve dear are left out, and lawBroken sees every law
-   regardless, so most contradictions still land — and gives each scan a
-   clock, so a barren board costs a bounded slice of the deal rather than a
-   minute of it. The hint path lifts both: a player who asks one question
-   deserves the full-strength answer. */
+/* How hard the supposed world may think. The dealing holds hypotheticals
+   to the second tier — the ways rules that make connected's solve dear are
+   left out, and lawBroken sees every law regardless, so most contradictions
+   still land. The hint path lifts the cap: a player who asks one question
+   deserves the full-strength answer.
+
+   There is deliberately no clock in here. A scan once carried one, and it
+   taught the third lesson of its kind: this solver is not monotone, so a
+   verifier given more time is not a stronger version of the dealer — it is
+   a different one, marking more per pass and thereby dissolving the very
+   cuts the dealer's path stood on. A fresh board shrugged at a hint over
+   exactly that. The scans are deterministic now — same order, same caps,
+   no stopwatch — so the replay of a deal's proof is the proof. */
 let supposeDeep = false;       // hints set this: full-tier hypotheticals
-let supposeStop = 0;           // a scan runs until this clock, 0 for no clock
 
 function supposeTry(known, c, bit) {
   const k2 = known.slice();
@@ -2556,7 +2554,6 @@ function supposeTry(known, c, bit) {
 // the first cell a supposition settles, with which way and why
 function supposeFind(known) {
   for (const c of supposeCands(known)) {
-    if (supposeStop && performance.now() > supposeStop) return null;
     for (const bit of [1, 0]) {
       const why = supposeTry(known, c, bit);
       if (why) return { cell: c, kind: bit ? 'safe' : 'mine', why };
@@ -2796,7 +2793,7 @@ function searchHint(known) {
   const nearby = [], farOff = [];
   for (const c of covered)
     ([...nbOf(c)].some(j => known[j] === SAFE && !muted[j]) ? nearby : farOff).push(c);
-  const stop = performance.now() + 800;
+  const stop = performance.now() + 2500;
   for (const c of nearby.concat(farOff)) {
     if (performance.now() > stop) break;
     if (!couldHold(c, 1) && !searchBlown)
