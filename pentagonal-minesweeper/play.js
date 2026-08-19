@@ -360,9 +360,9 @@ function saveBoard() {
   } catch (e) {}
 }
 
-function restoreBoard() {
+function restoreBoard(text) {
   let s = null;
-  try { s = JSON.parse(localStorage.getItem(BOARDKEY) || 'null'); } catch (e) {}
+  try { s = JSON.parse(text || localStorage.getItem(BOARDKEY) || 'null'); } catch (e) {}
   if (!s || s.v !== 2) return false;
   const t = TILINGS.find(x => x.id === s.tiling);
   if (!t || !LAWS[s.rule]) return false;      // a law since dropped or renamed
@@ -471,6 +471,13 @@ const breath = () => new Promise(r => setTimeout(r, 0));
    word over a board that is no longer its own. The buttons already queue
    their deals one behind another; this guards the ones nothing queues —
    scripts, tests, anything driving the game directly. */
+/* A deal with nobody waiting on it. Boards are made ahead of time in a
+   worker while the last one is still being played, and those deals let the
+   hiding pass spend its whole budget instead of stopping on a clock — which
+   is what makes one board hide as much as another. A live deal leaves this
+   off, since a player is watching it. */
+let dealPatient = false;
+
 let dealToken = 0;
 const STALE_DEAL = {};
 const dealCheck = t => { if (t !== dealToken) throw STALE_DEAL; };
@@ -544,7 +551,7 @@ async function newGameUnder(my, across, down, m) {
        on easy, a share on medium, and from hard up every number the board
        can spare. muteOn is kept abreast only for the saved game's sake. */
     muteOn = !!d.mute;
-    if (d.mute) { await muteNumbers(d.mute); dealCheck(my); }
+    if (d.mute) { await muteNumbers(d.mute, dealPatient); dealCheck(my); }
     given = opened;
   } finally { supposeOn = false; }
 

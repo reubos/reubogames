@@ -523,15 +523,20 @@ async function buildPuzzle() {
    keep back: medium and hard hide a little under half; harder asks for all
    of them and keeps whatever the board can actually spare.
 
-   Cells the board opens with are left alone: the opening is what the player
-   is given to work from, and a mute there would only make the start opaque.
+   The numbers the board opens with are offered up like any other, and the
+   ones that give away everything they touch are offered first — see the
+   ordering below. Blanks are the exception, since a muted blank reads as a
+   question where it now reads plainly empty and cannot cascade besides.
 
-   Candidates go in batches against a clock. Checking one cell at a time
-   costs a whole solve apiece, which the big boards cannot afford; a batch
-   that fails is put back and halved, so the cost falls on the few refusals
-   rather than on every cell. Asked for everything, the clock is longer and
-   the deal steps out now and then so the page can say how far it has got. */
-async function muteNumbers(share) {
+   Clues are asked about one at a time, and what is rationed is the number of
+   questions rather than the time they take: a question costs anywhere from
+   four milliseconds to over a second depending on the law, so a clock spent
+   them at wildly different rates and how much a board kept back came to
+   depend on the machine it was dealt on. A deal nobody is waiting for — one
+   made ahead of time in a worker — spends the whole budget; a live deal
+   keeps a short clock as well, since a player is watching it. The deal steps
+   out now and then so the page can say how far it has got. */
+async function muteNumbers(share, patient) {
   const my = dealToken;          // entered before the deal's first breath
   const start = [], cand = [];
   for (let i = 0; i < n; i++) {
@@ -584,7 +589,11 @@ async function muteNumbers(share) {
   cand.sort((a, b) => rank(b) - rank(a));
 
   const cap = DIFF[difficulty].tier >= 3 ? 0 : DIFF[difficulty].tier;
+  /* Every question put to the solver is counted, because the budget below
+     is spent in questions and not in milliseconds. */
+  let calls = 0;
   const solves = () => {
+    calls++;
     tierCap = cap;
     const known = new Uint8Array(n);
     for (const g of start) markOpen(known, g);
@@ -606,38 +615,53 @@ async function muteNumbers(share) {
   };
 
   const target = Math.round(cand.length * share);
-  const deadline = performance.now() +
-    (share >= 1 ? (n > 300 ? 6000 : 2500) : (n > 300 ? 400 : 200));
-  /* Clues are tried in slices, and a slice that will not go is halved and
-     tried again — but the slice has to be allowed to grow back afterwards.
-     Without that, one stubborn run of clues drags the slice down to a single
-     cell and it stays there for the whole of the rest of the list, which is
-     the slowest way there is to ask the question. That cost little while the
-     list was shuffled, since a shuffled list fails at an even rate; it costs
-     a great deal now that the clues most likely to refuse are deliberately
-     offered first. Measured on Two Groups at the deepest rung, the stuck
-     slice left 23 covered numbers hidden where 59 could have been. */
-  const wide = Math.max(1, target >> 3);
-  let batch = wide, at = 0, done = 0;
+  /* What the pass is allowed to spend, in questions to the solver rather
+     than in time. A question costs between four and a hundred and thirty
+     milliseconds depending on the law, so a clock spent them at wildly
+     different rates and how much a board kept back came to depend on how
+     fast the machine was and what else it was doing: Connected hid one
+     number on a slow run and eighty-one on a lucky one, the same law at
+     the same size. Counted in questions it is the same everywhere.
+
+     A patient deal — one being made ahead of time, with nobody waiting on
+     it — spends the budget and stops there. A live deal keeps a clock too,
+     since a player is watching and some laws would take a minute to spend
+     the whole budget; that deal is the fallback, and the boards made ahead
+     are the ones that get the full measure. */
+  const budget = share >= 1 ? 400 : 120;
+  /* A patient deal is bounded too, just far more loosely. On most laws the
+     budget above runs out first and the board is the same board every time;
+     on the dearest of them a question can cost over a second once the board
+     is well hidden, and the whole budget would take four minutes of somebody
+     else's battery. So the patient path keeps a backstop it will hardly ever
+     reach, and the live path keeps the short clock a waiting player needs. */
+  const deadline = performance.now() + (patient ? 45000 :
+    (share >= 1 ? (n > 300 ? 6000 : 2500) : (n > 300 ? 400 : 200)));
+  /* One clue at a time, in the order they were put in.
+
+     Clues used to be offered in groups of an eighth of the list, on the
+     reasoning that a group that goes costs one question and hides twenty.
+     Measured against a fixed number of questions that turns out to be a bad
+     bargain: a group of twenty is spoilt by any one clue in it that cannot
+     go, so it nearly always fails and then costs further questions to find
+     out which. Asked one at a time the same budget hid 79 numbers a board on
+     Connected against 54, and 63 against 48 with no law at all. Only Snake
+     preferred groups, and only slightly. */
+  let done = 0, seen = 0;
   let drew = performance.now();
 
-  while (at < cand.length && done < target && performance.now() < deadline) {
+  while (seen < cand.length && done < target && calls < budget &&
+         performance.now() < deadline) {
     if (performance.now() - drew > 100) {
       drew = performance.now();
-      dealNote = 'Hiding the numbers — ' + Math.round(100 * at / cand.length) + '%';
+      dealNote = 'Hiding the numbers — ' + Math.round(100 * seen / cand.length) + '%';
       paintStatus();
       await breath();
       dealCheck(my);
     }
-    const slice = cand.slice(at, at + batch);
-    for (const c of slice) muted[c] = 1;
-    if (solves()) {
-      done += slice.length; at += slice.length;
-      if (batch < wide) batch = Math.min(wide, batch * 2);
-    } else {
-      for (const c of slice) muted[c] = 0;
-      if (batch > 1) batch >>= 1; else at++;
-    }
+    const c = cand[seen++];
+    muted[c] = 1;
+    if (solves()) done++; else muted[c] = 0;
   }
 
   /* Where the boxes carry numbers, those can be kept back too. There are few
@@ -671,7 +695,8 @@ async function muteNumbers(share) {
     let hidden = 0;
     const most = Math.round(boxes.length * (share >= 1 ? 1 : 0.45));
     for (const b of order) {
-      if (hidden >= most || performance.now() > deadline + 200) break;
+      if (hidden >= most || calls >= budget + 40 ||
+          performance.now() > deadline + 200) break;
       boxMuted[b] = 1;
       if (solves()) hidden++; else boxMuted[b] = 0;
     }

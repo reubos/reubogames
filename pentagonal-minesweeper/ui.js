@@ -746,6 +746,76 @@ function paintRuleNote() {
    deal is done again after, off whatever the controls say by then. */
 let dealBusy = false, dealAgain = false;
 
+/* Boards made ahead of time.
+
+   A board hides as many of its numbers as it can afford to, and finding out
+   what it can afford means asking the solver, over and over, whether the
+   board still comes out. Those questions cost between four and a hundred and
+   thirty milliseconds each depending on the law, so in the couple of seconds
+   a player will wait the pass got through a handful of them and stopped —
+   and how much a board kept back came down to how fast the machine was.
+
+   So the next board is made in a worker while this one is still being played,
+   where there is no one waiting and the hiding pass can spend its whole
+   budget. By the time New game is pressed it is usually already there.
+   Everything degrades quietly: no worker, a board whose settings no longer
+   match, or one that fails to come back, and the deal simply happens the old
+   way in front of the player. */
+const BUILD = (() => {
+  const s = [...document.querySelectorAll('script[src]')]
+    .find(x => /ui.js/.test(x.getAttribute('src') || ''));
+  const m = s && ((s.getAttribute('src') || '').split('?v=')[1] || '');
+  return m || '';
+})();
+
+let boardWorker = null, readyBoard = null, wantKey = '', waiting = 0, reqNo = 0;
+
+/* Everything that decides which board arrives. Strict, the neighbour wash and
+   the flag colours are not in it: they change how a board is played, not which
+   one is dealt, so a board made before one was toggled is still the right
+   board and the toggles are put back over the top of it. */
+const boardKeyNow = () =>
+  [tiling.id, ruleset, difficulty, sizeName, rngAcross.value, rngDown.value,
+   rngMines.value, weakenOn ? 'w' : ''].join('|');
+
+function startPrefetch() {
+  if (typeof Worker === 'undefined') return;
+  const key = boardKeyNow();
+  if (readyBoard && readyBoard.key === key) return;   // one is already standing by
+  if (waiting && wantKey === key) return;             // one is already on its way
+  if (!boardWorker) {
+    try { boardWorker = new Worker('prefetch.js' + (BUILD ? '?v=' + BUILD : '')); }
+    catch (e) { boardWorker = null; return; }         // no worker here, deal live
+    boardWorker.onmessage = e => {
+      const m = e.data || {};
+      waiting = 0;
+      if (m.ok && m.key === wantKey && m.save) readyBoard = { key: m.key, save: m.save };
+    };
+    boardWorker.onerror = () => { boardWorker = null; waiting = 0; readyBoard = null; };
+  }
+  wantKey = key;
+  waiting = ++reqNo;
+  boardWorker.postMessage({
+    id: waiting, key, version: BUILD, tiling: tiling.id, ruleset, difficulty,
+    sizeName, weakenOn, strict, adjOn, hueOn,
+    across: +rngAcross.value, down: +rngDown.value, ask: +rngMines.value
+  });
+}
+
+/* A board that was waiting, put on the table. The player's own toggles are
+   held over the restore, since the saved board carries the values they had
+   when it was made rather than the ones in force now. */
+function useReadyBoard(key) {
+  if (!readyBoard || readyBoard.key !== key) return false;
+  const board = readyBoard;
+  readyBoard = null;
+  const keptStrict = strict, keptAdj = adjOn, keptHue = hueOn;
+  if (!restoreBoard(board.save)) return false;
+  strict = keptStrict; adjOn = keptAdj; hueOn = keptHue;
+  historyLost = false;            // freshly dealt, whatever the save said
+  return true;
+}
+
 async function startFromControls() {
   if (dealBusy) { dealAgain = true; return; }
   dealBusy = true;
@@ -753,6 +823,7 @@ async function startFromControls() {
     do {
       dealAgain = false;
       clearHint();
+      if (useReadyBoard(boardKeyNow())) continue;
       if (DIFF[difficulty].slow) {
         dealNote = 'Dealing…';
         paintStatus();
@@ -761,10 +832,12 @@ async function startFromControls() {
       }
       await newGame(+rngAcross.value, +rngDown.value, +rngMines.value);
     } while (dealAgain);
+    paintToggles();
     paintSizeLabels(n, mines);
     paintRuleNote();
     saveBoard();
     draw();
+    startPrefetch();               // and the one after this, while it is played
   } finally { dealBusy = false; dealNote = ''; paintStatus(); }
 }
 
@@ -983,6 +1056,7 @@ if (restoreBoard()) {
   paintStatus();
   layout();
   draw();
+  startPrefetch();
 } else {
   startFromControls();
 }
