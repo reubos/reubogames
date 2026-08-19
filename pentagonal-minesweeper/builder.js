@@ -608,7 +608,17 @@ async function muteNumbers(share) {
   const target = Math.round(cand.length * share);
   const deadline = performance.now() +
     (share >= 1 ? (n > 300 ? 6000 : 2500) : (n > 300 ? 400 : 200));
-  let batch = Math.max(1, target >> 3), at = 0, done = 0;
+  /* Clues are tried in slices, and a slice that will not go is halved and
+     tried again — but the slice has to be allowed to grow back afterwards.
+     Without that, one stubborn run of clues drags the slice down to a single
+     cell and it stays there for the whole of the rest of the list, which is
+     the slowest way there is to ask the question. That cost little while the
+     list was shuffled, since a shuffled list fails at an even rate; it costs
+     a great deal now that the clues most likely to refuse are deliberately
+     offered first. Measured on Two Groups at the deepest rung, the stuck
+     slice left 23 covered numbers hidden where 59 could have been. */
+  const wide = Math.max(1, target >> 3);
+  let batch = wide, at = 0, done = 0;
   let drew = performance.now();
 
   while (at < cand.length && done < target && performance.now() < deadline) {
@@ -621,8 +631,10 @@ async function muteNumbers(share) {
     }
     const slice = cand.slice(at, at + batch);
     for (const c of slice) muted[c] = 1;
-    if (solves()) { done += slice.length; at += slice.length; }
-    else {
+    if (solves()) {
+      done += slice.length; at += slice.length;
+      if (batch < wide) batch = Math.min(wide, batch * 2);
+    } else {
       for (const c of slice) muted[c] = 0;
       if (batch > 1) batch >>= 1; else at++;
     }
