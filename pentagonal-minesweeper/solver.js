@@ -2424,8 +2424,14 @@ function chord(i) {
 
 function flag(i) {
   if (over || state[i] === OPEN) return;
-  if (state[i] === FLAG) { state[i] = COVERED; flags--; }
-  else { state[i] = FLAG; flags++; ghost[i] = 0; }
+  if (state[i] === FLAG) {
+    state[i] = COVERED; flags--;
+    const at = flagOrder.indexOf(i);
+    if (at >= 0) flagOrder.splice(at, 1);
+  } else {
+    state[i] = FLAG; flags++; ghost[i] = 0;
+    flagOrder.push(i);              // youngest in whatever company it joins
+  }
 }
 
 /* Giving up. Nothing on the board can end a game any more, so this is the
@@ -2453,7 +2459,8 @@ function win() {
     const t = endTime - startTime;
     if (!(key in bests) || t < bests[key]) { bests[key] = t; newBest = true; saveBests(); }
   }
-  for (let j = 0; j < n; j++) if (mine[j] && state[j] !== FLAG) { state[j] = FLAG; flags++; }
+  for (let j = 0; j < n; j++)
+    if (mine[j] && state[j] !== FLAG) { state[j] = FLAG; flags++; flagOrder.push(j); }
 }
 
 /* =====================================================================

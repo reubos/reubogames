@@ -209,11 +209,27 @@ function flagVerdicts() {
   }
 
   if (has('twogroups')) {
-    /* Every connected company wears its own colour, the six largest each
-       distinct and any beyond that grey — the pennants are a map of the
-       grouping itself, which under a two-group law is the whole question. */
-    const ranked = pieces.slice().sort((x, y) => y.length - x.length);
-    ranked.forEach((piece, at) => {
+    /* Every connected company wears its own colour, six of them distinct and
+       any beyond that grey — the pennants are a map of the grouping itself,
+       which under a two-group law is the whole question.
+
+       Which company gets which colour goes by age, not by size. Size was the
+       obvious ranking and the wrong one: a company wore the colour its size
+       had earned, so laying one mine beside the second-largest company and
+       making it the largest swapped two colours at once, and the map redrew
+       itself under the hand that was drawing it. A company is dated by its
+       oldest flag instead, which laying more flags cannot alter. Two
+       companies merging still gives up a colour, as it must — there is one
+       company where there were two — and the survivor keeps the older of the
+       two colours. */
+    const laid = new Int32Array(n).fill(0x7fffffff);
+    flagOrder.forEach((c, k) => { laid[c] = k; });
+    const aged = pieces.slice().sort((x, y) => {
+      const ax = Math.min(...x.map(c => laid[c]));
+      const ay = Math.min(...y.map(c => laid[c]));
+      return ax - ay;
+    });
+    aged.forEach((piece, at) => {
       for (const c of piece) ok.set(c, at < 6 ? at : -1);
     });
   }

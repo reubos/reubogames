@@ -27,6 +27,15 @@ let muteOn = false;
    mark. A real flag stands above the sketch and is not drawn over. */
 let ghost = new Uint8Array(0);      // 0 none, 1 imagined mine, 2 imagined safe
 
+/* The order the flags went down, oldest first. Only the two-group law reads
+   it, and it reads it to answer one complaint: a company was wearing the
+   colour its size had earned, so laying a mine beside a company and making
+   it the larger swapped two colours at a stroke, and the map the pennants
+   were supposed to draw redrew itself under the player's hand. A company
+   keeps the colour of its oldest flag instead, which growing cannot change,
+   since the flag just laid is the youngest thing in it. */
+let flagOrder = [];
+
 function ghostMark(i, kind) {
   if (over || state[i] !== COVERED) return;
   ghost[i] = ghost[i] === kind ? 0 : kind;
@@ -330,6 +339,8 @@ function saveBoard() {
       across: builtAcross, down: builtDown, ask: +rngMines.value,
       size: sizeName, diff: difficulty, rule: ruleset,
       mute: muteOn, strict: strict, adj: adjOn, weaken: weakenOn, hue: hueOn,
+      // the order the flags went down, so the companies keep their colours
+      forder: flagOrder,
       miss: mistakes, hints: hintsUsed, lost: historyLost,
       n: n, mines: mines, given: given, exploded: exploded, over: over, won: won,
       /* opened and flags are kept rather than counted back, and so are the
@@ -380,6 +391,16 @@ function restoreBoard() {
     mine[i] = +s.mine[i]; state[i] = +s.state[i]; muted[i] = +s.muted[i];
     if (typeof s.ghost === 'string' && s.ghost.length === n) ghost[i] = +s.ghost[i];
     count[i] = parseInt(s.count[i], 36);
+  }
+  /* The flag order comes back as it was laid, less anything no longer
+     flagged. A save from before the order was kept has none, and then the
+     flags already down are taken in the order the cells run — arbitrary, but
+     settled, so the colours at least stop moving from here on. */
+  flagOrder = (Array.isArray(s.forder) ? s.forder : [])
+    .filter(c => Number.isInteger(c) && c >= 0 && c < n && state[c] === FLAG);
+  {
+    const has = new Set(flagOrder);
+    for (let i = 0; i < n; i++) if (state[i] === FLAG && !has.has(i)) flagOrder.push(i);
   }
   /* An irregular cut is not worked out from the tiling, so it comes back off
      the save rather than being drawn anew — a fresh cut would not be the board
@@ -494,6 +515,7 @@ async function newGameUnder(my, across, down, m) {
   count = new Uint8Array(n);
   muted = new Uint8Array(n);
   ghost = new Uint8Array(n);
+  flagOrder = [];
 
   opened = 0; flags = 0; given = 0; newBest = false;
   mistakes = 0; hintsUsed = 0; historyLost = false;
