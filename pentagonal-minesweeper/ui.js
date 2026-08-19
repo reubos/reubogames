@@ -622,7 +622,12 @@ canvas.addEventListener('pointerdown', e => {
   if (e.pointerType === 'touch') return;
   const i = cellAt(e.clientX, e.clientY);
   if (i < 0) return;
-  if (e.button === 2) { clearHint(); startClock(); cycleMark(i); paintStatus(); saveBoard(); draw(); }
+  if (e.shiftKey && (e.button === 0 || e.button === 2)) {
+    clearHint(); startClock();
+    ghostMark(i, e.button === 2 ? 1 : 2);
+    paintStatus(); saveBoard(); draw();
+  }
+  else if (e.button === 2) { clearHint(); startClock(); flag(i); paintStatus(); saveBoard(); draw(); }
   else dig(i, e.button === 1);
 });
 

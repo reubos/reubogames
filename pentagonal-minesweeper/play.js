@@ -22,15 +22,14 @@ let muteOn = false;
    cells. A ghost flag imagines a mine, a ghost ring imagines safe ground,
    and neither is real — the counters ignore them, the solver never sees
    them, a chord does not count them, and opening a cell wipes its ghost.
-   The right button cycles flag, ghost flag, ghost ring, bare. */
+   Shift carries the imagining: shift with the left button sketches safe
+   ground, shift with the right a mine, and the same stroke erases its own
+   mark. A real flag stands above the sketch and is not drawn over. */
 let ghost = new Uint8Array(0);      // 0 none, 1 imagined mine, 2 imagined safe
 
-function cycleMark(i) {
-  if (over || state[i] === OPEN) return;
-  if (state[i] === FLAG) { state[i] = COVERED; flags--; ghost[i] = 1; }
-  else if (ghost[i] === 1) ghost[i] = 2;
-  else if (ghost[i] === 2) ghost[i] = 0;
-  else { state[i] = FLAG; flags++; }
+function ghostMark(i, kind) {
+  if (over || state[i] !== COVERED) return;
+  ghost[i] = ghost[i] === kind ? 0 : kind;
 }
 
 /* Whether the dealing may loosen a box's clue — "at least", "at most" — in
