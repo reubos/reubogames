@@ -176,6 +176,7 @@ function huntMotif() {
 }
 
 async function buildPuzzle() {
+  twoShare = -1;                 // a new deal draws its own two-group split
   const d = DIFF[difficulty];
   const structured = ruleset !== 'none';
   const gSize = groupSize();

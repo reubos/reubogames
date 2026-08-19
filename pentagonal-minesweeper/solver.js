@@ -117,13 +117,55 @@ function placeCapped(k, cap) {
    are what is left uncovered by the mines' own neighbourhoods, so a group
    that spans the board leaves few, and a group that huddles leaves a sea —
    and one given blank cascades a sea open before a click is made. */
+/* The split is drawn once for a whole deal, not once for every laying.
+
+   The builder lays hundreds of boards and keeps the best-scoring one, so a
+   share drawn afresh each time was not really being drawn at all: the
+   scoring chose among the shares as well as among the boards, and it liked
+   the lopsided ones. Every share lays within a few goes — even an even
+   halving, at 98 in a hundred — so the laying was never the thing
+   filtering them; the judging was. Fixed for the deal, the board that
+   arrives wears the share that was drawn for it. */
+let twoShare = -1;
+
 function placeTwoGroups(k) {
   if (k < 2) return false;
   const dist = new Int32Array(n), prev = new Int32Array(n), q = new Int32Array(n);
-  for (let attempt = 0; attempt < 30; attempt++) {
+  /* How the count is cut in two.
+
+     A breakpoint drawn evenly from anywhere in the count sounds fair and is
+     not what arrives. Two large groups are far harder to fit than one large
+     and one small, since each must reach across the board and keep a moat
+     between them, so the even splits failed and were drawn again: an even
+     draw averaging a quarter came out at 15% of the mines in the smaller
+     group, and the smaller group was under four mines on one board in
+     fifteen.
+
+     Drawn around a third instead, as the third smallest of eight numbers
+     — a beta of three and six, which averages a third and strays about
+     0.15 either way, so a fifth and two fifths are both ordinary. One draw
+     in fourteen is deliberately lopsided instead, a product of two numbers
+     heaped up near nothing, which is what keeps a company of one mine
+     possible without making it common.
+
+     And a share that will not lay is tried several times over before
+     another is drawn, so what gets dealt follows the draw rather than
+     whatever happened to be easiest to place. */
+  const drawShare = () => {
+    if (Math.random() < 1 / 14) return Math.random() * Math.random() * 0.15;
+    const u = [];
+    for (let i = 0; i < 8; i++) u.push(Math.random());
+    u.sort((x, y) => x - y);
+    return u[2];
+  };
+  if (twoShare < 0) twoShare = drawShare();
+  for (let round = 0; round < 10; round++) {
+    const small = Math.max(1, Math.min(k - 1, Math.round(k * twoShare)));
+    for (let go = 0; go < 8; go++) {
     mine.fill(0);
-    const s2 = 1 + Math.floor(Math.random() * (k - 1));
-    const sizes = [s2, k - s2];
+    // which of the two is grown first is its own coin, since the first has
+    // the run of the board and the second only what the moat leaves
+    const sizes = Math.random() < 0.5 ? [small, k - small] : [k - small, small];
     const blocked = new Uint8Array(n);
     let ok = true;
     for (const target of sizes) {
@@ -164,6 +206,7 @@ function placeTwoGroups(k) {
       for (const c of blob) { blocked[c] = 1; for (const j of edgOf(c)) blocked[j] = 1; }
     }
     if (ok && validRuleset()) return true;
+    }
   }
   return false;
 }
