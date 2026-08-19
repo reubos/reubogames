@@ -95,13 +95,31 @@ function placeCapped(k, cap) {
   return false;
 }
 
-/* Two edge-joined blobs, grown apart. Each grows from its own seed by the
-   frontier walk any blob grows by; the second is barred from the first and
-   from every cell along the first's edge, so the two may meet at a corner
-   but never join. The equal law splits the count in half; the free law cuts
-   it anywhere, small pieces allowed, since a group of one is a group. */
+/* Two edge-joined groups, each reaching as far as it can. The second is
+   barred from the first and from every cell along the first's edge, so the
+   two may meet at a corner but never join, and the count is cut anywhere at
+   all — small pieces allowed, since a group of one is a group.
+
+   How a group grows was the whole difficulty. A frontier walk was tried
+   three ways — at random, compact, and at its thinnest — and every one left
+   the board a third noughts, because all three only ever step out from where
+   they already stand and so stay in the quarter of the board they were
+   seeded in. Measured against the other laws at the same density that was
+   damning: Connected, which is one group and ought to be the worst of them,
+   left six per cent noughts against these thirty-four, and its openings ran
+   twenty-four per cent of the safe ground against fifty-six.
+
+   What Connected does instead is reach. Each step finds the ground standing
+   furthest from the group as it presently is and lays a path out to it, so
+   the mines cross the board rather than pooling, and every mine laid on the
+   way covers ground no other mine was going to cover. That is what is
+   borrowed here, on edges rather than corners and inside the moat. Zeros
+   are what is left uncovered by the mines' own neighbourhoods, so a group
+   that spans the board leaves few, and a group that huddles leaves a sea —
+   and one given blank cascades a sea open before a click is made. */
 function placeTwoGroups(k) {
   if (k < 2) return false;
+  const dist = new Int32Array(n), prev = new Int32Array(n), q = new Int32Array(n);
   for (let attempt = 0; attempt < 30; attempt++) {
     mine.fill(0);
     const s2 = 1 + Math.floor(Math.random() * (k - 1));
@@ -116,29 +134,31 @@ function placeTwoGroups(k) {
         if (!blocked[c] && seedOK(c) && !mine[c]) { seed = c; break; }
       }
       if (seed < 0) { ok = false; break; }
-      /* Grown at its thinnest, and neither at random nor compact — both
-         were tried and both flooded the opening, each its own way. A random
-         frontier encloses one-cell holes, and a hole is legal here (the law
-         binds the mines, not the safes) so nothing can ever prove it and it
-         must be handed over. A compact blob has the least wall and the
-         greatest blank sea, and one given blank cascades the whole sea
-         open — measured at up to six safes in seven shown before a click.
-         A tendril has the most wall, and the wall is where the game lives:
-         the perimeter numbers are the board's information, and a thin blob
-         strings them everywhere while enclosing nothing. */
       const blob = [seed];
       mine[seed] = 1;
       while (blob.length < target) {
-        let best = -1, bestD = -1;
-        for (const c of blob) for (const j of edgOf(c)) {
-          if (mine[j] || blocked[j] || !seedOK(j)) continue;
-          let d = 0;
-          for (const j2 of edgOf(j)) if (mine[j2]) d++;
-          const score = -d + Math.random();
-          if (score > bestD) { bestD = score; best = j; }
+        // how far off every cell the group may still take stands from it
+        dist.fill(-1);
+        let head = 0, tail = 0, far = -1;
+        for (const c of blob) { dist[c] = 0; prev[c] = -1; q[tail++] = c; }
+        while (head < tail) {
+          const v = q[head++];
+          for (const j of edgOf(v))
+            if (dist[j] < 0 && !mine[j] && !blocked[j] && seedOK(j)) {
+              dist[j] = dist[v] + 1; prev[j] = v; q[tail++] = j; far = j;
+            }
         }
-        if (best < 0) break;
-        mine[best] = 1; blob.push(best);
+        if (far < 0) break;                  // no room left inside the moat
+        // one of the furthest at random, so the same group is not grown twice
+        const picks = [];
+        for (let i = 0; i < n; i++) if (dist[i] === dist[far]) picks.push(i);
+        let v = picks[Math.floor(Math.random() * picks.length)];
+        const path = [];
+        while (v >= 0 && !mine[v]) { path.push(v); v = prev[v]; }
+        // laid from the group outwards, so it is joined on at every step
+        for (let a = path.length - 1; a >= 0 && blob.length < target; a--) {
+          mine[path[a]] = 1; blob.push(path[a]);
+        }
       }
       if (blob.length < target) { ok = false; break; }
       for (const c of blob) { blocked[c] = 1; for (const j of edgOf(c)) blocked[j] = 1; }
