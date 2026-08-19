@@ -136,7 +136,14 @@ function drawMine(x, y, rad) {
    placed already satisfy, amber for one still short of it — a pair not yet
    paired, a group not yet joined, a chain not yet reaching the rim. Amber
    is not an accusation; it only says the law is not yet met here. */
-const FLAGHUES = ['#ef4444', '#60a5fa', '#c084fc', '#22d3ee', '#f9a8d4', '#fb923c'];
+/* Six company colours, ranked by size, and ordered so that the ones a board
+   actually uses are the ones furthest apart: most positions show two or three
+   companies, so red, blue and yellow lead, and the closest pair — orange
+   against red — sits at the sixth rank, where six companies must be on the
+   board at once before it is ever drawn. The pair a reader confuses first is
+   blue against cyan, and the old set held both: a blue second and a cyan
+   fourth, near enough on a pennant this small to read as one company. */
+const FLAGHUES = ['#ef4444', '#60a5fa', '#facc15', '#e879f9', '#4ade80', '#fb923c'];
 function drawFlag(x, y, rad, ok) {
   ctx.strokeStyle = '#e2eee2';
   ctx.lineWidth = Math.max(1, rad * 0.2);

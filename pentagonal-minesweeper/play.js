@@ -466,11 +466,16 @@ async function newGameUnder(my, across, down, m) {
   const asked = across * down;
   const d = DIFF[difficulty];
   /* A board at one of the standard sizes takes the level's own density where
-     the level names one. A board whose mines the player set by hand keeps the
-     number they chose, carried across to the board that actually arrived —
-     their figure, not ours. */
+     the level names one, and where it does not — the first two rungs — the
+     standard count scaled by the level. A board whose mines the player set by
+     hand takes neither: it keeps the number they chose, carried across to the
+     board that actually arrived, since a tiling makes whatever cell count its
+     geometry gives. Their figure, not ours — the level scaling belonged to the
+     standard sizes all along, and applying it here moved a slider set to forty
+     up to fifty-two without saying so. */
   const aim = d.dens && sizeName && (LAWDENS[ruleset] || d.dens);
-  mines = Math.max(1, Math.min(Math.round(aim ? n * aim : m * (n / asked) * d.mines), n - 9));
+  const scale = sizeName ? d.mines : 1;
+  mines = Math.max(1, Math.min(Math.round(aim ? n * aim : m * (n / asked) * scale), n - 9));
 
   mine = new Uint8Array(n);
   state = new Uint8Array(n);
