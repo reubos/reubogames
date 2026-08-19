@@ -50,6 +50,15 @@ let dealt = [];                // the opening as dealt, for the hint of very las
    the board, only what is drawn. */
 let adjOn = false;
 
+/* A flag's pennant can answer for the law in force — red where the flags as
+   placed already satisfy it, amber where they fall short, and a colour per
+   company under the two-group law. That is a genuine reading of the board
+   handed over for nothing, which some players want and others would rather
+   work out themselves, so it is theirs to switch off. On by default, since
+   it is what the board did before there was a switch, and off it leaves
+   every flag the plain red it has always been where no law watches. */
+let hueOn = true;
+
 /* A mine is forgiven: it shows itself for a moment and is then covered over
    again, leaving the board as it was and the game running. This was once a
    setting and is now simply how the game is played — a board that ends at
@@ -320,7 +329,7 @@ function saveBoard() {
       v: 2, tiling: tiling.id,
       across: builtAcross, down: builtDown, ask: +rngMines.value,
       size: sizeName, diff: difficulty, rule: ruleset,
-      mute: muteOn, strict: strict, adj: adjOn, weaken: weakenOn,
+      mute: muteOn, strict: strict, adj: adjOn, weaken: weakenOn, hue: hueOn,
       miss: mistakes, hints: hintsUsed, lost: historyLost,
       n: n, mines: mines, given: given, exploded: exploded, over: over, won: won,
       /* opened and flags are kept rather than counted back, and so are the
@@ -351,6 +360,8 @@ function restoreBoard() {
   tiling = t;
   difficulty = s.diff; ruleset = s.rule; muteOn = s.mute;
   strict = s.strict; adjOn = s.adj; sizeName = s.size; weakenOn = !!s.weaken;
+  // a board saved before the switch existed was played with the colours on
+  hueOn = s.hue === undefined ? true : !!s.hue;
   mistakes = s.miss || 0;
   hintsUsed = s.hints || 0;
   historyLost = s.miss === undefined || !!s.lost;
@@ -410,6 +421,7 @@ function paintToggles() {
   mark('[data-strict]', x => !!x.dataset.strict === strict);
   mark('[data-weaken]', x => !!x.dataset.weaken === weakenOn);
   mark('[data-adj]', x => !!x.dataset.adj === adjOn);
+  mark('[data-hue]', x => !!x.dataset.hue === hueOn);
   selTiling.value = TILINGS.indexOf(tiling);
 }
 

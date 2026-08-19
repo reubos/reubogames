@@ -431,7 +431,7 @@ function draw() {
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
 
-  const verdicts = flagVerdicts();
+  const verdicts = hueOn ? flagVerdicts() : null;
   for (let i = 0; i < n; i++) {
     if (state[i] === COVERED) {
       if (ghost[i]) {
@@ -779,6 +779,14 @@ for (const b of document.querySelectorAll('[data-strict]'))
     for (const x of document.querySelectorAll('[data-strict]')) x.classList.toggle('on', x === b);
     paintStatus();
     saveBoard();
+  };
+
+for (const b of document.querySelectorAll('[data-hue]'))
+  b.onclick = () => {
+    hueOn = !!b.dataset.hue;
+    for (const x of document.querySelectorAll('[data-hue]')) x.classList.toggle('on', x === b);
+    saveBoard();
+    draw();
   };
 
 for (const b of document.querySelectorAll('[data-adj]'))

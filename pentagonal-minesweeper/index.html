@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -187,7 +187,7 @@
       <div class="panel">
         <p class="label">Tiling</p>
         <select id="selTiling"></select>
-        <p class="label" style="margin-top: 14px">Ruleset <span class="help" data-tip="Boards are built so the chosen rule is needed to solve them. A flag's pennant answers for the law: red where the flags as placed already satisfy it, amber where they do not yet â€” a pair unpaired, a chain shy of the rim. Under Two Groups each connected company of flags wears its own colour, the six largest distinct and the rest grey.">?</span></p>
+        <p class="label" style="margin-top: 14px">Ruleset <span class="help" data-tip="Boards are built so the chosen rule is needed to solve them. A flag's pennant answers for the law: red where the flags as placed already satisfy it, amber where they do not yet — a pair unpaired, a chain shy of the rim. Under Two Groups each connected company of flags wears its own colour, the six largest distinct and the rest grey.">?</span></p>
         <select id="selRule">
           <option value="none">None</option>
           <option value="connected">Connected</option>
@@ -226,7 +226,7 @@
       </div>
 
       <div class="panel">
-        <p class="label">Controls <span class="help" data-tip="Click to uncover. Right-click plants or lifts a flag. Hold Shift to sketch a supposition: shift-click draws a ghost ring (imagined safe), shift-right-click a ghost flag (imagined mine), and the same stroke erases it â€” ghosts never touch the counters. Clicking a number that already has its full quota of flags beside it uncovers everything else it touches. Uncovering a mine shows it for a moment and covers it again; the board is never lost, only given up on. A board finished without touching a mine and without a hint sets a best time. When every mine is accounted for, a button appears to clear the rest of the board in one press.">?</span></p>
+        <p class="label">Controls <span class="help" data-tip="Click to uncover. Right-click plants or lifts a flag. Hold Shift to sketch a supposition: shift-click draws a ghost ring (imagined safe), shift-right-click a ghost flag (imagined mine), and the same stroke erases it — ghosts never touch the counters. Clicking a number that already has its full quota of flags beside it uncovers everything else it touches. Uncovering a mine shows it for a moment and covers it again; the board is never lost, only given up on. A board finished without touching a mine and without a hint sets a best time. When every mine is accounted for, a button appears to clear the rest of the board in one press.">?</span></p>
         <div class="btn-row">
           <button class="primary full" id="btnNew">New game</button>
           <button class="full" id="btnHint">Hint</button>
@@ -240,17 +240,22 @@
       </div>
 
       <div class="panel">
-        <p class="label">Strict <span class="help" data-tip="With this on, uncovering a cell that the board does not yet rule out as a mine finds a mine there. Only cells you can actually prove safe are safe, so guessing never pays. Every board can still be finished, and a clean run played this way sets a best time like any other â€” a strict pseudo-mine counts as a mine touched.">?</span></p>
+        <p class="label">Strict <span class="help" data-tip="With this on, uncovering a cell that the board does not yet rule out as a mine finds a mine there. Only cells you can actually prove safe are safe, so guessing never pays. Every board can still be finished, and a clean run played this way sets a best time like any other — a strict pseudo-mine counts as a mine touched.">?</span></p>
         <div class="btn-row">
           <button data-strict="" class="on">Off</button>
           <button data-strict="1">On</button>
         </div>
-        <p class="label" style="margin-top: 14px">Show neighbours <span class="help" data-tip="With this on, resting the pointer on a number lights the cells it counts â€” which a tiling of pentagons does not make obvious by looking.">?</span></p>
+        <p class="label" style="margin-top: 14px">Show neighbours <span class="help" data-tip="With this on, resting the pointer on a number lights the cells it counts — which a tiling of pentagons does not make obvious by looking.">?</span></p>
         <div class="btn-row">
           <button data-adj="" class="on">Off</button>
           <button data-adj="1">On</button>
         </div>
-        <p class="label" style="margin-top: 14px">Loose box clues <span class="help" data-tip="With this on, a box that would hand over its whole contents â€” a nought, or a box needing every cell it has left â€” may say at least or at most instead of its exact count, so its ground stays covered and has to be reasoned for. Only the box laws are touched.">?</span></p>
+        <p class="label" style="margin-top: 14px">Flag colours <span class="help" data-tip="With this on, a flag's pennant answers for the ruleset: red where the flags as placed already satisfy the law, amber where they do not yet &mdash; a pair unpaired, a chain shy of the rim. Under Two Groups each connected company of flags wears its own colour, the six largest distinct and the rest grey. Turn it off to be told nothing and check the law yourself: every flag then stays the plain red it wears when no ruleset is chosen.">?</span></p>
+        <div class="btn-row">
+          <button data-hue="">Off</button>
+          <button data-hue="1" class="on">On</button>
+        </div>
+        <p class="label" style="margin-top: 14px">Loose box clues <span class="help" data-tip="With this on, a box that would hand over its whole contents — a nought, or a box needing every cell it has left — may say at least or at most instead of its exact count, so its ground stays covered and has to be reasoned for. Only the box laws are touched.">?</span></p>
         <div class="btn-row">
           <button data-weaken="" class="on">Off</button>
           <button data-weaken="1">On</button>
@@ -267,11 +272,11 @@
      throws on a name that moved between them, and the game half-works in
      ways no fresh copy can. The version token forces every cached set to be
      whole. Bump it in all five lines together whenever any script changes. -->
-<script src="tiling.js?v=20260819c"></script>
-<script src="play.js?v=20260819c"></script>
-<script src="solver.js?v=20260819c"></script>
-<script src="builder.js?v=20260819c"></script>
-<script src="ui.js?v=20260819c"></script>
+<script src="tiling.js?v=20260819d"></script>
+<script src="play.js?v=20260819d"></script>
+<script src="solver.js?v=20260819d"></script>
+<script src="builder.js?v=20260819d"></script>
+<script src="ui.js?v=20260819d"></script>
 </body>
 </html>
 
