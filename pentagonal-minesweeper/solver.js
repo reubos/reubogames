@@ -3257,6 +3257,127 @@ function searchHint(known) {
 }
 
 // The second tier: what kind of reasoning the marked cells are asking for.
+
+/* The hint in the position's own numbers.
+
+   HINTWORDS below says what a rule is. That is the right thing to read once,
+   and the wrong thing to read every time: a player looking at a 3 beside two
+   covered cells does not need to be told what counting is, they need to be
+   told what this 3 says. So where a rule's reasoning can be rebuilt from the
+   cells it lit, it is rebuilt and spoken with the actual figures — how many
+   mines a number still owes, how many cells it still watches, how many of
+   those two numbers share. Rules with no entry here fall back to their
+   general wording, which is no worse than it was.
+
+   Nothing here decides anything. The deduction has already been made and
+   checked; this only describes it, so a composer that cannot make sense of a
+   position returns nothing and the general wording stands. */
+function hintCon(known, i) {
+  if (i === undefined || known[i] !== SAFE || muted[i]) return null;
+  const cells = [];
+  let found = 0;
+  for (const j of nbOf(i)) {
+    if (known[j] === UNKNOWN) cells.push(j);
+    else if (known[j] === KNOWN_MINE) found++;
+  }
+  if (!cells.length) return null;
+  return { at: i, n: count[i], found, cells, owed: count[i] - found };
+}
+
+// "1 mine" against "2 mines"; and whole clauses rather than halves of them,
+// since "it is" plus " mines" is how you get "it is mines"
+const DASH = '—';
+const plural = (k, one, many) => k + ' ' + (k === 1 ? one : many);
+const someCells = k => (k === 1 ? 'the one cell'
+                      : k === 2 ? 'both cells' : 'all ' + k + ' cells');
+const isAre = k => (k === 1 ? 'is' : 'are');
+const areMines = k => (k === 1 ? 'it is a mine'
+                     : k === 2 ? 'both are mines' : 'all ' + k + ' are mines');
+const areClear = k => (k === 1 ? 'it is clear'
+                     : k === 2 ? 'both are clear' : 'all ' + k + ' are clear');
+const itsMines = k => (k === 1 ? 'its mine'
+                     : k === 2 ? 'both of its mines' : 'all ' + k + ' of its mines');
+
+const HINTSAY = {
+  'counting-clear': (known, h) => {
+    const c = hintCon(known, h.clues[0]);
+    if (!c || c.owed !== 0) return '';
+    const k = c.cells.length;
+    return 'Counting. The ' + c.n + ' has ' + itsMines(c.found) + ' flagged already, so ' +
+      someCells(k) + ' it still touches ' + isAre(k) + ' clear.';
+  },
+
+  'counting-full': (known, h) => {
+    const c = hintCon(known, h.clues[0]);
+    if (!c || c.owed !== c.cells.length) return '';
+    return 'Counting. The ' + c.n + ' still needs ' + plural(c.owed, 'mine', 'mines') +
+      ' and touches only ' + plural(c.cells.length, 'covered cell', 'covered cells') +
+      ', so ' + areMines(c.cells.length) + '.';
+  },
+
+  subset: (known, h) => {
+    const a = hintCon(known, h.clues[0]), b = hintCon(known, h.clues[1]);
+    if (!a || !b) return '';
+    const inA = new Set(a.cells);
+    const diff = b.cells.filter(y => !inA.has(y));
+    if (!diff.length || !a.cells.every(y => b.cells.includes(y))) return '';
+    const twin = a.n === b.n;
+    const A = twin ? 'one ' + a.n : 'the ' + a.n;
+    const B = twin ? 'the other ' + b.n : 'the ' + b.n;
+    const head = 'Overlap. ' + A[0].toUpperCase() + A.slice(1) + ' needs ' +
+      plural(a.owed, 'mine', 'mines') + ' among the ' +
+      plural(a.cells.length, 'cell', 'cells') + ' it still touches; ' + B + ' needs ' +
+      plural(b.owed, 'mine', 'mines') + ' among ' + b.cells.length +
+      '. Every cell ' + A + ' watches is watched by ' + B + ' too';
+    if (h.kind === 'safe')
+      return head + ', so every mine ' + B + ' owes already lies inside them ' + DASH + ' and ' +
+        someCells(diff.length) + ' outside ' + isAre(diff.length) + ' clear.';
+    return head + ', so ' + B + ' must find ' + plural(b.owed - a.owed, 'more mine', 'more mines') +
+      ' among the ' + plural(diff.length, 'cell', 'cells') + ' ' + A +
+      ' cannot see ' + DASH + ' ' + areMines(diff.length) + '.';
+  },
+
+  crossed: (known, h) => {
+    const a = hintCon(known, h.clues[0]), b = hintCon(known, h.clues[1]);
+    if (!a || !b) return '';
+    const inA = new Set(a.cells), inB = new Set(b.cells);
+    const inter = b.cells.filter(y => inA.has(y));
+    if (!inter.length) return '';
+    const aOut = a.cells.length - inter.length, bOut = b.cells.length - inter.length;
+    const hi = Math.min(a.owed, b.owed, inter.length);
+    const lo = Math.max(a.owed - aOut, b.owed - bOut, 0);
+    if (lo > hi) return '';
+    const share = lo === hi
+      ? 'which must hold exactly ' + plural(lo, 'mine', 'mines')
+      : 'which can hold between ' + lo + ' and ' + plural(hi, 'mine', 'mines');
+    const settled = new Set(h.cells);
+    const twin = a.n === b.n;
+    const A = twin ? 'one ' + a.n : 'the ' + a.n;
+    const B = twin ? 'the other ' + b.n : 'the ' + b.n;
+    const whose = h.cells.every(c => inter.includes(c)) ? 'shared'
+      : h.cells.every(c => inA.has(c) && !inB.has(c)) ? A
+      : h.cells.every(c => inB.has(c) && !inA.has(c)) ? B : null;
+    if (whose === null) return '';
+    const tail = whose === 'shared'
+      ? 'so ' + (inter.length === 1 ? 'the shared cell is a mine.'
+                : someCells(inter.length).replace('cells', 'shared cells') + ' are mines.')
+      : 'so ' + someCells(settled.size) + ' only ' + whose + ' can see ' +
+        (h.kind === 'safe' ? isAre(settled.size) + ' clear.'
+         : settled.size === 1 ? 'is a mine.' : 'are mines.');
+    return 'Crossing. ' + A[0].toUpperCase() + A.slice(1) + ' needs ' +
+      plural(a.owed, 'mine', 'mines') + ' among ' + a.cells.length + ' cells; ' + B +
+      ' needs ' + plural(b.owed, 'mine', 'mines') + ' among ' + b.cells.length +
+      '. They share ' + plural(inter.length, 'cell', 'cells') + ', ' + share +
+      ' ' + DASH + ' ' + tail;
+  }
+};
+
+function saySpecific(known, h) {
+  const f = HINTSAY[h.rule];
+  if (!f) return '';
+  try { return f(known, h) || ''; } catch (e) { return ''; }
+}
+
 const HINTWORDS = {
   'counting-clear': 'Counting. A number here already has all its mines accounted for, so the rest of what it touches is clear.',
   'counting-full': 'Counting. A number here has only just enough covered cells left to hold its mines.',
@@ -3464,7 +3585,7 @@ function askHint() {
         : (h.why ? ' What breaks: ' + h.why + '.' : ''));
   } else {
     el('noteHint').textContent = hintLevel >= 2
-      ? HINTWORDS[h.rule] || HINTIDLE
+      ? saySpecific(known, h) || HINTWORDS[h.rule] || HINTIDLE
       : 'Marked in gold: the clues to work from — the cells they settle may lie ' +
         'elsewhere. Ask again to be told how.';
   }
