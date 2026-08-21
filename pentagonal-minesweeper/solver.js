@@ -1303,7 +1303,9 @@ function rulesetMoves(known, find) {
           for (const c of g) mark(c, 'safe', 'reach-pocket', g);
         for (const g of withM)
           for (const u of cutCells(known, g, x => id[x] === id[g[0]], adj, isM, isM, 'split'))
-            mark(u, 'mine', 'reach-cut', [...adj(u)]);
+            // only the mines that have to get out through here: the safe ground
+            // beside the cell is what they walk on, not what the player must see
+            mark(u, 'mine', 'reach-cut', [...adj(u)].filter(isM));
       }
     }
 
@@ -3395,6 +3397,154 @@ const pathAt = (known, i) => {
 const citedMines = (known, clues) => (clues || []).filter(c => known[c] === KNOWN_MINE);
 
 const HINTSAY = {
+  /* A bound of this kind is only half an argument: it says what the cells
+     around a mine can hold, and something else has to want them. Where exactly
+     one number on show still needs mines from the settled cell, that number is
+     named with its own figures. Which number the solver actually traded against
+     is not written down, but a lone candidate is almost always it, and what is
+     said of it is read straight off the board and true either way. */
+  partnerOf: (known, c) => {
+    const found = [];
+    for (const j of nbOf(c)) {
+      const con = hintCon(known, j);
+      if (con && con.owed > 0 && con.cells.includes(c)) found.push(con);
+    }
+    return found.length === 1 ? found[0] : null;
+  },
+
+  /* The path laws as a count over named cells, which is the form they trade in.
+     A closed path has no ends, so every mine on one has exactly two neighbours
+     and the count is exact; an open path may end anywhere, so it only has a
+     ceiling. Saying "at most" for a loop would be true and weak. */
+  pathCount: (known, h) => {
+    const m = h.clues[0];
+    if (m === undefined || known[m] !== KNOWN_MINE) return '';
+    let has = 0, free = 0;
+    for (const j of edgOf(m)) {
+      if (known[j] === KNOWN_MINE) has++;
+      else if (known[j] === UNKNOWN) free++;
+    }
+    if (!free || has > 2) return '';
+    const room = 2 - has;
+    const cells = plural(free, 'covered cell', 'covered cells');
+    const first = h.rule === 'loop-count'
+      ? 'The loop. Every mine on a closed path has exactly two neighbours on it, and ' +
+        'this one has ' + has + ' so far, so exactly ' + plural(room, 'more', 'more') +
+        ' must come from the ' + cells + ' around it. '
+      : 'The path. The mine here already has ' +
+        plural(has, 'neighbour', 'neighbours') + ' on the path and may have two in all, ' +
+        'so the ' + cells + ' around it can hold ' +
+        (room === 0 ? 'no more mines at all'
+         : 'at most ' + plural(room, 'more mine', 'more mines')) +
+        (free > 1 ? ' between them' : '') + '. ';
+    const p = HINTSAY.partnerOf(known, h.cells[0]);
+    if (!p)
+      return first + 'Weighed against what the numbers watching those same cells still ' +
+        'need, that settles this cell.';
+    return first + 'The ' + p.n + ' still needs ' + plural(p.owed, 'mine', 'mines') +
+      ' from the ' + plural(p.cells.length, 'cell', 'cells') + ' it touches, and the two ' +
+      'together leave this cell ' + (h.kind === 'mine' ? 'a mine.' : 'clear.');
+  },
+
+  /* The priced rules, each saying what it costs and what there is to pay
+     with, in one sentence rather than a general one with a figure hung off
+     the end. What none of them does is name the price itself: the rule walked
+     a route to find it and walking a second one here could easily arrive at a
+     different number, which would be a reason invented after the fact. Saying
+     it costs more than what is left is what the rule actually established. */
+  'reach-budget': (known, h) => {
+    const left = minesLeft(known);
+    if (!left) return '';
+    return 'The pieces. Reaching this cell from the mines already found would cost ' +
+      'more than the ' + plural(left, 'mine', 'mines') + ' still to be placed, so the ' +
+      'group cannot stretch to it ' + DASH + ' this cell is clear.';
+  },
+  'piece-budget': (known, h) => {
+    const left = minesLeft(known);
+    if (!left) return '';
+    return 'The pieces. The mines must all end in one piece, and joining the pieces ' +
+      'already showing would take more than the ' + plural(left, 'mine', 'mines') +
+      ' still to be placed. A mine here would leave one piece too many, so it is clear.';
+  },
+  'two-far': (known, h) => {
+    const left = minesLeft(known);
+    if (!left) return '';
+    return 'The two groups, priced. Two fragments already stand further apart than the ' +
+      plural(left, 'mine', 'mines') + ' still to be placed could ever join, so those two ' +
+      'are the groups; and reaching this cell from either would cost more than that ' +
+      'again, so no mine can stand here.';
+  },
+  /* The toll is a number's own reckoning, not the board's: what it can pay is
+     the mines it still owes, so that is the figure to give. */
+  'reach-toll': (known, h) => {
+    const c = hintCon(known, h.clues[0]);
+    if (!c) return '';
+    return 'The chain, priced. A mine here could only chain out through more of the ' +
+      c.n + '\u2019s cells than the ' + plural(c.owed, 'mine', 'mines') + ' it still owes ' +
+      'can pay for, so no chain can carry it ' + DASH + ' this cell is clear.';
+  },
+  'reach-way': (known, h) => {
+    const c = hintCon(known, h.clues[0]);
+    if (!c) return '';
+    return 'The one affordable way. Of every route the pieces could still join by, the ' +
+      'ones the ' + c.n + ' can pay for with the ' + plural(c.owed, 'mine', 'mines') +
+      ' it still owes all pass through here ' + DASH + ' so the chain does too, and this ' +
+      'cell is a mine.';
+  },
+  'reach-fare': (known, h) => {
+    const left = minesLeft(known);
+    if (!left) return '';
+    return 'The fare. Every way the pieces could still join for the ' +
+      plural(left, 'mine', 'mines') + ' left to spend runs through this cell, so a mine ' +
+      'stands here.';
+  },
+
+  /* Two cells such that losing both would strand a piece, which is a floor of
+     one mine over the pair. The old wording described the search that found
+     them rather than what they amount to. */
+  'reach-need': (known, h) => {
+    const held = citedMines(known, h.clues);
+    if (!held.length) return '';
+    const seen = new Set();
+    let pieces = 0;
+    for (const m of held) {
+      if (seen.has(m)) continue;
+      pieces++;
+      const st = [m];
+      seen.add(m);
+      while (st.length) {
+        const v = st.pop();
+        for (const j of joinAdj()(v))
+          if (known[j] === KNOWN_MINE && !seen.has(j)) { seen.add(j); st.push(j); }
+      }
+    }
+    if (pieces < 2) return '';
+    return 'Connectedness. The mines found stand in ' + plural(pieces, 'piece', 'pieces') +
+      ' and the law will have them all in one, so a road has to be built between them. ' +
+      'Only two cells are left that such a road can use, so at least one of the two holds ' +
+      'a mine ' + DASH + ' and weighed against what the numbers watching them allow, that ' +
+      'settles this cell.';
+  },
+  /* The crowding law written as a count over named cells, which is the only
+     form it can be traded against a number in. The old wording described that
+     machinery instead of the position, and read as machinery. */
+  'deg-count': (known, h) => {
+    const m = h.clues[0];
+    const cap = degCap();
+    if (m === undefined || known[m] !== KNOWN_MINE || cap >= 99) return '';
+    const has = crowdAt(known, m);
+    let free = 0;
+    for (const j of corOf(m)) if (known[j] === UNKNOWN) free++;
+    if (!free || has > cap) return '';
+    const room = cap - has;
+    return 'Sparse. The mine here already touches ' +
+      plural(has, 'other mine', 'other mines') + ' and the law allows it ' + cap +
+      ', so the ' + plural(free, 'covered cell', 'covered cells') + ' around it can hold ' +
+      (room === 0 ? 'no more mines at all'
+       : 'at most ' + plural(room, 'more mine', 'more mines')) + (free > 1 ? ' between them' : '') +
+      '. Weighed against what the numbers watching those same cells still need, ' +
+      'that settles this cell.';
+  },
 
   /* ---- the rest of the mine counter ---- */
   'total-elsewhere-mined': (known, h) => {
@@ -3665,6 +3815,8 @@ const HINTSAY = {
       ' ' + DASH + ' ' + tail;
   }
 };
+for (const r of ['snake-count', 'loop-count']) HINTSAY[r] = HINTSAY.pathCount;
+delete HINTSAY.pathCount;
 
 /* Families that argue alike share a composer. The reach rules keep their own
    wording and only gain the figure they all turn on — how many mines are
@@ -3674,9 +3826,8 @@ const HINTSAY = {
 for (const r of ['group-count', 'cap-count']) HINTSAY[r] = HINTSAY.groupRoom;
 for (const r of ['group-ways', 'cap-ways', 'deg-ways', 'conn-ways', 'two-ways'])
   HINTSAY[r] = HINTSAY.everyWay;
-for (const r of ['reach-way', 'reach-budget', 'reach-toll', 'reach-fare', 'reach-need',
-                 'piece-budget', 'two-far'])
-  HINTSAY[r] = HINTSAY.budget;
+/* Nothing is left sharing the budget composer, every priced rule having been
+   given a sentence of its own; it stays for the next one that wants it. */
 delete HINTSAY.groupRoom;
 delete HINTSAY.everyWay;
 delete HINTSAY.budget;
@@ -3736,7 +3887,7 @@ const HINTWORDS = {
   'deg-grow': 'The huddle. This mine is short of the companions it must have, and only just enough covered cells are left to give them.',
   'deg-over': 'The crowding. A mine here would touch more mines than the law allows.',
   'deg-room': 'The huddle. There are too few cells around this one that could ever hold a mine for it to find the companions it would need.',
-  'deg-count': 'The huddle. How many companions this mine still owes, or has room for, is a count over the covered cells beside it — and a number watching the same cells trades against it.',
+  'deg-count': 'Sparse. What room a mine has left for more company is a count over the covered cells beside it — so many of them, and at most so many mines between them. Written that way it can be weighed against a number watching those same cells.',
   'suppose': 'The supposition. Grant the opposite for a moment — a mine here, or none — and follow the ordinary rules: they break against the board. Keep pressing to walk the story one step at a time.',
   'deg-ways': 'The crowding, laid out. Take a number — or the mine counter itself, once little ground is left — and lay its mines every way it allows; throw out the ways that crowd some mine past the law, or that leave one unable ever to find its companions, and every way left agrees about this cell. Two cells beside each other that each already touch their fill cannot both be mines, however little else connects them.',
   'reach-fare': 'Connectedness. Every covered cell a route runs through is a mine spent, and only one way of joining these pieces can be paid for with the mines that are left — it comes through here.',
