@@ -23,7 +23,13 @@ const BOXLINE = '#cfe7d6';     // the pale line drawn round a box of the repeat
 const BOXNUM = '#9dbca5';      // and the quieter tone its number is written in
 const ADJ = '#bfe3ff';         // the wash over the cells a hovered number counts
 const SPENT = '#5c7a62';       // a number whose flags are all planted
-const OVER = '#f87171';        // and one carrying more flags than it asked for
+/* A number carrying more flags than it asked for. Colouring the digit alone
+   was no use: the palette already writes every 3 in that same red, so an
+   over-flagged 3 looked exactly like an ordinary one. It gets the cell
+   instead — a red wash under it and a rim round it, with the digit in white
+   above — which no ordinary number ever wears. */
+const OVER = '#ff5c5c';        // the rim and wash under an over-flagged number
+const OVERINK = '#fff4f4';     // and the digit written over it
 // how crowded a flag is under Sparse: comfortable, at the cap, over it
 const CROWD = ['#4ade80', '#facc15', '#f87171'];
 // one green per pentagon shape, used only when asked for
@@ -398,6 +404,25 @@ function draw() {
      asking this of: a covered cell counts nothing yet, a blank has already
      opened everything it touches, and a muted one is keeping its number to
      itself. */
+  /* Laid under the cells' own numbers so the digit still reads on top. Only
+     ever the player's own miscount, never anything about the board. */
+  if (quotaOn && !over) {
+    ctx.save();
+    for (let i = 0; i < n; i++) {
+      if (state[i] !== OPEN || muted[i] || !count[i]) continue;
+      if (flagsAround(i) <= count[i]) continue;
+      ctx.globalAlpha = 0.3;
+      ctx.fillStyle = OVER;
+      ctx.fill(cellPath[i]);
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = OVER;
+      ctx.lineWidth = cellPitch * 0.09;
+      ctx.stroke(cellPath[i]);
+    }
+    ctx.restore();
+    ctx.lineWidth = cellPitch * 0.06;
+  }
+
   if (adjOn && hover >= 0 && !over &&
       state[hover] === OPEN && !muted[hover] && count[hover]) {
     ctx.save();
@@ -479,11 +504,20 @@ function draw() {
          the law as you plant. */
       if (hueOn && degCap() < 99 && !over) {
         const k = flagsAround(i);
-        ctx.font = '600 ' + (rad * 0.85).toFixed(1) + 'px "Segoe UI", sans-serif';
+        /* Big enough to read at a glance and haloed in the board's own line
+           colour, since it sits over the flag, the pole and the cell by turns
+           and was illegible against all three at subscript size. */
+        const size = rad * 1.25;
+        ctx.font = '700 ' + size.toFixed(1) + 'px "Segoe UI", sans-serif';
+        ctx.lineJoin = 'round';
+        ctx.lineWidth = Math.max(2, size * 0.42);
+        ctx.strokeStyle = '#0d1a0f';
         ctx.fillStyle = CROWD[k < degCap() ? 0 : k === degCap() ? 1 : 2];
         ctx.textAlign = 'left';
-        ctx.fillText(k, x + rad * 0.5, y + rad * 0.75);
+        ctx.strokeText(k, x + rad * 0.55, y + rad * 0.7);
+        ctx.fillText(k, x + rad * 0.55, y + rad * 0.7);
         ctx.textAlign = 'center';
+        ctx.lineWidth = cellPitch * 0.06;
       }
       if (over && !mine[i]) drawCross(x, y, rad * 1.3);
     } else if (mine[i]) {
@@ -499,7 +533,7 @@ function draw() {
       const planted = quotaOn && !over ? flagsAround(i) : -1;
       ctx.fillStyle = planted < 0 || planted < count[i]
         ? NUMS[Math.min(count[i], NUMS.length - 1)]
-        : planted > count[i] ? OVER : SPENT;
+        : planted > count[i] ? OVERINK : SPENT;
       ctx.fillText(count[i], x, y);
     }
   }
