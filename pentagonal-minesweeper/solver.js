@@ -3365,7 +3365,165 @@ const areClear = k => (k === 1 ? 'it is clear'
 const itsMines = k => (k === 1 ? 'its mine'
                      : k === 2 ? 'both of its mines' : 'all ' + k + ' of its mines');
 
+/* A few more readings of a position, for the composers below. Each is only
+   ever used to describe a deduction already made and checked. */
+const minesLeft = known => {
+  let f = 0;
+  for (let i = 0; i < n; i++) if (known[i] === KNOWN_MINE) f++;
+  return mines - f;
+};
+const coveredLeft = known => {
+  let c = 0;
+  for (let i = 0; i < n; i++) if (known[i] === UNKNOWN) c++;
+  return c;
+};
+// mines against a cell, by the ring the crowding law reads
+const crowdAt = (known, i) => {
+  let k = 0;
+  for (const j of corOf(i)) if (known[j] === KNOWN_MINE) k++;
+  return k;
+};
+// mines against a cell along edges, which is what a path counts
+const pathAt = (known, i) => {
+  let k = 0;
+  for (const j of edgOf(i)) if (known[j] === KNOWN_MINE) k++;
+  return k;
+};
+// the found mines among a rule's cited cells
+const citedMines = (known, clues) => (clues || []).filter(c => known[c] === KNOWN_MINE);
+
 const HINTSAY = {
+
+  /* ---- the mine counter ---- */
+  'total-none': (known, h) => {
+    if (minesLeft(known) !== 0) return '';
+    const k = h.cells.length;
+    return 'The mine counter. All ' + mines + ' mines are flagged, so ' +
+      (k === 1 ? 'the one cell' : 'all ' + k + ' cells') + ' still covered ' +
+      isAre(k) + ' clear.';
+  },
+  'total-all': (known, h) => {
+    const left = minesLeft(known), cov = coveredLeft(known);
+    if (left !== cov || !left) return '';
+    return 'The mine counter. ' + plural(left, 'mine is', 'mines are') +
+      ' still to be found and only ' + plural(cov, 'covered cell', 'covered cells') +
+      ' left, so every one of them holds a mine.';
+  },
+  'total-elsewhere-clear': (known, h) => {
+    const c = hintCon(known, h.clues[0]);
+    const left = minesLeft(known);
+    if (!c || !left || c.owed !== left) return '';
+    const k = h.cells.length;
+    return 'The mine counter. The ' + c.n + ' still needs ' +
+      plural(c.owed, 'mine', 'mines') + ', and that is every mine left on the board ' +
+      DASH + ' so they all lie beside it, and ' +
+      (k === 1 ? 'the one cell' : 'all ' + k + ' cells') + ' elsewhere ' +
+      isAre(k) + ' clear.';
+  },
+
+  /* ---- crowding ---- */
+  'deg-full': (known, h) => {
+    const m = h.clues[0];
+    if (m === undefined || known[m] !== KNOWN_MINE) return '';
+    const k = crowdAt(known, m);
+    if (k < degCap()) return '';
+    return 'Sparse. The mine here already touches ' +
+      plural(k, 'other mine', 'other mines') + ', which is all the law allows it, ' +
+      'so nothing more may come against it and this cell is clear.';
+  },
+  'deg-over': (known, h) => {
+    const c = h.cells[0];
+    const k = crowdAt(known, c);
+    if (k <= degCap()) return '';
+    return 'Sparse. A mine here would stand against ' +
+      plural(k, 'other mine', 'other mines') + ', past the ' + degCap() +
+      ' the law allows, so this cell is clear.';
+  },
+
+  /* ---- groups and caps ---- */
+  'group-full': (known, h) => {
+    const g = citedMines(known, h.clues);
+    if (!g.length || groupSize() !== g.length) return '';
+    return 'The groups. The company beside this cell already holds ' +
+      plural(g.length, 'mine', 'mines') + ', a whole group, so no mine may join it ' +
+      DASH + ' this cell is clear.';
+  },
+  'group-grow': (known, h) => {
+    const g = citedMines(known, h.clues);
+    if (!g.length || !groupSize() || g.length >= groupSize()) return '';
+    return 'The groups. The company here holds ' + plural(g.length, 'mine', 'mines') +
+      ' and a group takes ' + groupSize() + ', and this is the only cell it can still ' +
+      'grow into ' + DASH + ' so it is a mine.';
+  },
+  'group-big': (known, h) => {
+    const g = citedMines(known, h.clues);
+    if (!g.length || !groupSize()) return '';
+    return 'The groups. A mine here would join companies coming to ' +
+      plural(g.length + 1, 'mine', 'mines') + ', more than the ' + groupSize() +
+      ' a group may hold, so this cell is clear.';
+  },
+  'cap-over': (known, h) => {
+    const g = citedMines(known, h.clues);
+    if (!g.length || !groupCap()) return '';
+    return 'The cap. A mine here would join companies coming to ' +
+      plural(g.length + 1, 'mine', 'mines') + ', past the ' + groupCap() +
+      ' the law allows in one, so this cell is clear.';
+  },
+
+  /* ---- the boxes ---- */
+  box: (known, h) => {
+    const g = h.clues || [];
+    if (!g.length || !boxOf || boxOf[g[0]] === undefined) return '';
+    const b = boxOf[g[0]];
+    if (b < 0) return '';
+    let held = 0, left = 0;
+    for (const c of g) {
+      if (known[c] === KNOWN_MINE) held++;
+      else if (known[c] === UNKNOWN) left++;
+    }
+    if (!left) return '';
+    const r = boxRange(b);
+    const lo = r[0], hi = r[1];
+    /* The bound a box shows can be loosened by the dealing, so the range read
+       back here is not always the one the rule leant on. Rather than assert a
+       reason that may not be the true one, the conclusion is checked against
+       the range first, and where it does not follow the general wording
+       stands. Without this the box was told to say that two mines among three
+       remaining cells made all three mines, which is not so. */
+    if (h.kind === 'safe' ? !(held >= hi) : !(lo - held === left)) return '';
+    const none = hi === 0;
+    const says = none ? 'holds no mines at all'
+      : lo === hi ? 'holds ' + plural(lo, 'mine', 'mines')
+      : 'holds between ' + lo + ' and ' + plural(hi, 'mine', 'mines');
+    const sofar = held === 0 ? 'none of them flagged yet'
+      : held === 1 ? 'one of them flagged already'
+      : held + ' of them flagged already';
+    if (h.kind === 'safe')
+      return 'The box. This box ' + says +
+        (none ? '' : ' and has ' + sofar) + ', so ' +
+        (left === 1 ? 'the one cell it has left is clear.'
+         : left === 2 ? 'both cells it has left are clear.'
+         : 'all ' + left + ' cells it has left are clear.');
+    return 'The box. This box ' + says + ' with ' + sofar + ', and only ' +
+      plural(left, 'cell', 'cells') + ' remain ' + DASH + ' so ' + areMines(left) + '.';
+  },
+
+  /* ---- the paths ---- */
+  path: (known, h) => {
+    const m = h.clues[0];
+    if (m === undefined || known[m] !== KNOWN_MINE) return '';
+    const k = pathAt(known, m);
+    if (h.kind === 'safe') {
+      if (k < 2) return '';
+      return 'The path. The mine here already has ' +
+        plural(k, 'neighbour', 'neighbours') + ' on the path, which is as many as a ' +
+        'path may run through, so every other cell against it is clear.';
+    }
+    return 'The path. The mine here has ' + plural(k, 'neighbour', 'neighbours') +
+      ' and the path has to carry on through it, with only this cell left to carry ' +
+      'on into ' + DASH + ' so it is a mine.';
+  },
+
   'two-last': (known, h) => {
     const frags = twoFragments(known);
     let held = 0;
@@ -3456,6 +3614,15 @@ const HINTSAY = {
       ' ' + DASH + ' ' + tail;
   }
 };
+
+/* The boxes all argue the same way and so does either path law, so one
+   composer answers for each family rather than four copies of a sentence. */
+for (const r of ['box-exact', 'box-count', 'box-full', 'box-short'])
+  HINTSAY[r] = HINTSAY.box;
+for (const r of ['snake-body', 'snake-end', 'loop-degree'])
+  HINTSAY[r] = HINTSAY.path;
+delete HINTSAY.box;
+delete HINTSAY.path;
 
 function saySpecific(known, h) {
   const f = HINTSAY[h.rule];
