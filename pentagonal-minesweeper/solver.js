@@ -3397,20 +3397,74 @@ const pathAt = (known, i) => {
 const citedMines = (known, clues) => (clues || []).filter(c => known[c] === KNOWN_MINE);
 
 const HINTSAY = {
-  /* A bound of this kind is only half an argument: it says what the cells
-     around a mine can hold, and something else has to want them. Where exactly
-     one number on show still needs mines from the settled cell, that number is
-     named with its own figures. Which number the solver actually traded against
-     is not written down, but a lone candidate is almost always it, and what is
-     said of it is read straight off the board and true either way. */
-  partnerOf: (known, c) => {
+  /* The trade behind a count rule, found by checking rather than guessing.
+
+     A bound says the covered cells round a mine can hold at most so many
+     more; a number wanting some of those same cells is the other half of the
+     argument. The first version of this named a number only when it was the
+     lone one watching the settled cell, and went vague the moment two did —
+     needlessly, since which number carries the deduction is arithmetic, not
+     preference. Here every number on show is tested against the bound:
+
+     to force a mine outside the ring, the number must owe more than the ring
+     can give it even filled to its cap, with the balance falling on exactly
+     the cells beyond — owed less what the shared cells could hold, no
+     smaller than the count of cells outside;
+
+     to clear a ring cell, the number must owe so much that the ring's whole
+     allowance is spoken for inside the shared cells — owed less the cells
+     it holds beyond the ring, no smaller than the room — and the settled
+     cell must lie in the ring but not among that number's own cells.
+
+     Only a number that passes is named, and only when exactly one does. What
+     is said of it is then a checked fact about the board, not a guess about
+     which trade the solver happened to make. */
+  tradeOf: (known, c, ring, room, kind) => {
+    const inB = new Set(ring);
     const found = [];
-    for (const j of nbOf(c)) {
+    for (let j = 0; j < n; j++) {
       const con = hintCon(known, j);
-      if (con && con.owed > 0 && con.cells.includes(c)) found.push(con);
+      if (!con || con.owed <= 0) continue;
+      const shared = con.cells.filter(x => inB.has(x));
+      if (!shared.length) continue;
+      const outside = con.cells.filter(x => !inB.has(x));
+      if (kind === 'mine') {
+        if (!outside.includes(c)) continue;
+        const most = Math.min(room, shared.length);
+        if (con.owed - most >= outside.length)
+          found.push({ con, shared: shared.length, outside: outside.length, most });
+      } else {
+        if (!inB.has(c) || con.cells.includes(c)) continue;
+        if (con.owed - outside.length >= room && room > 0)
+          found.push({ con, shared: shared.length, outside: outside.length, most: room });
+      }
     }
     return found.length === 1 ? found[0] : null;
   },
+
+  /* And the sentence it makes, shared by the crowding and path counts. */
+  tradeWords: (t, kind) => {
+    const w = t.con.owed, k = t.con.cells.length;
+    if (kind === 'mine') {
+      const must = w - t.most;
+      return 'The ' + t.con.n + ' also needs ' + plural(w, 'mine', 'mines') +
+        ' from the ' + plural(k, 'cell', 'cells') + ' it touches, and ' + t.shared +
+        ' of those lie among them ' + String.fromCharCode(0x2014) + ' so at most ' + t.most +
+        ' of its mines can be there, and ' +
+        (t.outside === 1
+          ? 'the rest falls on its one cell beyond: this cell is a mine.'
+          : 'at least ' + plural(must, 'mine falls', 'mines fall') + ' on its ' +
+            t.outside + ' cells beyond ' + String.fromCharCode(0x2014) + ' every one a mine.');
+    }
+    return 'The ' + t.con.n + ' still needs ' + plural(w, 'mine', 'mines') +
+      ' from the ' + plural(k, 'cell', 'cells') + ' it touches, and ' +
+      (t.outside === 0 ? 'every one of those lies among them '
+       : t.outside === 1 ? 'only one of those lies beyond them '
+       : 'only ' + t.outside + ' of those lie beyond them ') + String.fromCharCode(0x2014) +
+      ' so every mine still allowed here is spoken for by the ' + t.con.n +
+      '\u2019s cells, and this cell, which it does not touch, is clear.';
+  },
+
 
   /* The path laws as a count over named cells, which is the form they trade in.
      A closed path has no ends, so every mine on one has exactly two neighbours
@@ -3437,13 +3491,12 @@ const HINTSAY = {
         (room === 0 ? 'no more mines at all'
          : 'at most ' + plural(room, 'more mine', 'more mines')) +
         (free > 1 ? ' between them' : '') + '. ';
-    const p = HINTSAY.partnerOf(known, h.cells[0]);
-    if (!p)
+    const ringP = [...edgOf(m)].filter(j => known[j] === UNKNOWN);
+    const t = HINTSAY.tradeOf(known, h.cells[0], ringP, room, h.kind);
+    if (!t)
       return first + 'Weighed against what the numbers watching those same cells still ' +
         'need, that settles this cell.';
-    return first + 'The ' + p.n + ' still needs ' + plural(p.owed, 'mine', 'mines') +
-      ' from the ' + plural(p.cells.length, 'cell', 'cells') + ' it touches, and the two ' +
-      'together leave this cell ' + (h.kind === 'mine' ? 'a mine.' : 'clear.');
+    return first + HINTSAY.tradeWords(t, h.kind);
   },
 
   /* The priced rules, each saying what it costs and what there is to pay
@@ -3543,14 +3596,12 @@ const HINTSAY = {
       (room === 0 ? 'no more mines at all'
        : 'at most ' + plural(room, 'more mine', 'more mines')) + (free > 1 ? ' between them' : '') +
       '. ';
-    // the trade made in front of the player, where one number plainly wants the cell
-    const p = HINTSAY.partnerOf(known, h.cells[0]);
-    if (!p)
+    const ring = [...corOf(m)].filter(j => known[j] === UNKNOWN);
+    const t = HINTSAY.tradeOf(known, h.cells[0], ring, room, h.kind);
+    if (!t)
       return first + 'Weighed against what the numbers watching those same cells still ' +
         'need, that settles this cell.';
-    return first + 'The ' + p.n + ' still needs ' + plural(p.owed, 'mine', 'mines') +
-      ' from the ' + plural(p.cells.length, 'cell', 'cells') + ' it touches, and the two ' +
-      'together leave this cell ' + (h.kind === 'mine' ? 'a mine.' : 'clear.');
+    return first + HINTSAY.tradeWords(t, h.kind);
   },
 
   /* ---- the rest of the mine counter ---- */
