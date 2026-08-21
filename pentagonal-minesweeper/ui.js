@@ -28,10 +28,17 @@ const SPENT = '#5c7a62';       // a number whose flags are all planted
    over-flagged 3 looked exactly like an ordinary one. It gets the cell
    instead — a red wash under it and a rim round it, with the digit in white
    above — which no ordinary number ever wears. */
-const OVER = '#ff5c5c';        // the rim and wash under an over-flagged number
+const OVER = '#ff2d2d';        // the rim and wash under an over-flagged number
 const OVERINK = '#fff4f4';     // and the digit written over it
-// how crowded a flag is under Sparse: comfortable, at the cap, over it
-const CROWD = ['#4ade80', '#facc15', '#f87171'];
+/* How crowded a flag is under Sparse: room, at the cap, over it. Deliberately
+   not the palette the numbers use. The first set drawn here took its green
+   from the 2, its amber from the hint gold and its red from the 3 — the same
+   values exactly, so a count beside a flag read as a tile's number. These sit
+   a measured distance off every one of them: the nearest clash is fourteen
+   for the mint, thirteen for the lemon and twelve for the red, where before
+   all three were nought. The red is the one the over-flagged cell wears, both
+   meaning the same thing — a law the flags as placed have broken. */
+const CROWD = ['#a7f3d0', '#fef08a', '#ff2d2d'];
 // one green per pentagon shape, used only when asked for
 const COVERS = ['#35603d', '#2c5a4c', '#3d5f33', '#2f5560'];
 const COVER_HI = '#4b8557';
