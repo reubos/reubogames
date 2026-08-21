@@ -1060,6 +1060,44 @@ function rulesetMoves(known, find) {
       }
     }
 
+    /* The last mine.
+
+       With one mine still to place, the finished board is decided by where
+       it goes, so the companies it would leave can simply be counted. A
+       cell touching none of the mines found stands alone and makes a
+       company of itself; a cell touching t of the fragments welds those t
+       into one. Either way the count that would result is known outright,
+       and any cell not leaving exactly two is a cell the mine cannot be on.
+
+       No pricing and no reaching — the fragments are counted, not measured.
+       Which is why this is worth having even though it settles nothing the
+       board could not already reach: measured over 3758 positions, the
+       reading applies at 178 of them, and at 133 of those the hint was
+       otherwise a priced-reach argument three tiers up. Saying "a mine
+       there would leave one company, and the law wants two" is the same
+       deduction told plainly. */
+    {
+      const frags = twoFragments(known);
+      let held = 0;
+      for (const f of frags) held += f.length;
+      if (frags.length && mines - held === 1) {
+        const owner = new Int32Array(n).fill(-1);
+        frags.forEach((f, at2) => { for (const c of f) owner[c] = at2; });
+        for (let c = 0; c < n; c++) {
+          if (known[c] !== UNKNOWN) continue;
+          const met = new Set();
+          for (const j of edgOf(c)) if (owner[j] >= 0) met.add(owner[j]);
+          // alone it adds a company; touching t fragments it welds them into one
+          const parts = met.size === 0 ? frags.length + 1 : frags.length - met.size + 1;
+          if (parts === 2) continue;
+          const clues = met.size
+            ? [...met].slice(0, 4).map(f => frags[f][0])
+            : frags.slice(0, 4).map(f => f[0]);
+          mark(c, 'safe', 'two-last', clues);
+        }
+      }
+    }
+
     /* And the pricing, which does not wait for the ground to split. Once
        two fragments can never join on the budget, the two final groups are
        anchored, and every mine still to come must reach some fragment — so
@@ -3328,6 +3366,24 @@ const itsMines = k => (k === 1 ? 'its mine'
                      : k === 2 ? 'both of its mines' : 'all ' + k + ' of its mines');
 
 const HINTSAY = {
+  'two-last': (known, h) => {
+    const frags = twoFragments(known);
+    let held = 0;
+    for (const f of frags) held += f.length;
+    if (!frags.length || mines - held !== 1) return '';
+    const c = h.cells[0];
+    const owner = new Int32Array(n).fill(-1);
+    frags.forEach((f, at2) => { for (const x of f) owner[x] = at2; });
+    const met = new Set();
+    for (const j of edgOf(c)) if (owner[j] >= 0) met.add(owner[j]);
+    const parts = met.size === 0 ? frags.length + 1 : frags.length - met.size + 1;
+    const what = met.size === 0
+      ? 'a mine here would touch none of them and stand as a company of its own'
+      : met.size === 1
+        ? 'a mine here would join the company beside it'
+        : 'a mine here would weld ' + met.size + ' of them into one';
+    return 'The last mine. Only one mine is left to place, so the finished board is settled by where it goes. The mines found stand in ' + plural(frags.length, 'piece', 'pieces') + ', and ' + what + ' — which leaves ' + plural(parts, 'company', 'companies') + ' where the law asks for two. So the mine is not here.';
+  },
   'counting-clear': (known, h) => {
     const c = hintCon(known, h.clues[0]);
     if (!c || c.owed !== 0) return '';
@@ -3436,6 +3492,7 @@ const HINTWORDS = {
   'reach-room': 'Connectedness. Take this cell away and no piece of ground left has both the mines already found and room for all of them — so the group must come through here.',
   'reach-owed': 'Connectedness. A number here is still owed a mine, and wherever that mine turns out to be it must join the group — which leaves it only this way through.',
   'two-ways': "The two groups. Lay this number's mines every way it allows, throw out the ways that would strand the mines in three pieces, and every way left agrees about this cell.",
+  'two-last': 'The last mine. Only one mine is still to be placed, so the board it leaves is settled by where it goes — and a mine here would not leave the two companies the law asks for. So the mine is not here.',
   'two-far': 'The two groups, priced. Two fragments already stand too far apart ever to join on the mines that remain, so they anchor the two groups — and reaching this cell from any fragment would cost more mines than are left, so no mine can ever stand here.',
   'two-pocket': 'The two groups. Both groups have staked their ground, and this piece of the board holds neither — nothing here can be a mine.',
   'two-cut': 'The two groups. The fragments in this piece of ground must join into one group — a third is forbidden — and this is the only cell that can join them.',

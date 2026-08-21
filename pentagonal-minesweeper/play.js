@@ -177,6 +177,7 @@ const TIER = {
   'deg-full': 1, 'deg-grow': 1, 'deg-over': 1, 'deg-room': 1,
   'box-exact': 1, 'box-full': 1, 'box-short': 1,
   'two-pocket': 2, 'two-cut': 2, 'two-ways': 3, 'two-far': 3,
+  'two-last': 2,
   'safe-cut': 2, 'safe-pocket': 2,
   'subset': 2, 'snake-touch': 2, 'loop-short': 2, 'loop-close': 2,
   'reach-pocket': 2, 'outside-pocket': 2, 'reach-cut': 2, 'outside-cut': 2,
