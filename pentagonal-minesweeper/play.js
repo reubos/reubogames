@@ -68,6 +68,14 @@ let adjOn = false;
    every flag the plain red it has always been where no law watches. */
 let hueOn = true;
 
+/* Numbers that have had their say. A number whose flags are all planted has
+   nothing left to tell anyone, and on a crowded board there are a great many
+   of them competing for the eye with the ones still owed something. Turned
+   on, a satisfied number goes quiet and grey, and one carrying more flags
+   than it asked for turns red — which is a mistake made visible rather than
+   a reading of the board, since the board never lies about its own counts. */
+let quotaOn = false;
+
 /* A mine is forgiven: it shows itself for a moment and is then covered over
    again, leaving the board as it was and the game running. This was once a
    setting and is now simply how the game is played — a board that ends at
@@ -340,6 +348,7 @@ function saveBoard() {
       across: builtAcross, down: builtDown, ask: +rngMines.value,
       size: sizeName, diff: difficulty, rule: ruleset,
       mute: muteOn, strict: strict, adj: adjOn, weaken: weakenOn, hue: hueOn,
+      quota: quotaOn,
       // the order the flags went down, so the companies keep their colours
       forder: flagOrder,
       miss: mistakes, hints: hintsUsed, lost: historyLost,
@@ -374,6 +383,7 @@ function restoreBoard(text) {
   strict = s.strict; adjOn = s.adj; sizeName = s.size; weakenOn = !!s.weaken;
   // a board saved before the switch existed was played with the colours on
   hueOn = s.hue === undefined ? true : !!s.hue;
+  quotaOn = !!s.quota;
   mistakes = s.miss || 0;
   hintsUsed = s.hints || 0;
   historyLost = s.miss === undefined || !!s.lost;
@@ -444,6 +454,7 @@ function paintToggles() {
   mark('[data-weaken]', x => !!x.dataset.weaken === weakenOn);
   mark('[data-adj]', x => !!x.dataset.adj === adjOn);
   mark('[data-hue]', x => !!x.dataset.hue === hueOn);
+  mark('[data-quota]', x => !!x.dataset.quota === quotaOn);
   selTiling.value = TILINGS.indexOf(tiling);
 }
 

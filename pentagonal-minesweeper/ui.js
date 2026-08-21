@@ -22,6 +22,10 @@ const HINT = '#facc15';        // the gold a hint marks its cells with
 const BOXLINE = '#cfe7d6';     // the pale line drawn round a box of the repeat
 const BOXNUM = '#9dbca5';      // and the quieter tone its number is written in
 const ADJ = '#bfe3ff';         // the wash over the cells a hovered number counts
+const SPENT = '#5c7a62';       // a number whose flags are all planted
+const OVER = '#f87171';        // and one carrying more flags than it asked for
+// how crowded a flag is under Sparse: comfortable, at the cap, over it
+const CROWD = ['#4ade80', '#facc15', '#f87171'];
 // one green per pentagon shape, used only when asked for
 const COVERS = ['#35603d', '#2c5a4c', '#3d5f33', '#2f5560'];
 const COVER_HI = '#4b8557';
@@ -176,6 +180,14 @@ function drawFlag(x, y, rad, ok) {
    chosen: on connected every flag is red only while all the flags form one
    joined group, since two tidy pairs on a connected board are still a board
    the law refuses. Returns null where no law watches the flags. */
+/* Flags planted around a cell. The numbers count every neighbour, and so
+   does the crowding law, so both read the same ring. */
+function flagsAround(i) {
+  let k = 0;
+  for (const j of nbOf(i)) if (state[j] === FLAG) k++;
+  return k;
+}
+
 function flagVerdicts() {
   if (ruleset === 'none') return null;
   const flagged = [];
@@ -460,6 +472,19 @@ function draw() {
     const rad = inr[i] * view.s * 0.55;
     if (state[i] === FLAG) {
       drawFlag(x, y, rad, verdicts ? verdicts.get(i) : undefined);
+      /* Under the crowding law a flag carries its own company as a subscript,
+         since what the law forbids is a mine keeping too much of it: green
+         while there is room, amber at the cap, red past it. It rides with the
+         flag colours, being the same kind of thing — the board answering for
+         the law as you plant. */
+      if (hueOn && degCap() < 99 && !over) {
+        const k = flagsAround(i);
+        ctx.font = '600 ' + (rad * 0.85).toFixed(1) + 'px "Segoe UI", sans-serif';
+        ctx.fillStyle = CROWD[k < degCap() ? 0 : k === degCap() ? 1 : 2];
+        ctx.textAlign = 'left';
+        ctx.fillText(k, x + rad * 0.5, y + rad * 0.75);
+        ctx.textAlign = 'center';
+      }
       if (over && !mine[i]) drawCross(x, y, rad * 1.3);
     } else if (mine[i]) {
       drawMine(x, y, rad * 0.62);
@@ -469,7 +494,12 @@ function draw() {
       ctx.fillText('?', x, y);
     } else if (count[i]) {
       ctx.font = '600 ' + (inr[i] * view.s * 1.15).toFixed(1) + 'px "Segoe UI", sans-serif';
-      ctx.fillStyle = NUMS[Math.min(count[i], NUMS.length - 1)];
+      /* A number with all its flags planted has nothing left to say and steps
+         back; one with too many has been given something it never asked for. */
+      const planted = quotaOn && !over ? flagsAround(i) : -1;
+      ctx.fillStyle = planted < 0 || planted < count[i]
+        ? NUMS[Math.min(count[i], NUMS.length - 1)]
+        : planted > count[i] ? OVER : SPENT;
       ctx.fillText(count[i], x, y);
     }
   }
@@ -868,6 +898,14 @@ for (const b of document.querySelectorAll('[data-strict]'))
     for (const x of document.querySelectorAll('[data-strict]')) x.classList.toggle('on', x === b);
     paintStatus();
     saveBoard();
+  };
+
+for (const b of document.querySelectorAll('[data-quota]'))
+  b.onclick = () => {
+    quotaOn = !!b.dataset.quota;
+    for (const x of document.querySelectorAll('[data-quota]')) x.classList.toggle('on', x === b);
+    saveBoard();
+    draw();
   };
 
 for (const b of document.querySelectorAll('[data-hue]'))
