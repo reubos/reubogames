@@ -3537,13 +3537,20 @@ const HINTSAY = {
     for (const j of corOf(m)) if (known[j] === UNKNOWN) free++;
     if (!free || has > cap) return '';
     const room = cap - has;
-    return 'Sparse. The mine here already touches ' +
+    const first = 'Sparse. The mine here already touches ' +
       plural(has, 'other mine', 'other mines') + ' and the law allows it ' + cap +
       ', so the ' + plural(free, 'covered cell', 'covered cells') + ' around it can hold ' +
       (room === 0 ? 'no more mines at all'
        : 'at most ' + plural(room, 'more mine', 'more mines')) + (free > 1 ? ' between them' : '') +
-      '. Weighed against what the numbers watching those same cells still need, ' +
-      'that settles this cell.';
+      '. ';
+    // the trade made in front of the player, where one number plainly wants the cell
+    const p = HINTSAY.partnerOf(known, h.cells[0]);
+    if (!p)
+      return first + 'Weighed against what the numbers watching those same cells still ' +
+        'need, that settles this cell.';
+    return first + 'The ' + p.n + ' still needs ' + plural(p.owed, 'mine', 'mines') +
+      ' from the ' + plural(p.cells.length, 'cell', 'cells') + ' it touches, and the two ' +
+      'together leave this cell ' + (h.kind === 'mine' ? 'a mine.' : 'clear.');
   },
 
   /* ---- the rest of the mine counter ---- */
