@@ -2884,22 +2884,38 @@ let hypoKnown = null;          // while set, the mask described above
    or a count already violated beyond saving, since the whole argument
    stands on the breaking being real. */
 function lawBroken(k2) {
-  for (const c of constraintsOf(k2))
-    if (c.left < 0 || c.left > c.cells.length)
-      return 'a number is owed more than its ground could ever give';
+  for (const c of constraintsOf(k2)) {
+    if (c.left > c.cells.length)
+      return c.from >= 0
+        ? 'the ' + count[c.from] + ' is owed ' + plural(c.left, 'more mine', 'more mines') +
+          (c.cells.length === 0 ? ' and has no covered cell left beside it'
+           : ' but has only ' + plural(c.cells.length, 'covered cell', 'covered cells') +
+             ' beside it')
+        : 'a count is owed ' + plural(c.left, 'mine', 'mines') + ' with only ' +
+          plural(c.cells.length, 'cell', 'cells') + ' to hold them';
+    if (c.left < 0)
+      return c.from >= 0
+        ? 'the ' + count[c.from] + ' ends up with ' + (count[c.from] - c.left) +
+          ' mines beside it though it asked for ' + count[c.from]
+        : 'a count ends up given more mines than it asked for';
+  }
   let found = 0, covered = 0;
   for (let i = 0; i < n; i++) {
     if (k2[i] === KNOWN_MINE) found++;
     else if (k2[i] === UNKNOWN) covered++;
   }
-  if (found > mines) return 'more mines than the board holds';
-  if (found + covered < mines) return 'too little ground is left for the mines that remain';
+  if (found > mines) return 'the board ends up holding ' + found + ' mines where it has only ' + mines;
+  if (found + covered < mines)
+    return 'the ' + plural(mines - found, 'mine', 'mines') + ' still owed ' +
+      (mines - found === 1 ? 'has ' : 'have ') +
+      (covered === 0 ? 'nowhere left to stand'
+       : 'only ' + plural(covered, 'covered cell', 'covered cells') + ' left to stand in');
   const dHi = degCap();
   if (dHi < 99) for (let i = 0; i < n; i++) {
     if (k2[i] !== KNOWN_MINE) continue;
     let d = 0;
     for (const j of corOf(i)) if (k2[j] === KNOWN_MINE) d++;
-    if (d > dHi) return 'a mine ends up more crowded than the law allows';
+    if (d > dHi) return 'a mine ends up touching ' + d + ' others where the law allows ' + dHi;
   }
   const gLim = groupSize() || groupCap();
   if (gLim) {
@@ -2912,14 +2928,14 @@ function lawBroken(k2) {
         const c = st.pop(); size++;
         for (const j of edgOf(c)) if (k2[j] === KNOWN_MINE && !seen[j]) { seen[j] = 1; st.push(j); }
       }
-      if (size > gLim) return 'a group grows past what the law allows';
+      if (size > gLim) return 'a group grows to ' + size + ' mines where the law allows ' + gLim;
     }
   }
   if (has('snake') || has('loop')) for (let i = 0; i < n; i++) {
     if (k2[i] !== KNOWN_MINE) continue;
     let d = 0;
     for (const j of edgOf(i)) if (k2[j] === KNOWN_MINE) d++;
-    if (d > 2) return 'the path would have to run alongside itself';
+    if (d > 2) return 'a mine ends up with ' + d + ' path neighbours, and a path can pass through only two';
   }
   if (has('connected')) {
     const adj = joinAdj();
@@ -2932,14 +2948,16 @@ function lawBroken(k2) {
         return 'mines end up cut off from one another';
       const home = comps.find(g => id[g[0]] === id[held[0]]);
       if (home && home.length < mines)
-        return 'the mines are shut in a piece too small to hold them all';
+        return 'the mines are shut in a piece of ' + plural(home.length, 'cell', 'cells') +
+          ', too small for the ' + mines + ' they number';
     }
   }
   if (has('twogroups')) {
     const open = i => k2[i] === UNKNOWN || k2[i] === KNOWN_MINE;
     const { comps } = compsOver(open, edgOf);
     const claimed = comps.filter(g => g.some(c => k2[c] === KNOWN_MINE));
-    if (claimed.length > 2) return 'the mines are split three ways with no road between';
+    if (claimed.length > 2)
+      return 'the mines are split ' + claimed.length + ' ways with no road between';
     /* How few companies the mines can still come down to.
 
        Every fragment must end inside one of exactly two companies, and two
@@ -3001,7 +3019,8 @@ function lawBroken(k2) {
       let room = 0;
       for (const g of claimed) room += g.length;
       if (room < mines)
-        return 'the claimed ground is too small for the mines that remain';
+        return 'the two groups\u2019 ground holds ' + plural(room, 'cell', 'cells') +
+          ', too small for the ' + mines + ' mines the board owes';
     }
   }
   if (has('safeconn')) {
@@ -3017,7 +3036,8 @@ function lawBroken(k2) {
     if (anchorId >= 0) {
       const home = comps.find(g => id[g[0]] === anchorId);
       if (home && home.length < n - mines)
-        return 'the safe ground is shut in a piece too small for every safe cell';
+        return 'the safe ground is shut in a piece of ' + plural(home.length, 'cell', 'cells') +
+          ' where ' + (n - mines) + ' must stand together';
     }
   }
   return '';
@@ -4109,7 +4129,7 @@ function askHint() {
     } else {
       hintClues = h.cells.slice();
       el('noteHint').textContent = 'And there it breaks: ' + h.why +
-        '. What was imagined cannot be, so this cell is ' +
+        '. What was imagined cannot be, so the supposition was false \u2014 this cell is ' +
         (h.kind === 'safe' ? 'clear.' : 'a mine.');
     }
   } else if (hintLevel >= 2 && h.rule === 'suppose') {
