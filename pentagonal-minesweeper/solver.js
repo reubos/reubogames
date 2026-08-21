@@ -2898,28 +2898,57 @@ function lawBroken(k2) {
     const { comps } = compsOver(open, edgOf);
     const claimed = comps.filter(g => g.some(c => k2[c] === KNOWN_MINE));
     if (claimed.length > 2) return 'the mines are split three ways with no road between';
-    /* The priced form of the same fact: three fragments pairwise beyond the
-       budget force three groups even inside one piece of ground. */
+    /* How few companies the mines can still come down to.
+
+       Every fragment must end inside one of exactly two companies, and two
+       fragments can only share a company if there is a way to join them that
+       the mines left over can pay for. So price every pair, keep the ones
+       that are still affordable, and see what the fragments fall into: two
+       fragments in different pieces of that reckoning can never share a
+       company, however the rest of the board goes. Three pieces or more and
+       the board is asking for three companies, which the law will not have.
+
+       This replaces an older reading that looked only for three fragments
+       pairwise beyond reach — a triangle. A triangle is one way to get three
+       pieces and not the only one, so the older reading missed the rest.
+
+       What it buys beyond saying no is the forcing, and that comes through
+       the supposing for nothing: imagine the one cell a merge has to pass
+       through is clear, and the pair it served falls out of reach, and the
+       pieces go from two to three. The board comes apart, so the cell is a
+       mine. Nothing has to be written to make a corridor compulsory — it is
+       enough to be able to say when a merge has become impossible. */
     {
       const frags = twoFragments(k2);
       if (frags.length >= 3) {
         let found = 0;
         for (const f of frags) found += f.length;
-        const apart = twoUnmergeables(k2, frags, mines - found, 12);
-        if (apart.length >= 3) {
-          const deg = new Map();
-          for (const [a2, b2] of apart) {
-            deg.set(a2, (deg.get(a2) || 0) + 1);
-            deg.set(b2, (deg.get(b2) || 0) + 1);
+        const budget = mines - found;
+        // a subset only, as ever: fewer fragments weighed can only quieten this
+        const take = frags.slice(0, 12);
+        const link = take.map(() => []);
+        for (let a2 = 0; a2 < take.length; a2++) {
+          const cost = twoCost(k2, take[a2]);
+          for (let b2 = a2 + 1; b2 < take.length; b2++) {
+            let best = Infinity;
+            for (const c of take[b2]) if (cost[c] >= 0 && cost[c] < best) best = cost[c];
+            if (best <= budget) { link[a2].push(b2); link[b2].push(a2); }
           }
-          const pairSet = new Set(apart.map(([a2, b2]) => a2 + ':' + b2));
-          for (const [a2, b2] of apart)
-            for (const [c2] of deg)
-              if (c2 !== a2 && c2 !== b2 &&
-                  (pairSet.has(Math.min(a2, c2) + ':' + Math.max(a2, c2))) &&
-                  (pairSet.has(Math.min(b2, c2) + ':' + Math.max(b2, c2))))
-                return 'three groups are forced, the mines that remain unable to join them';
         }
+        const seen = new Array(take.length).fill(false);
+        let pieces = 0;
+        for (let a2 = 0; a2 < take.length; a2++) {
+          if (seen[a2]) continue;
+          pieces++;
+          const st = [a2];
+          seen[a2] = true;
+          while (st.length) {
+            const v = st.pop();
+            for (const w of link[v]) if (!seen[w]) { seen[w] = true; st.push(w); }
+          }
+        }
+        if (pieces > 2)
+          return 'the companies stand in ' + pieces + ' pieces too far apart to come down to two';
       }
     }
     /* The room is only tellable once BOTH groups are placed. With a single
