@@ -3396,6 +3396,55 @@ const citedMines = (known, clues) => (clues || []).filter(c => known[c] === KNOW
 
 const HINTSAY = {
 
+  /* ---- the rest of the mine counter ---- */
+  'total-elsewhere-mined': (known, h) => {
+    const c = hintCon(known, h.clues[0]);
+    const left = minesLeft(known);
+    if (!c || !left) return '';
+    const owedElsewhere = left - c.owed;
+    if (owedElsewhere !== h.cells.length || owedElsewhere <= 0) return '';
+    return 'The mine counter. The ' + c.n + ' can hold at most ' +
+      plural(c.owed, 'more mine', 'more mines') + ', and ' +
+      plural(left, 'mine is', 'mines are') + ' left on the board, so at least ' +
+      plural(owedElsewhere, 'mine', 'mines') + ' must lie away from it ' + DASH +
+      ' and ' + (h.cells.length === 1 ? 'only one cell lies away from it, so it is a mine.'
+        : 'only ' + h.cells.length + ' cells do, so every one of them is a mine.');
+  },
+
+  /* ---- what a group has room for ---- */
+  groupRoom: (known, h) => {
+    const g = citedMines(known, h.clues);
+    const limit = groupCap() || groupSize();
+    if (!g.length || !limit || g.length > limit) return '';
+    const room = limit - g.length;
+    return 'The groups. The group beside this cell holds ' +
+      plural(g.length, 'mine', 'mines') + ' and may reach ' + limit + ', so the cells ' +
+      'around it can take ' +
+      (room === 0 ? 'no more between them' : 'at most ' + plural(room, 'more', 'more') +
+       ' between them') + ', which is what settles this cell.';
+  },
+
+  /* ---- laid out every way the law allows ---- */
+  everyWay: (known, h) => {
+    const c = hintCon(known, h.clues[0]);
+    if (!c) return '';
+    return 'Laid out. The ' + c.n + ' still needs ' + plural(c.owed, 'mine', 'mines') +
+      ' among the ' + plural(c.cells.length, 'cell', 'cells') + ' it touches. Lay them ' +
+      'every way it allows, throw out the ways that break the law, and every way ' +
+      'left over agrees that this cell is ' + (h.kind === 'mine' ? 'a mine.' : 'clear.');
+  },
+
+  /* ---- the chain, and what the mines left can pay for ---- */
+  budget: (known, h) => {
+    const left = minesLeft(known);
+    if (!left) return '';
+    const words = HINTWORDS[h.rule] || '';
+    if (!words) return '';
+    return words + '  There ' + (left === 1 ? 'is 1 mine' : 'are ' + left + ' mines') +
+      ' still to be found, which is what there is to pay with.';
+  },
+
+
   /* ---- the mine counter ---- */
   'total-none': (known, h) => {
     if (minesLeft(known) !== 0) return '';
@@ -3616,6 +3665,21 @@ const HINTSAY = {
       ' ' + DASH + ' ' + tail;
   }
 };
+
+/* Families that argue alike share a composer. The reach rules keep their own
+   wording and only gain the figure they all turn on — how many mines are
+   left to pay with — since restating their reasoning in figures would mean
+   re-deriving a route the rule already walked, and a reason invented after
+   the fact is worse than a general one. */
+for (const r of ['group-count', 'cap-count']) HINTSAY[r] = HINTSAY.groupRoom;
+for (const r of ['group-ways', 'cap-ways', 'deg-ways', 'conn-ways', 'two-ways'])
+  HINTSAY[r] = HINTSAY.everyWay;
+for (const r of ['reach-way', 'reach-budget', 'reach-toll', 'reach-fare', 'reach-need',
+                 'piece-budget', 'two-far'])
+  HINTSAY[r] = HINTSAY.budget;
+delete HINTSAY.groupRoom;
+delete HINTSAY.everyWay;
+delete HINTSAY.budget;
 
 /* The boxes all argue the same way and so does either path law, so one
    composer answers for each family rather than four copies of a sentence. */
