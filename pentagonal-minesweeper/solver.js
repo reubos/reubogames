@@ -1016,7 +1016,9 @@ function rulesetMoves(known, find) {
       const mn = near.filter(isM);
       const unk = near.filter(j2 => known[j2] === UNKNOWN);
       if (mn.length >= dHi)
-        for (const j2 of unk) mark(j2, 'safe', 'deg-full', [i2, ...mn]);
+        // only the crowded mine is lit: its neighbours are what crowds it, not
+      // what the player has to look at
+      for (const j2 of unk) mark(j2, 'safe', 'deg-full', [i2]);
       else if (unk.length && dLo - mn.length === unk.length)
         for (const j2 of unk) mark(j2, 'mine', 'deg-grow', [i2, ...mn]);
     }
@@ -2986,7 +2988,7 @@ function lawBroken(k2) {
           }
         }
         if (pieces > 2)
-          return 'the companies stand in ' + pieces + ' pieces too far apart to come down to two';
+          return 'the groups stand in ' + pieces + ' pieces too far apart to come down to two';
       }
     }
     /* The room is only tellable once BOTH groups are placed. With a single
@@ -3444,28 +3446,28 @@ const HINTSAY = {
   'group-full': (known, h) => {
     const g = citedMines(known, h.clues);
     if (!g.length || groupSize() !== g.length) return '';
-    return 'The groups. The company beside this cell already holds ' +
+    return 'The groups. The group beside this cell already holds ' +
       plural(g.length, 'mine', 'mines') + ', a whole group, so no mine may join it ' +
       DASH + ' this cell is clear.';
   },
   'group-grow': (known, h) => {
     const g = citedMines(known, h.clues);
     if (!g.length || !groupSize() || g.length >= groupSize()) return '';
-    return 'The groups. The company here holds ' + plural(g.length, 'mine', 'mines') +
+    return 'The groups. The group here holds ' + plural(g.length, 'mine', 'mines') +
       ' and a group takes ' + groupSize() + ', and this is the only cell it can still ' +
       'grow into ' + DASH + ' so it is a mine.';
   },
   'group-big': (known, h) => {
     const g = citedMines(known, h.clues);
     if (!g.length || !groupSize()) return '';
-    return 'The groups. A mine here would join companies coming to ' +
+    return 'The groups. A mine here would join groups coming to ' +
       plural(g.length + 1, 'mine', 'mines') + ', more than the ' + groupSize() +
       ' a group may hold, so this cell is clear.';
   },
   'cap-over': (known, h) => {
     const g = citedMines(known, h.clues);
     if (!g.length || !groupCap()) return '';
-    return 'The cap. A mine here would join companies coming to ' +
+    return 'The cap. A mine here would join groups coming to ' +
       plural(g.length + 1, 'mine', 'mines') + ', past the ' + groupCap() +
       ' the law allows in one, so this cell is clear.';
   },
@@ -3536,11 +3538,11 @@ const HINTSAY = {
     for (const j of edgOf(c)) if (owner[j] >= 0) met.add(owner[j]);
     const parts = met.size === 0 ? frags.length + 1 : frags.length - met.size + 1;
     const what = met.size === 0
-      ? 'a mine here would touch none of them and stand as a company of its own'
+      ? 'a mine here would touch none of them and stand as a group of its own'
       : met.size === 1
-        ? 'a mine here would join the company beside it'
+        ? 'a mine here would join the group beside it'
         : 'a mine here would weld ' + met.size + ' of them into one';
-    return 'The last mine. Only one mine is left to place, so the finished board is settled by where it goes. The mines found stand in ' + plural(frags.length, 'piece', 'pieces') + ', and ' + what + ' — which leaves ' + plural(parts, 'company', 'companies') + ' where the law asks for two. So the mine is not here.';
+    return 'The last mine. Only one mine is left to place, so the finished board is settled by where it goes. The mines found stand in ' + plural(frags.length, 'piece', 'pieces') + ', and ' + what + ' — which leaves ' + plural(parts, 'group', 'groups') + ' where the law asks for two. So the mine is not here.';
   },
   'counting-clear': (known, h) => {
     const c = hintCon(known, h.clues[0]);
@@ -3659,7 +3661,7 @@ const HINTWORDS = {
   'reach-room': 'Connectedness. Take this cell away and no piece of ground left has both the mines already found and room for all of them — so the group must come through here.',
   'reach-owed': 'Connectedness. A number here is still owed a mine, and wherever that mine turns out to be it must join the group — which leaves it only this way through.',
   'two-ways': "The two groups. Lay this number's mines every way it allows, throw out the ways that would strand the mines in three pieces, and every way left agrees about this cell.",
-  'two-last': 'The last mine. Only one mine is still to be placed, so the board it leaves is settled by where it goes — and a mine here would not leave the two companies the law asks for. So the mine is not here.',
+  'two-last': 'The last mine. Only one mine is still to be placed, so the board it leaves is settled by where it goes — and a mine here would not leave the two groups the law asks for. So the mine is not here.',
   'two-far': 'The two groups, priced. Two fragments already stand too far apart ever to join on the mines that remain, so they anchor the two groups — and reaching this cell from any fragment would cost more mines than are left, so no mine can ever stand here.',
   'two-pocket': 'The two groups. Both groups have staked their ground, and this piece of the board holds neither — nothing here can be a mine.',
   'two-cut': 'The two groups. The fragments in this piece of ground must join into one group — a third is forbidden — and this is the only cell that can join them.',
@@ -3785,12 +3787,19 @@ function askHint() {
   }
 
   const sig = opened + ':' + flags + ':' + h.rule + ':' + h.cells.join(',');
-  /* Most hints have two levels: the ground, then the reasoning. A
-     supposition with its story has more — one press per step of the
-     refutation, and a verdict at the end — and stays on the verdict once
-     it gets there. */
+  /* Hints come in three presses: the ground to look at, the reasoning, and
+     then the answer itself sketched onto the board. A supposition with a
+     story has more — one press per step of the refutation, and a verdict at
+     the end — and stays on the verdict once it gets there.
+
+     The sketch is drawn in the ghost marks the player already has for
+     supposing with, and that a walked supposition already uses to show its
+     imagined world: a faded flag where a mine must be, a pale ring where
+     the ground is clear. Nothing is settled by it. The marks are the
+     hint's own and go when the hint goes, so a player who wants them kept
+     still has to put them there. */
   const walked = h.rule === 'suppose' && h.steps && h.steps.length;
-  const top = walked ? 3 + h.steps.length : 2;
+  const top = walked ? 3 + h.steps.length : 3;
   hintLevel = sig === hintAt ? Math.min(top, hintLevel + 1) : 1;
   hintAt = sig;
   // asking the same hint again for its reasoning is the one ask, not two
@@ -3836,9 +3845,21 @@ function askHint() {
       (walked
         ? ' Keep pressing to walk the story one step at a time.'
         : (h.why ? ' What breaks: ' + h.why + '.' : ''));
+  } else if (hintLevel >= 3) {
+    // the answer itself, in the marks the player sketches suppositions with
+    hintGhosts = h.cells.map(c => ({ cell: c, kind: h.kind }));
+    const many = h.cells.length > 1;
+    el('noteHint').textContent =
+      (saySpecific(known, h) || HINTWORDS[h.rule] || HINTIDLE) + '  ' +
+      (h.kind === 'mine'
+        ? (many ? 'Sketched on the board: a ghost flag on each.'
+                : 'Sketched on the board: a ghost flag where the mine must be.')
+        : (many ? 'Sketched on the board: a ghost ring on each.'
+                : 'Sketched on the board: a ghost ring where the ground is clear.'));
   } else {
     el('noteHint').textContent = hintLevel >= 2
-      ? saySpecific(known, h) || HINTWORDS[h.rule] || HINTIDLE
+      ? (saySpecific(known, h) || HINTWORDS[h.rule] || HINTIDLE) +
+        '  Ask again to have it sketched on the board.'
       : 'Marked in gold: the clues to work from — the cells they settle may lie ' +
         'elsewhere. Ask again to be told how.';
   }
