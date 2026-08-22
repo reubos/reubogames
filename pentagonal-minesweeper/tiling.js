@@ -250,6 +250,18 @@ const T_k53 = fromCells({
          [3,0.0102,1.6193,1.5708],[3,0.5102,1.908,0.5236],[3,0.5102,2.4853,1.5708],
          [3,0.7988,-0.1694,0],[3,0.7988,0.8306,2.0944],[3,1.0875,0.3306,1.0472]] });
 
+/* The three classics, for players who want familiar ground. Each is a
+   one-line unit cell — the engine reads everything else off the snapped
+   topology, exactly as it does for the pentagons. */
+const T_square = fromCells({ v1: [1, 0], v2: [0, 1],
+  cell: [[4, 0, 0, Math.PI / 4]] });
+const T_hexTile = fromCells({ v1: [S3, 0], v2: [S3 / 2, 1.5],
+  cell: [[6, 0, 0, Math.PI / 6]] });
+const T_triTile = lattice(() => {
+  const up = reg(3, 0, 0, Math.PI / 2);
+  return [up, attach(up, 2, 3)];
+}, [1, 0], [0.5, S3 / 2]);
+
 const TILINGS = [
   /* Turned so its lattice stands square to the page. Four pentagons pinwheel
      about each right-angled corner and that group of four is the unit cell, so
@@ -311,7 +323,21 @@ const TILINGS = [
     note: 'Two prismatic pentagons to each Cairo one, from a 3-uniform parent — the prismatic ' +
           'pentagons here fall into two families that sit differently among their neighbours. Its ' +
           'rows run Cairo, prismatic, prismatic down the page, and each row stands a cell right ' +
-          'of the last and a little higher, so the board leans as it goes.' }
+          'of the last and a little higher, so the board leans as it goes.' },
+  { id: 'square', name: 'Square', src: T_square,
+    boxMul: [2, 2],          // one tile to its repeat, so a box of four is two by two
+    note: 'The classic. Every cell a square with eight neighbours counting the corners, ' +
+          'exactly as minesweeper has always been played.' },
+  { id: 'hex', name: 'Hexagonal', src: T_hexTile,
+    boxMul: [2, 2],
+    note: 'Hexagons in level rows, each row half a cell out of step with the last. Six ' +
+          'neighbours to a cell and no corner-touching at all: every neighbour shares an ' +
+          'edge, which makes the counting cleaner than the square and the ground tighter.' },
+  { id: 'tri', name: 'Triangular', src: T_triTile,
+    boxMul: [2, 1],          // two tiles to its repeat, so a box of four is two of them
+    note: 'Triangles pointing up and down by turns. Only three cells share an edge with ' +
+          'any cell, but twelve touch it in all, so the numbers run high and the corners ' +
+          'do most of the talking.' }
 ];
 
 /* =====================================================================

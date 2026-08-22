@@ -24,6 +24,78 @@
    So the group is grown towards whatever cell currently stands furthest
    from it, over and over: each pass throws a branch out into the emptiest
    ground left, and the emptiest ground is never empty for long. */
+/* Connected, with no edge-joined clump past the cap. The plain connected
+   placer reaches by corner paths, and a corner path is free to run edge to
+   edge — under the capped law that lays long welded runs the law refuses, and
+   a laying rejected after the fact is a laying wasted. So the growth here
+   checks as it lays: a cell may join only if the clump it would make — itself
+   and every edge-joined clump it touches — stays within the cap. Groups are
+   tiny under a cap of two or three, so the bookkeeping is a scan of the
+   neighbours, not a structure. */
+function placeConnCapped(k, cap) {
+  const clumpOf = c => {
+    const g = [c];
+    const seen = new Set([c]);
+    for (let a = 0; a < g.length; a++)
+      for (const j of edgOf(g[a]))
+        if (mine[j] && !seen.has(j)) { seen.add(j); g.push(j); }
+    return g.length;
+  };
+  const fits = c => {
+    let size = 1;
+    const counted = new Set();
+    for (const j of edgOf(c)) {
+      if (!mine[j] || counted.has(j)) continue;
+      const g = [j];
+      const seen = new Set([j]);
+      for (let a = 0; a < g.length; a++)
+        for (const x of edgOf(g[a]))
+          if (mine[x] && !seen.has(x)) { seen.add(x); g.push(x); }
+      for (const x of g) counted.add(x);
+      size += g.length;
+    }
+    return size <= cap;
+  };
+  const dist = new Int32Array(n), prev = new Int32Array(n), q = new Int32Array(n);
+  for (let attempt = 0; attempt < 30; attempt++) {
+    mine.fill(0);
+    let placed = 0;
+    if (seedMotif) { for (const c of seedMotif.mines) if (fits(c)) { mine[c] = 1; placed++; } }
+    if (!placed) { mine[Math.floor(Math.random() * n)] = 1; placed = 1; }
+    let stalls = 0;
+    while (placed < k && stalls < 20) {
+      dist.fill(-1);
+      let head = 0, tail = 0, far = -1;
+      for (let i = 0; i < n; i++) if (mine[i]) { dist[i] = 0; prev[i] = -1; q[tail++] = i; }
+      while (head < tail) {
+        const v = q[head++];
+        for (const j of joinAdj()(v))
+          if (dist[j] < 0 && !mine[j] && seedOK(j)) {
+            dist[j] = dist[v] + 1; prev[j] = v; q[tail++] = j; far = j;
+          }
+      }
+      if (far < 0) break;
+      const picks = [];
+      for (let i = 0; i < n; i++) if (dist[i] === dist[far]) picks.push(i);
+      let v = picks[Math.floor(Math.random() * picks.length)];
+      const path = [];
+      while (v >= 0 && !mine[v]) { path.push(v); v = prev[v]; }
+      let laidAny = false;
+      for (let a = path.length - 1; a >= 0 && placed < k; a--) {
+        /* checked at laying time, since the cells laid a moment ago count:
+           a cell the path planned on may no longer fit, and then the rest
+           of the path is walked no further — the next reckoning starts from
+           what actually stands */
+        if (!fits(path[a])) break;
+        mine[path[a]] = 1; placed++; laidAny = true;
+      }
+      stalls = laidAny ? 0 : stalls + 1;
+    }
+    if (placed === k && validRuleset()) return true;
+  }
+  return false;
+}
+
 function placeConnected(k) {
   mine.fill(0);
   const dist = new Int32Array(n), prev = new Int32Array(n), q = new Int32Array(n);
@@ -658,6 +730,7 @@ function layByRule() {
   const g = groupSize();
   const ok = has('snake') ? placeSnake(mines)
            : has('loop') ? placeLoop(mines)
+           : has('connected') && groupCap() ? placeConnCapped(mines, groupCap())
            : has('connected') ? placeConnected(mines)
            : has('twogroups') ? placeTwoGroups(mines)
            : has('safeconn') ? placeSafeConn(mines)

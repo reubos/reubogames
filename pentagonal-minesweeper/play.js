@@ -112,7 +112,8 @@ const LAWS = {
   snake: ['snake'], loop: ['loop'],
   boxed1: ['box'], boxed2: ['box'], boxed3: ['box'], boxed4: ['box'],
   boxedirr: ['box'],
-  cbox4: ['connected', 'box'], sbox4: ['snake', 'box']
+  cbox4: ['connected', 'box'], sbox4: ['snake', 'box'],
+  cnq: ['connected', 'group']
 };
 /* One law may be held back for a moment, to ask whether the board really
    needs it. Nothing lays or checks while it is held back — only the solver
@@ -125,7 +126,7 @@ const has = law => law !== lawOff && (LAWS[ruleset] || []).includes(law);
    border, the two groups — goes edge to edge. The dial is a map so that an
    edge-joined variant of connected can return one day by adding a name that
    is not in it. */
-const CORNERJOIN = { connected: 1, cbox4: 1 };
+const CORNERJOIN = { connected: 1, cbox4: 1, cnq: 1 };
 const joinAdj = () => (CORNERJOIN[ruleset] ? corOf : edgOf);
 
 /* Two groups instead of one, and one law about the safe ground instead of
@@ -158,7 +159,7 @@ const degCap = () => (lawOff === 'degree' ? 99 : (DEGCAP[ruleset] === undefined 
 const layStep = () => groupSize() || 1;
 
 const GROUPSIZE = { singles: 1, doubles: 2, triples: 3, quads: 4 };
-const GROUPCAP = { notriples: 2, noquads: 3 };
+const GROUPCAP = { notriples: 2, noquads: 3, cnq: 3 };
 const groupSize = () => (lawOff === 'group' ? 0 : GROUPSIZE[ruleset] || 0);
 const groupCap = () => (lawOff === 'group' ? 0 : GROUPCAP[ruleset] || 0);
 
@@ -255,6 +256,7 @@ const RULENOTES = {
   loop: 'Mines form one edge-joined loop that never runs alongside itself — ' +
         'every mine has exactly two mines beside it.',
   boxed1: '', boxed2: '', boxed3: '', boxed4: '', boxedirr: '',
+  cnq: 'All mines form a single group touching by edge or corner, and no four of them may stand joined edge to edge — one great chain made of small clumps meeting at their corners.',
   cbox4: '', sbox4: ''      // all written out by paintRuleNote
 };
 let mines = 10, opened = 0, flags = 0, given = 0;
