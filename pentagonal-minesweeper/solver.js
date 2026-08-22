@@ -3734,20 +3734,47 @@ const HINTSAY = {
       ' and a group takes ' + groupSize() + ', and this is the only cell it can still ' +
       'grow into ' + DASH + ' so it is a mine.';
   },
-  'group-big': (known, h) => {
-    const g = citedMines(known, h.clues);
-    if (!g.length || !groupSize()) return '';
-    return 'The groups. A mine here would join groups coming to ' +
-      plural(g.length + 1, 'mine', 'mines') + ', more than the ' + groupSize() +
-      ' a group may hold, so this cell is clear.';
+  /* A mine welding what stands beside it. The first wording here counted the
+     hypothetical — "groups coming to 3 mines" — which read as a claim about
+     groups on the board, and there were none of that size anywhere near. So
+     what stands there is said first, group by group with its own size, and
+     the merged figure is plainly the outcome of the imagined mine. The
+     groups are read off the board afresh and the sum checked against the
+     law before anything is said, and where they do not add up the general
+     wording stands instead. */
+  joinBig: (known, h) => {
+    const limit = groupSize() || groupCap();
+    if (!limit) return '';
+    const c = h.cells[0];
+    const seen = new Set();
+    const sizes = [];
+    for (const j of edgOf(c)) {
+      if (known[j] !== KNOWN_MINE || seen.has(j)) continue;
+      const g = [j];
+      seen.add(j);
+      for (let a = 0; a < g.length; a++)
+        for (const x of edgOf(g[a]))
+          if (known[x] === KNOWN_MINE && !seen.has(x)) { seen.add(x); g.push(x); }
+      sizes.push(g.length);
+    }
+    const total = sizes.reduce((p, q) => p + q, 0) + 1;
+    if (!sizes.length || total <= limit) return '';
+    const law = groupSize()
+      ? 'more than the ' + limit + ' a group may hold'
+      : 'past the ' + limit + ' the law allows in one';
+    if (sizes.length === 1)
+      return 'The groups. The group beside this cell holds ' +
+        plural(sizes[0], 'mine', 'mines') + ', and a mine here would grow it to ' +
+        total + ' ' + DASH + ' ' + law + '. So this cell is clear.';
+    sizes.sort((a, b) => b - a);
+    const list = sizes.length === 2 ? sizes[0] + ' and ' + sizes[1]
+      : sizes.slice(0, -1).join(', ') + ' and ' + sizes[sizes.length - 1];
+    return 'The groups. Beside this cell stand ' + sizes.length + ' separate groups, of ' +
+      list + ' ' + plural(sizes[sizes.length - 1], 'mine', 'mines').replace(/^[0-9]+ /, '') +
+      ' ' + DASH + ' a mine here would weld them into one group of ' + total + ', ' + law +
+      '. So this cell is clear.';
   },
-  'cap-over': (known, h) => {
-    const g = citedMines(known, h.clues);
-    if (!g.length || !groupCap()) return '';
-    return 'The cap. A mine here would join groups coming to ' +
-      plural(g.length + 1, 'mine', 'mines') + ', past the ' + groupCap() +
-      ' the law allows in one, so this cell is clear.';
-  },
+
 
   /* ---- the boxes ---- */
   box: (known, h) => {
@@ -3893,8 +3920,10 @@ const HINTSAY = {
       ' ' + DASH + ' ' + tail;
   }
 };
+for (const r of ['group-big', 'cap-over']) HINTSAY[r] = HINTSAY.joinBig;
 for (const r of ['snake-count', 'loop-count']) HINTSAY[r] = HINTSAY.pathCount;
 delete HINTSAY.pathCount;
+delete HINTSAY.joinBig;
 
 /* Families that argue alike share a composer. The reach rules keep their own
    wording and only gain the figure they all turn on — how many mines are
