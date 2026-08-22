@@ -202,7 +202,14 @@ async function buildPuzzle() {
   // the deep tiers get longer to search, and so do the laws: what they ask for is rarer
   const clock =
     (n > 300 ? 300 : 120) * ((d.tier >= 3 ? 2 : 1) + (structured ? 1 : 0)) *
-    (d.chain ? 2 : 1);           // chain boards are rarer, and each try dearer
+    (d.chain ? 2 : 1) *          // chain boards are rarer, and each try dearer
+    /* A deal nobody is waiting on hunts longer. The flat rules have grown
+       strong enough on some laws that qualifying boards take real searching,
+       and a search that comes home empty ends in a spare — a board the gate
+       never judged, which is how a level promising chains dealt one that
+       needed none. The worker has the time; the player at a live deal keeps
+       the short clock. */
+    (typeof dealPatient !== 'undefined' && dealPatient ? 3 : 1);
   let best = null, spare = null;
   const shortlist = [];          // harder's finalists, for the variety judging
   dealSeeds = { hunted: 0, laid: 0, kept: 0, qualified: 0 };
@@ -504,6 +511,19 @@ async function buildPuzzle() {
     while (!laid && mines + step <= n - 9) { mines += step; laid = layByRule(); }
     if (!laid) layMines(new Set());
     return handOut().list;
+  }
+
+  /* A chain level settling for a spare is dealing a board its own gate never
+     passed, and one time in fifteen or so that board needed no chain at all
+     — measured on Two Groups after two-last joined the flat rules, and the
+     very complaint that found it: several boards in a row solved without a
+     single supposition. So before a spare is accepted, the search goes out
+     once more on a fresh clock. Bounded — one extra pass — and the spare
+     still stands behind it, since a board must always come back. */
+  if (!best && d.chain) {
+    await breathe('Dealing…');
+    // twice the first clock: it only runs when that clock already failed
+    await search(performance.now() + clock * 2);
   }
 
   /* The shrink can lower `mines` on attempts after the kept one was laid,
