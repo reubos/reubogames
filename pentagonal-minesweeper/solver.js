@@ -3165,12 +3165,87 @@ function supposeHint(known) {
            steps: tale ? tale.steps : null, why: tale ? tale.why : s.why };
 }
 
+/* The rules that trade a law's bound against a number. Each is a crossing
+   wearing the law as one side, and the tier ladder ranks them below the
+   plain crossing — so a player could be told about a group's room where an
+   ordinary overlap of two visible numbers settled the very same cell in the
+   board's own terms, and rightly found the group version obtuse. */
+const BOUNDY = { 'group-count': 1, 'cap-count': 1, 'deg-count': 1,
+                 'snake-count': 1, 'loop-count': 1, 'box-count': 1 };
+
+/* A second opinion on such a hint: the subset and crossing scans, run over
+   the plain numbers alone and ungated by tier — this chooses the clearer
+   explanation for a cell the bound already settled at its own tier, and
+   spends no solving power the tier does not have. Returns an overlap only
+   where it settles one of the same cells, so the hint never wanders. */
+function overlapHintAt(known, cells) {
+  const want = new Set(cells);
+  const cons = constraintsOf(known);
+  const owner = new Map();
+  for (const c of cons) for (const x of c.cells) {
+    let w = owner.get(x); if (!w) owner.set(x, w = []); w.push(c);
+  }
+  for (const a of cons) {
+    const seen = new Set();
+    for (const x of a.cells) for (const b of owner.get(x)) {
+      if (b === a || seen.has(b) || b.cells.length <= a.cells.length) continue;
+      seen.add(b);
+      if (!a.cells.every(y => b.cells.includes(y))) continue;
+      const diff = b.cells.filter(y => !a.cells.includes(y));
+      if (!diff.some(y => want.has(y))) continue;
+      if (b.hi - a.lo <= 0)
+        return { cells: diff, kind: 'safe', rule: 'subset', clues: [a.from, b.from] };
+      if (b.lo - a.hi >= diff.length)
+        return { cells: diff, kind: 'mine', rule: 'subset', clues: [a.from, b.from] };
+    }
+  }
+  for (const a of cons) {
+    const seen = new Set([a]);
+    const inA = new Set(a.cells);
+    for (const x of a.cells) for (const b of owner.get(x)) {
+      if (seen.has(b)) continue;
+      seen.add(b);
+      const inter = b.cells.filter(y => inA.has(y));
+      if (!inter.length) continue;
+      const aOut = a.cells.length - inter.length, bOut = b.cells.length - inter.length;
+      const inHi = Math.min(a.hi, b.hi, inter.length);
+      const inLo = Math.max(a.lo - aOut, b.lo - bOut, 0);
+      if (inLo > inHi) continue;
+      const say = (cs, kind) => ({ cells: cs, kind, rule: 'crossed', clues: [a.from, b.from] });
+      if (bOut) {
+        const diff = b.cells.filter(y => !inA.has(y));
+        if (diff.some(y => want.has(y))) {
+          if (b.hi - inLo <= 0) return say(diff, 'safe');
+          if (b.lo - inHi >= bOut) return say(diff, 'mine');
+        }
+      }
+      if (aOut) {
+        const inB = new Set(b.cells);
+        const diff = a.cells.filter(y => !inB.has(y));
+        if (diff.some(y => want.has(y))) {
+          if (a.hi - inLo <= 0) return say(diff, 'safe');
+          if (a.lo - inHi >= aOut) return say(diff, 'mine');
+        }
+      }
+      if (inter.length && inLo >= inter.length && inter.some(y => want.has(y)))
+        return say(inter, 'mine');
+    }
+  }
+  return null;
+}
+
 function findHint(known) {
   for (const cap of [1, 2, 3]) {
     tierCap = cap;
     try {
       const h = findHintAt(known);
-      if (h) return h;
+      if (h) {
+        if (BOUNDY[h.rule]) {
+          const o = overlapHintAt(known, h.cells);
+          if (o) return o;
+        }
+        return h;
+      }
     } finally { tierCap = 0; }
   }
   return searchHint(known) || replayHint(known);
