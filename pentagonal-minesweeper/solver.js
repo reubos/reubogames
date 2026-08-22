@@ -3238,10 +3238,6 @@ function findHintAt(known) {
       return { cells: c.cells.slice(), kind: 'mine', rule: 'counting-full', clues: [c.from] };
   }
 
-  if (ruleset !== 'none') {
-    const h = rulesetHint(known);
-    if (h) return h;
-  }
 
   const owner = new Map();                 // cell -> the numbers watching it
   for (const c of cons) for (const x of c.cells) {
@@ -3286,6 +3282,19 @@ function findHintAt(known) {
       }
       if (inter.length && inLo >= inter.length) return say(inter, 'mine');
     }
+  }
+  /* The law's own rules come after the plain overlaps, not before. A bound
+     traded off a group is itself a crossing with the law as one side — the
+     more contorted lens — and it was preempting the clean two-number
+     crossing whenever both settled the same cell: a player was told about a
+     group's room where an ordinary 2-against-3 overlap said the same thing
+     in the board's own numbers. Ordinary logic speaks first where it
+     suffices; the law speaks where it is needed. The tier ladder is
+     untouched — a one-glance law rule still reaches the player at the first
+     rung, where the overlaps are not yet allowed to answer. */
+  if (ruleset !== 'none') {
+    const h = rulesetHint(known);
+    if (h) return h;
   }
 
   const covered = [];
