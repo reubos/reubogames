@@ -3640,16 +3640,44 @@ const HINTSAY = {
   },
 
   /* ---- what a group has room for ---- */
+  /* What a group has room for, said of where the group actually is. The
+     first wording claimed the group stood beside the settled cell, and it
+     often does not: the rule's bound lives on the group's frontier and is
+     traded through the overlap machinery, so the cell it settles can sit
+     beside the trading number, a step or two from the group — a player
+     told "the group beside this cell holds 3" rightly found no such group
+     beside anything. The group is flooded off the board afresh, said to be
+     beside the cell only when it is and pointed at by its gold otherwise,
+     and the trade is verified before it is described; where nothing checks
+     out, the general wording stands. */
   groupRoom: (known, h) => {
-    const g = citedMines(known, h.clues);
     const limit = groupCap() || groupSize();
-    if (!g.length || !limit || g.length > limit) return '';
+    if (!limit) return '';
+    const m0 = (h.clues || []).find(c => known[c] === KNOWN_MINE);
+    if (m0 === undefined) return '';
+    const g = [m0];
+    const seen = new Set([m0]);
+    for (let a = 0; a < g.length; a++)
+      for (const j of edgOf(g[a]))
+        if (known[j] === KNOWN_MINE && !seen.has(j)) { seen.add(j); g.push(j); }
+    if (g.length > limit) return '';
     const room = limit - g.length;
-    return 'The groups. The group beside this cell holds ' +
-      plural(g.length, 'mine', 'mines') + ' and may reach ' + limit + ', so the cells ' +
-      'around it can take ' +
-      (room === 0 ? 'no more between them' : 'at most ' + plural(room, 'more', 'more') +
-       ' between them') + ', which is what settles this cell.';
+    const frontier = [];
+    const fseen = new Set();
+    for (const c of g) for (const j of edgOf(c))
+      if (known[j] === UNKNOWN && !fseen.has(j)) { fseen.add(j); frontier.push(j); }
+    if (!frontier.length) return '';
+    const beside = fseen.has(h.cells[0]);
+    const head = 'The groups. The group ' + (beside ? 'beside this cell' : 'lit in gold') +
+      ' holds ' + plural(g.length, 'mine', 'mines') + ' and may reach ' + limit +
+      ', so the ' + plural(frontier.length, 'cell', 'cells') + ' around it can take ' +
+      (room === 0 ? 'no more mines' : 'at most ' + plural(room, 'more mine', 'more mines')) +
+      (frontier.length > 1 ? ' between them' : '') + '. ';
+    if (h.kind === 'safe' && room === 0 && beside)
+      return head + 'This cell is one of them, so it is clear.';
+    const t = HINTSAY.tradeOf(known, h.cells[0], frontier, room, h.kind);
+    if (t) return head + HINTSAY.tradeWords(t, h.kind);
+    return '';
   },
 
   /* ---- laid out every way the law allows ---- */
