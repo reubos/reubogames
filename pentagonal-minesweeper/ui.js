@@ -999,7 +999,26 @@ el('btnRandRule').onclick = () => {
 };
 
 el('btnNew').onclick = startFromControls;
+/* While a hint is showing, the one button becomes two: one to put it away,
+   one to press it further. The second wears the name of what it would
+   actually do — more detail ordinarily, the next step of the story where a
+   walked supposition is mid-walk — and disappears once the hint has said
+   everything it has, leaving the hide button the row to itself. */
+function paintHintButtons() {
+  const showing = hintAt !== '';
+  el('btnHint').style.display = showing ? 'none' : '';
+  const hide = el('btnHintHide'), more = el('btnHintMore');
+  hide.style.display = showing ? '' : 'none';
+  const hasMore = showing && hintLevel < hintTop;
+  more.style.display = hasMore ? '' : 'none';
+  hide.classList.toggle('full', showing && !hasMore);
+  if (hasMore)
+    more.textContent = hintWalked && hintLevel >= 2 ? 'Next hint step' : 'More detailed hint';
+}
+
 el('btnHint').onclick = askHint;
+el('btnHintMore').onclick = askHint;
+el('btnHintHide').onclick = () => { clearHint(); draw(); };
 el('btnCheck').onclick = checkFlags;
 el('btnGhosts').onclick = () => {
   for (let i = 0; i < n; i++) ghost[i] = 0;

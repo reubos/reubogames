@@ -230,13 +230,15 @@
         <div class="btn-row">
           <button class="primary full" id="btnNew">New game</button>
           <button class="full" id="btnHint">Hint</button>
+          <button id="btnHintHide" style="display: none">Hide hint</button>
+          <button id="btnHintMore" style="display: none">More detailed hint</button>
           <button class="full" id="btnCheck">Check flags</button>
           <button class="full" id="btnReveal">Reveal board</button>
           <button class="full" id="btnClear" style="display: none">Clear remaining cells</button>
           <button class="full" id="btnGhosts" style="display: none">Clear ghost markings</button>
         </div>
-        <p class="note" id="noteHint">Asking once marks what to look at; again
-          names the reasoning; again sketches the answer in ghost marks.</p>
+        <p class="note" id="noteHint">A hint first marks what to look at; more detail
+          names the reasoning, then sketches the answer in ghost marks.</p>
       </div>
 
       <div class="panel">
@@ -277,11 +279,11 @@
      throws on a name that moved between them, and the game half-works in
      ways no fresh copy can. The version token forces every cached set to be
      whole. Bump it in all five lines together whenever any script changes. -->
-<script src="tiling.js?v=20260819z"></script>
-<script src="play.js?v=20260819z"></script>
-<script src="solver.js?v=20260819z"></script>
-<script src="builder.js?v=20260819z"></script>
-<script src="ui.js?v=20260819z"></script>
+<script src="tiling.js?v=20260820a"></script>
+<script src="play.js?v=20260820a"></script>
+<script src="solver.js?v=20260820a"></script>
+<script src="builder.js?v=20260820a"></script>
+<script src="ui.js?v=20260820a"></script>
 </body>
 </html>
 

@@ -3987,18 +3987,24 @@ const HINTWORDS = {
   'replay': 'The deal remembers. Solved from the opening cells alone, the board settles this — retrace it from what was first shown.',
 };
 
-const HINTIDLE = 'Asking once marks what to look at; asking again names the reasoning.';
+const HINTIDLE = 'A hint first marks what to look at; more detail names the reasoning, then sketches the answer in ghost marks.';
 
 /* What is lit and what has been said. Asking twice about the same position
    says more; touching the board puts the marks out again. */
 let hintClues = [], hintLevel = 0, hintAt = '', hintNote = false;
+/* How far this hint can be pressed, and whether its middle presses are the
+   steps of a walked supposition — the two facts the hint buttons need in
+   order to say what pressing again would do. */
+let hintTop = 0, hintWalked = false;
 let hintGhosts = [];         // the supposed world the walked hint has shown so far
 
 function clearHint() {
   hintGhosts = [];
   hintAt = '';
   hintClues = [];
+  hintLevel = 0;
   if (hintNote) { hintNote = false; el('noteHint').textContent = HINTIDLE; }
+  if (typeof paintHintButtons === 'function') paintHintButtons();
 }
 
 /* Which flags sit on cells holding no mine, told the way a hint is told: the
@@ -4052,7 +4058,9 @@ function checkFlags() {
 function askHint() {
   if (over || !n) return;
   hintNote = true;
-  const say = t => { hintClues = []; hintLevel = 0; hintAt = ''; el('noteHint').textContent = t; draw(); };
+  // the shrug and report paths return early, so the buttons repaint here too
+  const say = t => { hintClues = []; hintLevel = 0; hintAt = ''; el('noteHint').textContent = t;
+    if (typeof paintHintButtons === 'function') paintHintButtons(); draw(); };
 
   // a wrong flag is reported before any hint is worked out
   if (reportFlags(false)) return;
@@ -4093,6 +4101,7 @@ function askHint() {
      still has to put them there. */
   const walked = h.rule === 'suppose' && h.steps && h.steps.length;
   const top = walked ? 3 + h.steps.length : 3;
+  hintTop = top; hintWalked = !!walked;
   hintLevel = sig === hintAt ? Math.min(top, hintLevel + 1) : 1;
   hintAt = sig;
   // asking the same hint again for its reasoning is the one ask, not two
@@ -4156,6 +4165,7 @@ function askHint() {
       : 'Marked in gold: the clues to work from — the cells they settle may lie ' +
         'elsewhere. Ask again to be told how.';
   }
+  if (typeof paintHintButtons === 'function') paintHintButtons();
   draw();
 }
 
