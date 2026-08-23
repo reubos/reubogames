@@ -108,7 +108,7 @@ const LAWS = {
   twogroup1: ['twogroups'], safeconn: ['safeconn'],
   sparse: ['degree'],
   singles: ['group'], doubles: ['group'], triples: ['group'], quads: ['group'],
-  notriples: ['group'], noquads: ['group'],
+  notriples: ['group'], noquads: ['group'], nofives: ['group'],
   snake: ['snake'], loop: ['loop'],
   boxed1: ['box'], boxed2: ['box'], boxed3: ['box'], boxed4: ['box'],
   boxedirr: ['box'],
@@ -159,7 +159,7 @@ const degCap = () => (lawOff === 'degree' ? 99 : (DEGCAP[ruleset] === undefined 
 const layStep = () => groupSize() || 1;
 
 const GROUPSIZE = { singles: 1, doubles: 2, triples: 3, quads: 4 };
-const GROUPCAP = { notriples: 2, noquads: 3, cnq: 3 };
+const GROUPCAP = { notriples: 2, noquads: 3, nofives: 4, cnq: 3 };
 const groupSize = () => (lawOff === 'group' ? 0 : GROUPSIZE[ruleset] || 0);
 const groupCap = () => (lawOff === 'group' ? 0 : GROUPCAP[ruleset] || 0);
 
@@ -252,6 +252,8 @@ const RULENOTES = {
              'pairs, and never more.',
   noquads: 'No four mines join up along their edges: they come in ones, twos or ' +
            'threes, and never more.',
+  nofives: 'No five mines join up along their edges: they come in ones, twos, ' +
+           'threes or fours, and never more.',
   snake: 'Mines form one edge-joined path that never runs alongside itself.',
   loop: 'Mines form one edge-joined loop that never runs alongside itself — ' +
         'every mine has exactly two mines beside it.',

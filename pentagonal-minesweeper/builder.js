@@ -51,6 +51,7 @@ function huntRun() {
   if (s === 1) { L = 5; mineAt = [0, 2, 4]; }
   else if (cap === 2) { L = 4; mineAt = [0, 1, 3]; }
   else if (cap === 3) { L = 5; mineAt = [0, 1, 2, 4]; }
+  else if (cap === 4) { L = 6; mineAt = [0, 1, 2, 3, 5]; }
   else return null;
   const start = Math.floor(Math.random() * n);
   for (let o = 0; o < n; o++) {
