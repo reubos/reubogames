@@ -973,27 +973,47 @@ for (const b of document.querySelectorAll('[data-weaken]'))
     startFromControls();
   };
 
+/* Pairings the menus refuse to form. Hexagons have no corner-only
+   meetings — every touching pair of cells shares an edge — so connected
+   plus a cap of three collapses to boards of three mines. While either
+   half of a barred pair is chosen the other menu hides its partner, and
+   the dice below never roll it; a selection already standing is left
+   visible, so a save from before the bar still shows what it is. */
+const BARRED = [['hex', 'cnq']];
+const barred = (tilId, rule) => BARRED.some(p => p[0] === tilId && p[1] === rule);
+
+function paintBarred() {
+  const sel = el('selRule');
+  for (const o of sel.options || [])
+    o.hidden = o.disabled = barred(tiling.id, o.value) && o.value !== sel.value;
+  for (const o of selTiling.options || [])
+    o.hidden = o.disabled = barred(TILINGS[+o.value].id, ruleset) &&
+                            +o.value !== +selTiling.value;
+}
+
 el('selRule').onchange = () => {
   ruleset = el('selRule').value;
+  paintBarred();
   startFromControls();            // which paints the note, once there are boxes to count
 };
 
 const selTiling = el('selTiling');
 selTiling.innerHTML = TILINGS.map((t, i) => '<option value="' + i + '">' + t.name + '</option>').join('');
-selTiling.onchange = () => { tiling = TILINGS[+selTiling.value]; startFromControls(); };
+selTiling.onchange = () => { tiling = TILINGS[+selTiling.value]; paintBarred(); startFromControls(); };
 
 /* The dice. Random never lands on what is already chosen — a pick that
    changes nothing reads as a broken button — and each roll deals afresh
    through the same road the selects take. */
 el('btnRandTil').onclick = () => {
-  let at = Math.floor(Math.random() * (TILINGS.length - 1));
-  if (at >= +selTiling.value) at++;
-  selTiling.value = at;
+  const picks = TILINGS.map((t, i) => i)
+    .filter(i => i !== +selTiling.value && !barred(TILINGS[i].id, ruleset));
+  selTiling.value = picks[Math.floor(Math.random() * picks.length)];
   selTiling.onchange();
 };
 el('btnRandRule').onclick = () => {
   const sel = el('selRule');
-  const opts = [...sel.options].map(o => o.value).filter(v => v !== sel.value);
+  const opts = [...sel.options].map(o => o.value)
+    .filter(v => v !== sel.value && !barred(tiling.id, v));
   sel.value = opts[Math.floor(Math.random() * opts.length)];
   sel.onchange();
 };

@@ -479,6 +479,8 @@ function paintToggles() {
   mark('[data-hue]', x => !!x.dataset.hue === hueOn);
   mark('[data-quota]', x => !!x.dataset.quota === quotaOn);
   selTiling.value = TILINGS.indexOf(tiling);
+  // the barred pairings follow whatever was restored; declared in the ui script
+  if (typeof paintBarred === 'function') paintBarred();
 }
 
 function saveBests() {
