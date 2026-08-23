@@ -325,15 +325,18 @@ const TILINGS = [
           'rows run Cairo, prismatic, prismatic down the page, and each row stands a cell right ' +
           'of the last and a little higher, so the board leans as it goes.' },
   { id: 'square', name: 'Square', src: T_square,
+    region: { kind: 'para' }, boxPar: [2, 2],
     boxMul: [2, 2],          // one tile to its repeat, so a box of four is two by two
     note: 'The classic. Every cell a square with eight neighbours counting the corners, ' +
           'exactly as minesweeper has always been played.' },
   { id: 'hex', name: 'Hexagonal', src: T_hexTile,
+    region: { kind: 'para' }, boxPar: [2, 2],
     boxMul: [2, 2],
     note: 'Hexagons in level rows, each row half a cell out of step with the last. Six ' +
           'neighbours to a cell and no corner-touching at all: every neighbour shares an ' +
           'edge, which makes the counting cleaner than the square and the ground tighter.' },
   { id: 'tri', name: 'Triangular', src: T_triTile,
+    region: { kind: 'para' }, boxPar: [2, 1],
     boxMul: [2, 1],          // two tiles to its repeat, so a box of four is two of them
     note: 'Triangles pointing up and down by turns. Only three cells share an edge with ' +
           'any cell, but twelve touch it in all, so the numbers run high and the corners ' +
@@ -855,8 +858,17 @@ function paraBoard(t, across, down) {
   const cp = 1 / Math.sqrt(t.src.density);
   const area = Math.abs(t.src.v1[0] * t.src.v2[1] - t.src.v1[1] * t.src.v2[0]);
   const per = Math.max(1, Math.round(t.src.density * area));       // tiles per unit cell
-  const nb = Math.max(1, Math.round(down * cp / Math.abs(t.src.v2[1])));
-  const na = Math.max(1, Math.round(across * down / (nb * per)));
+  let nb = Math.max(1, Math.round(down * cp / Math.abs(t.src.v2[1])));
+  let na = Math.max(1, Math.round(across * down / (nb * per)));
+  /* A tiling whose boxes span more than one unit asks its cut to land on
+     whole boxes, or the rim leaves part-boxes that the carving must drop —
+     and a dropped box is ground outside every box, which the boxed laws
+     cannot have. The count moves a little to make the parity; the sliders
+     step by two, so on the square it does not move at all. */
+  if (t.boxPar) {
+    na = Math.max(t.boxPar[0], Math.round(na / t.boxPar[0]) * t.boxPar[0]);
+    nb = Math.max(t.boxPar[1], Math.round(nb / t.boxPar[1]) * t.boxPar[1]);
+  }
 
   const toAB = latticeCoords(t.src);
   // the parallelogram is centred, so its reach is half its diagonal
