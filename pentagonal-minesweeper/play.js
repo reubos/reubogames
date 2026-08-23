@@ -372,7 +372,26 @@ function saveBoard() {
   } catch (e) {}
 }
 
+/* Restoring writes the saved settings into the live globals before it can
+   know whether the board itself will come back — the board is built out of
+   them. So a restore that fails half-way must put everything back, or the
+   page deals a fresh board under the dead save's settings: a stale save from
+   an old build on a slow tiling and law turned every page load into a
+   minutes-long live deal, which read as the game not loading at all. */
 function restoreBoard(text) {
+  const keep = { tiling, difficulty, ruleset, muteOn, strict, adjOn, sizeName,
+                 weakenOn, hueOn, quotaOn, across: rngAcross.value,
+                 down: rngDown.value, ask: rngMines.value };
+  if (restoreBoardInner(text)) return true;
+  tiling = keep.tiling; difficulty = keep.difficulty; ruleset = keep.ruleset;
+  muteOn = keep.muteOn; strict = keep.strict; adjOn = keep.adjOn;
+  sizeName = keep.sizeName; weakenOn = keep.weakenOn; hueOn = keep.hueOn;
+  quotaOn = keep.quotaOn;
+  rngAcross.value = keep.across; rngDown.value = keep.down; rngMines.value = keep.ask;
+  return false;
+}
+
+function restoreBoardInner(text) {
   let s = null;
   try { s = JSON.parse(text || localStorage.getItem(BOARDKEY) || 'null'); } catch (e) {}
   if (!s || s.v !== 2) return false;
