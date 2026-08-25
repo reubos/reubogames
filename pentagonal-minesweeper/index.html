@@ -221,6 +221,12 @@
           <option value="hard">Hard</option>
           <option value="harder">Harder</option>
         </select>
+        <p class="label" style="margin-top: 14px">Board source <span class="help" data-tip="For testing the pre-generated bank. Pregen 1 and 2 serve that stored board for the current settings, as often as asked; Random livegen always deals fresh. Settings with no stored board deal fresh whichever is chosen.">?</span></p>
+        <select id="selSource">
+          <option value="pregen0">Pregen 1</option>
+          <option value="pregen1">Pregen 2</option>
+          <option value="live">Random livegen</option>
+        </select>
         <div class="btn-row" style="margin-top: 14px">
           <button id="btnRandTil">Random tiling</button>
           <button id="btnRandRule">Random ruleset</button>
@@ -281,11 +287,11 @@
      throws on a name that moved between them, and the game half-works in
      ways no fresh copy can. The version token forces every cached set to be
      whole. Bump it in all five lines together whenever any script changes. -->
-<script src="tiling.js?v=20260820k"></script>
-<script src="play.js?v=20260820k"></script>
-<script src="solver.js?v=20260820k"></script>
-<script src="builder.js?v=20260820k"></script>
-<script src="ui.js?v=20260820k"></script>
+<script src="tiling.js?v=20260820l"></script>
+<script src="play.js?v=20260820l"></script>
+<script src="solver.js?v=20260820l"></script>
+<script src="builder.js?v=20260820l"></script>
+<script src="ui.js?v=20260820l"></script>
 </body>
 </html>
 

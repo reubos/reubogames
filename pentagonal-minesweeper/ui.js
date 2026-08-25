@@ -894,17 +894,17 @@ function useReadyBoard(key) {
 /* The bank: boards dealt ahead of time by the release build, carried with
    the site as the game's own saves. They exist for the cold start — the
    first Harder board of a combination, where the worker has had no chance
-   to get ahead and a live deal can run minutes — so the prefetched board
-   is preferred when one is standing by, and the bank answers when none is.
+   to get ahead and a live deal can run minutes.
 
-   Each board is served once. What was served is remembered by name, and a
-   combination whose boards are all spent simply deals live again — the
-   bank is a head start, not a loop of the same two boards. The file is
-   fetched once, lazily, and every failure ends the same quiet way the
-   worker's do: the deal happens the old way in front of the player. */
+   For now the source is chosen by hand, for testing the bank itself: the
+   dropdown names a stored board outright and serves it as often as asked,
+   or asks for a fresh deal instead. Nothing is spent — a board picked by
+   name must stay pickable. The released game will choose by itself again;
+   the spend-once reading of the bank is in the history at f11cda6. The
+   file is fetched once, lazily, and every failure ends the same quiet way
+   the worker's do: the deal happens the old way in front of the player. */
 let bankBoards = null;            // key -> boards, false once fetching has failed
 let bankFetching = false;
-const BANKSPENT = 'pentagonal-minesweeper-bank-spent';
 
 function loadBank() {
   if (bankBoards !== null || bankFetching || typeof fetch !== 'function') return;
@@ -926,28 +926,17 @@ function loadBank() {
         const key = [s.tiling, s.rule, s.diff, s.size, s.across, s.down,
                      s.ask, s.weaken ? 'w' : ''].join('|');
         if (!map.has(key)) map.set(key, []);
-        map.get(key).push({ id: r.til + '/' + r.rule + '/' + r.idx, save: r.save });
+        map.get(key).push({ idx: r.idx, save: r.save });
       }
       bankBoards = map;
     })
     .catch(() => { bankBoards = false; });
 }
 
-function useBankBoard(key) {
+function useBankBoard(key, idx) {
   if (!bankBoards) return false;                 // unavailable, or not here yet
-  const list = bankBoards.get(key);
-  if (!list) return false;
-  let spent = [];
-  try { spent = JSON.parse(localStorage.getItem(BANKSPENT) || '[]'); } catch (e) {}
-  if (!Array.isArray(spent)) spent = [];
-  const fresh = list.filter(b => !spent.includes(b.id));
-  if (!fresh.length) return false;
-  const pick = fresh[Math.floor(Math.random() * fresh.length)];
-  if (!restoreDealt(pick.save)) return false;
-  // spent on serving, so an abandoned board never comes round again either
-  try { localStorage.setItem(BANKSPENT, JSON.stringify(spent.concat(pick.id))); }
-  catch (e) {}
-  return true;
+  const pick = (bankBoards.get(key) || []).find(b => b.idx === idx);
+  return !!pick && restoreDealt(pick.save);
 }
 
 async function startFromControls() {
@@ -958,8 +947,12 @@ async function startFromControls() {
     do {
       dealAgain = false;
       clearHint();
+      /* the named bank board outranks even a board standing ready, since it
+         was asked for outright; fresh never touches the bank at all */
+      const src = el('selSource').value;
+      if (src !== 'live' && useBankBoard(boardKeyNow(), src === 'pregen1' ? 1 : 0))
+        continue;
       if (useReadyBoard(boardKeyNow())) continue;
-      if (useBankBoard(boardKeyNow())) continue;
       if (DIFF[difficulty].slow) {
         dealNote = 'Dealing…';
         paintStatus();
@@ -997,6 +990,9 @@ el('selDiff').onchange = () => {
   difficulty = el('selDiff').value;
   startFromControls();
 };
+
+// picking a source is asking for that board, so it deals at once
+el('selSource').onchange = () => startFromControls();
 
 for (const b of document.querySelectorAll('[data-strict]'))
   b.onclick = () => {
