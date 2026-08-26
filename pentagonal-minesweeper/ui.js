@@ -950,7 +950,7 @@ async function startFromControls() {
       /* the named bank board outranks even a board standing ready, since it
          was asked for outright; fresh never touches the bank at all */
       const src = el('selSource').value;
-      if (src !== 'live' && useBankBoard(boardKeyNow(), src === 'pregen1' ? 1 : 0))
+      if (src !== 'live' && useBankBoard(boardKeyNow(), +src.slice(6) || 0))
         continue;
       if (useReadyBoard(boardKeyNow())) continue;
       if (DIFF[difficulty].slow) {
