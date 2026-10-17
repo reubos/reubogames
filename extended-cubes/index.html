@@ -12,6 +12,7 @@
   .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
   label { font-size: 13px; display: flex; align-items: center; gap: 5px; }
   input[type=number] { width: 52px; }
+  #preset { max-width: 100%; }
   select { font: inherit; padding: 4px 6px; background: #222; color: #eee; border: 1px solid #444; border-radius: 5px; }
   #spec { font-family: ui-monospace, Consolas, monospace; }
   .notation-help { font-size: 12px; color: #aaa; margin-bottom: 10px; }
@@ -84,9 +85,11 @@
     <option value="3x3x3 +U +D +R +L +F +B">Cross Cube</option>
     <option value="3x3x3 +U +R +F">Corner Cube</option>
     <option value="3x3x3 +2U +2D +R +L">Super Shapeshifter</option>
+    <option value="3x3x3 +2U +2D +2R +2L">X2-Cube</option>
+    <option value="5x5x5 +U(3x3) +D(3x3) +R(3x3) +L(3x3)">Ball Cube</option>
     <option value="3x3x3 +D(5x5) +L(5x5) +B(5x5)">Diorama Cube</option>
     <option value="5x1x5 +U(3x3,1x1)">Pyramid Cube</option>
-    <option value="5x1x5 +U(3x3,1x1) +D(3x3,1x1)">Diamond Cube</option>
+    <option value="5x1x5 +U(3x3,1x1) +D(3x3,1x1)">Lantern Cube</option>
     <option value="5x1x5 +U(3x5,1x5)">Triangle Prism Cube</option>
     <option value="3x3x5 +U(1x5) +D(1x5) +R(1x5) +L(1x5)">Diamond Prism Cube</option>
     <option value="">Custom</option>
@@ -595,6 +598,9 @@ document.getElementById('btn-apply').onclick=applySequence;
 document.getElementById('seq-input').addEventListener('keydown',e=>{ if(e.key==='Enter') applySequence(); });
 
 // init
+// show each preset's layout beside its name, written from the value it loads
+for(const o of document.getElementById('preset').options)
+  if(o.value) o.textContent=`${o.textContent} · ${pretty(formatSpec(parseSpec(o.value)))}`;
 loadOptions();
 renderPhaseSliders(false);
 refreshMoveButtons();
