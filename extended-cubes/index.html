@@ -355,7 +355,17 @@ function performMove(mv){
   coarsen(cubies,eff);
   applyMove(cubies,mv);
   coarsen(cubies,eff);
+  // Back in the original cuboid shape, every original cut plane exists again,
+  // so all layers are independently turnable: return to the first phase.
+  if(isOriginalShape()){
+    eff=[gW,gH,gD];
+    for(const c of cubies) c.fc=[...c.pos];
+  }
   return true;
+}
+function isOriginalShape(){
+  const lim=[gW-1,gH-1,gD-1];
+  return cubies.every(c=>c.pos.every((v,k)=>Math.abs(v)<=lim[k]));
 }
 
 function doMove(mv){
