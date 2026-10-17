@@ -339,20 +339,27 @@ let anim=null, animFrame=null;
 const QUARTER_MS=[450,320,220,150,90];   // by speed setting 1..5
 const ANIMATE_MAX_CUBIES=1500;           // past this a frame is too slow to draw
 const ANIMATE_MAX_SEQUENCE=12;           // longer typed sequences apply instantly
+// scramble playback: about this long in all, each quarter turn within limits
+const SCRAMBLE_TOTAL_MS=5000, SCRAMBLE_MIN_MS=20, SCRAMBLE_MAX_MS=70, PHASE_PAUSE_MS=400;
 
 function animationOn(){
   return document.getElementById('opt-animate').checked && puzzle.cubies.length<=ANIMATE_MAX_CUBIES;
 }
-function turnDuration(angle){
-  const q=QUARTER_MS[Math.min(5,Math.max(1,+document.getElementById('opt-speed').value||3))-1];
-  return Math.abs(angle)>Math.PI/2+1e-6 ? q*1.5 : q;
+// how long an item plays: a pause, a turn at its own quarter-turn time (a
+// scramble's fast playback), or a turn at the Speed setting
+function itemDuration(it){
+  if(it.pause) return it.pause;
+  const q = it.quarterMs || QUARTER_MS[Math.min(5,Math.max(1,+document.getElementById('opt-speed').value||3))-1];
+  return Math.abs(it.angle)>Math.PI/2+1e-6 ? q*1.5 : q;
 }
 // one turn to play: the pieces as they were just before it, and which move
-function sweepFrom(before, mv){
+function sweepFrom(before, mv, quarterMs){
   const sel=before.selection(mv), sw=moveSweep(mv), members=new Set();
   before.cubies.forEach((c,i)=>{ if(sel.fcs.has(c.fc[sel.axK])) members.add(i); });
-  return {cubies:before.cubies, members, axK:sw.axK, angle:sw.angle};
+  return {cubies:before.cubies, members, axK:sw.axK, angle:sw.angle, quarterMs};
 }
+// hold the pieces still for `ms` (between a scramble's phases)
+const pauseOn = (cubies, ms) => ({cubies, members:new Set(), axK:0, angle:0, pause:ms});
 function playTurns(items){
   stopAnimation();
   if(!items.length) return;
@@ -361,13 +368,15 @@ function playTurns(items){
 }
 function drawAnimationFrame(){
   const it=anim.items[anim.i];
-  const t=Math.min(1,(performance.now()-anim.t0)/turnDuration(it.angle)), eased=t*t*(3-2*t);
+  const t=Math.min(1,(performance.now()-anim.t0)/itemDuration(it)), eased=t*t*(3-2*t);
   drawPuzzle(it.cubies, {members:it.members, axK:it.axK, angle:it.angle*eased});
 }
 function stepAnimation(now){
   if(!anim) return;
-  if(now-anim.t0>=turnDuration(anim.items[anim.i].angle)){
-    anim.i++; anim.t0=now;
+  // carry leftover time into the next turn rather than restarting the clock on
+  // each frame, so short turns (a scramble's playback) keep to their timing
+  while(now-anim.t0>=itemDuration(anim.items[anim.i])){
+    anim.t0+=itemDuration(anim.items[anim.i]); anim.i++;
     if(anim.i>=anim.items.length){ anim=null; animFrame=null; renderSVG(); return; }
   }
   drawAnimationFrame();
@@ -715,6 +724,24 @@ function generate(){
   scramble={phases:res.phases, moves:res.moves};
   history=[...res.moves];
   replayHistory(history);
+  // With animation on, play the scramble back quickly from solved, pausing
+  // briefly between phases; the puzzle is already scrambled underneath, so any
+  // other action just jumps to the end.
+  if(animationOn() && res.moves.length){
+    // half turns take 1.5 quarter-turn times
+    const weight=res.moves.reduce((s,m)=>s+(m.endsWith('2')?1.5:1),0);
+    const quarterMs=Math.max(SCRAMBLE_MIN_MS, Math.min(SCRAMBLE_MAX_MS, SCRAMBLE_TOTAL_MS/weight));
+    const p=new Puzzle(puzzle.spec), items=[];
+    res.phases.forEach((ph,i)=>{
+      if(i>0) items.push(pauseOn(p.clone().cubies, PHASE_PAUSE_MS));
+      for(const m of ph.moves){
+        const before=p.clone();
+        p.move(m);
+        items.push(sweepFrom(before, parseMove(m), quarterMs));
+      }
+    });
+    playTurns(items);
+  }
   showMsg('');
   redraw();
   updateHistory();
