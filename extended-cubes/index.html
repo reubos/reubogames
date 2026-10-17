@@ -610,9 +610,23 @@ function updateLayerButtons(){
   const inp=document.getElementById('layer-input');
   inp.max=max; inp.value=currentLayer;
   document.getElementById('layer-max').textContent=`/ ${max}`;
+  refreshMoveLabels();
 }
 
 /* ===================== move buttons ===================== */
+// The selected layer, or that face's deepest layer if the selection is deeper.
+function buttonMove(face,mod){
+  const l=Math.min(currentLayer, maxLayersFor(face));
+  return l<1 ? null : moveStr(face,l,mod);
+}
+function refreshMoveLabels(){
+  for(const btn of document.querySelectorAll('#move-panel button[data-face]')){
+    const m=buttonMove(btn.dataset.face, btn.dataset.mod);
+    btn.textContent = m || btn.dataset.face+btn.dataset.mod;
+    btn.disabled = !m;
+    btn.title = m ? `Turn ${m}` : 'This face has no turnable layer';
+  }
+}
 function updateMoveButtons(){
   const panel=document.getElementById('move-panel');
   panel.innerHTML='';
@@ -622,13 +636,8 @@ function updateMoveButtons(){
       for(const mod of mods){
         const btn=document.createElement('button');
         btn.className=`btn mbtn ${COL_CLASS[face]}`;
-        btn.textContent=face+mod;
-        btn.title=`${face}${mod} — left/right for CCW, shift for double`;
-        btn.onclick=()=>{
-          const l=Math.min(currentLayer, maxLayersFor(face));
-          if(l<1) return;
-          doMove(moveStr(face,l,mod));
-        };
+        btn.dataset.face=face; btn.dataset.mod=mod;
+        btn.onclick=()=>{ const m=buttonMove(face,mod); if(m) doMove(m); };
         panel.appendChild(btn);
       }
       // separator between the two halves of a pair
@@ -647,6 +656,7 @@ function updateMoveButtons(){
       }
     }
   }
+  refreshMoveLabels();
 }
 
 /* ===================== history display ===================== */
