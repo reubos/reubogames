@@ -23,8 +23,9 @@
     --border: #444; --border-soft: #333;
     --muted: #888; --muted-strong: #aaa; --faint: #666; --done: #777;
     --accent: #ffb347; --error: #e88; --solved: #1a5;
-    --reduce: #4a3210; --reduce-hover: #64441a;
-    --restore: #15402a; --restore-hover: #1d573a;
+    --keep: #3c3c3e; --keep-hover: #4a4a4d;
+    --reduce: #5c3d10; --reduce-hover: #734e18;
+    --restore: #1c4f34; --restore-hover: #256243;
     --pick: #335; --current: #446; --current-text: #fff;
     --face-r: #992222; --face-l: #885500; --face-u: #888888;
     --face-d: #998800; --face-f: #006633; --face-b: #004488;
@@ -36,6 +37,7 @@
     --border: #c4c4c4; --border-soft: #dadada;
     --muted: #6b6b6b; --muted-strong: #555; --faint: #888; --done: #9a9a9a;
     --accent: #b5620a; --error: #c0392b; --solved: #1a8f4c;
+    --keep: #ffffff; --keep-hover: #ececec;
     --reduce: #ffe1b8; --reduce-hover: #ffd29a;
     --restore: #cdeedb; --restore-hover: #b5e4c8;
     --pick: #dce4ff; --current: #c9d4ff; --current-text: #111;
@@ -70,12 +72,15 @@
   .move-face { width: 18px; font-size: 12px; font-weight: 600; color: var(--muted-strong); border: none; }
   .mbtn { min-width: 40px; text-align: center; padding: 4px 6px; font-size: 13px; }
   /* what a move does to the shape: background tint (the border shows the face) */
+  .mbtn.mv-keeps { background: var(--keep); }
+  .mbtn.mv-keeps:hover { background: var(--keep-hover); }
   .mbtn.mv-reduces { background: var(--reduce); }
   .mbtn.mv-reduces:hover { background: var(--reduce-hover); }
   .mbtn.mv-restores { background: var(--restore); }
   .mbtn.mv-restores:hover { background: var(--restore-hover); }
   .move-key { display: flex; gap: 12px; font-size: 11px; color: var(--muted); margin-top: 2px; }
   .move-key span::before { content: ''; display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; border: 1px solid var(--border); background: var(--control); }
+  .move-key .mv-keeps::before { background: var(--keep); }
   .move-key .mv-reduces::before { background: var(--reduce); }
   .move-key .mv-restores::before { background: var(--restore); }
   .mbtn:active { background: var(--control-active); }
