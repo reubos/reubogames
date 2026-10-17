@@ -152,9 +152,7 @@ function applyMove(cubies,move){
   const sign=baseSign(mv.face), exp=mv.mod==='2'?2:mv.mod==="'"?-sign:sign, R=matPow(P[ax],exp);
   for(const c of cubies){
     if(!sel.has(c.fc[k]))continue;
-    c.pos=matVec(R,c.pos); c.ori=matMul(R,c.ori); c.fc=matVec(R,c.fc);
-    if(c.shadow) c.shadow=c.shadow.map(v=>matVec(R,v));
-  }
+    c.pos=matVec(R,c.pos); c.ori=matMul(R,c.ori); c.fc=matVec(R,c.fc);  }
 }
 function worldStickers(c){
   const out={}, oriT=transpose(c.ori);
@@ -357,11 +355,7 @@ function performMove(mv){
   const k=IDX[AXIS[mv.face]], lim=ne[k]-1;
   const layers=new Set(cubies.map(c=>Math.max(-lim,Math.min(lim,c.fc[k])))).size;
   if(!mv.wide && mv.layer>layers) return false;
-  if(ne!==eff){
-    // remember the phase being left, with each piece's coordinates in it
-    phaseStack.push(eff);
-    for(const c of cubies) c.shadow.push([...c.fc]);
-  }
+  if(ne!==eff) phaseStack.push(eff);
   eff=ne;
   coarsen(cubies,eff);
   applyMove(cubies,mv);
@@ -369,23 +363,23 @@ function performMove(mv){
   undoReductions();
   return true;
 }
-// Each earlier phase's coordinates turn with the pieces. Once every piece's
-// coordinates fit that phase's box again, its layers line up as whole slabs,
-// so the reduction is undone; the earliest such phase wins.
+// An earlier phase is turnable again once its central sub-cuboid has a piece
+// in every position: each layer of it is then a whole slab. Pieces outside the
+// box attach to the layer they touch. The earliest such phase wins.
 function undoReductions(){
   for(let i=0;i<phaseStack.length;i++){
-    const lim=phaseStack[i].map(e=>e-1);
-    if(!cubies.every(c=>c.shadow[i].every((v,k)=>Math.abs(v)<=lim[k]))) continue;
-    eff=phaseStack[i];
-    for(const c of cubies){ c.fc=c.shadow[i]; c.shadow.length=i; }
+    const e=phaseStack[i], lim=e.map(x=>x-1);
+    const inside=cubies.filter(c=>c.pos.every((v,k)=>Math.abs(v)<=lim[k])).length;
+    if(inside!==e[0]*e[1]*e[2]) continue;
+    eff=e;
     phaseStack.length=i;
+    for(const c of cubies) c.fc=c.pos.map((v,k)=>Math.max(-lim[k],Math.min(lim[k],v)));
     return;
   }
 }
 function resetPhases(){
   eff=[gW,gH,gD];
   phaseStack=[];
-  for(const c of cubies) c.shadow=[];
 }
 
 function doMove(mv){
