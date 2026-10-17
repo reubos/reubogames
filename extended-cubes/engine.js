@@ -252,6 +252,7 @@ class Puzzle {
     q.spec=this.spec; q.shape=this.shape; q.fullBox=this.fullBox;
     q.cubies=this.cubies.map(c=>({home:c.home,stickers:c.stickers,pos:c.pos,ori:c.ori,fc:c.fc}));
     q.eff=this.eff; q.phaseStack=[...this.phaseStack];
+    q.names=this.names || (this.names=new Map());   // same shape, so names carry over
     return q;
   }
   layerCount(k){ return new Set(this.cubies.map(c=>c.fc[k])).size; }

@@ -29,6 +29,15 @@
   .move-row { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
   .move-face { width: 18px; font-size: 12px; font-weight: 600; color: #aaa; border: none; }
   .mbtn { min-width: 40px; text-align: center; padding: 4px 6px; font-size: 13px; }
+  /* what a move does to the shape: background tint (the border shows the face) */
+  .mbtn.mv-reduces { background: #4a3210; }
+  .mbtn.mv-reduces:hover { background: #64441a; }
+  .mbtn.mv-restores { background: #15402a; }
+  .mbtn.mv-restores:hover { background: #1d573a; }
+  .move-key { display: flex; gap: 12px; font-size: 11px; color: #888; margin-top: 2px; }
+  .move-key span::before { content: ''; display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; border: 1px solid #444; background: #222; }
+  .move-key .mv-reduces::before { background: #4a3210; }
+  .move-key .mv-restores::before { background: #15402a; }
   .mbtn:active { background: #444; }
   .r-col { border-color: #992222; }
   .l-col { border-color: #885500; }
@@ -406,6 +415,18 @@ function possibleMoves(face){
   return out;
 }
 
+// What a move does to the phase, found by making it on a copy: adds a
+// reduction, undoes one, or neither (including a reduction that its own
+// turn immediately undoes).
+function moveEffect(m){
+  const q=puzzle.clone(), before=q.phaseStack.length;
+  q.move(m);
+  const after=q.phaseStack.length;
+  if(after>before) return {kind:'reduces', to:q.boxName()};
+  if(after<before) return {kind:'restores', to:q.boxName()};
+  return {kind:'keeps'};
+}
+
 function refreshMoveButtons(){
   const panel=document.getElementById('move-panel');
   panel.innerHTML='';
@@ -416,9 +437,12 @@ function refreshMoveButtons(){
     row.className='move-row';
     row.innerHTML=`<span class="move-face ${COL_CLASS[face]}">${face}</span>`;
     for(const m of moves){
-      const btn=document.createElement('button');
-      btn.className=`btn mbtn ${COL_CLASS[face]}`;
-      btn.dataset.move=m; btn.textContent=m; btn.title=`Turn ${m}`;
+      const btn=document.createElement('button'), fx=moveEffect(m);
+      btn.className=`btn mbtn ${COL_CLASS[face]} mv-${fx.kind}`;
+      btn.dataset.move=m; btn.textContent=m;
+      btn.title = fx.kind==='reduces' ? `Turn ${m}: reduces to ${pretty(fx.to)}`
+        : fx.kind==='restores' ? `Turn ${m}: restores ${pretty(fx.to)}`
+        : `Turn ${m}: keeps the shape`;
       btn.onclick=()=>doMove(m);
       btn.addEventListener('pointerenter',()=>setHoveredBtn(btn));
       btn.addEventListener('pointerleave',()=>setHoveredBtn(null));
@@ -427,6 +451,9 @@ function refreshMoveButtons(){
     panel.appendChild(row);
   }
   if(!panel.children.length) panel.innerHTML='<span class="muted">No moves possible</span>';
+  else panel.insertAdjacentHTML('beforeend',
+    '<div class="move-key"><span class="mv-keeps">keeps the shape</span>'+
+    '<span class="mv-reduces">reduces</span><span class="mv-restores">restores</span></div>');
   // the buttons were replaced, so re-find whichever one is under the pointer
   const under=lastPointer && document.elementFromPoint(...lastPointer);
   hoveredBtn = under && under.closest ? under.closest('#move-panel button[data-move]') : null;
