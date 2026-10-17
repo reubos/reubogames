@@ -258,10 +258,11 @@ console.log('      phases per preset: '+Object.entries(PRESETS).map(([n,s])=>{
     }
     // efficient mode may leave a phase only one useful layer (an I-cube's U
     // slab), so only normal mode must fill every phase
-    // single-axis phases: at most one turn per layer after the reducing move
+    // single-axis phases: at most one turn per layer, counting the reducing
+    // move that opens the phase (its layer must not get a second turn)
     res.phases.forEach((ph,i)=>{
       if(!ph.singleAxis) return;
-      const rest=ph.moves.slice(ph.opensWithReduction?1:0), layers=rest.map(m=>m.replace(/['2]$/,''));
+      const rest=ph.moves.slice(ph.opensWithReduction?1:0), layers=ph.moves.map(m=>m.replace(/['2]$/,''));
       if(new Set(layers).size!==layers.length) problems.push(`${spec} phase ${i+1} ${ph.name}: a layer turned twice (${ph.moves.join(' ')})`);
       if(new Set(rest.map(m=>E.AXIS[E.parseMove(m).face])).size>1) problems.push(`${spec} phase ${i+1} ${ph.name}: single-axis phase turned several axes (${ph.moves.join(' ')})`);
     });

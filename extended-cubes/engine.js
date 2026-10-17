@@ -547,6 +547,7 @@ function generateScramble(spec, opts={}){
   for(let i=0;;i++){
     const n=perPhase[Math.min(i,perPhase.length-1)];
     const moves=[];
+    let opening=null;   // face:layer of the move that reduced into this phase
     if(i>0){
       if(!plan.length) break;
       // reach the planned phase; re-plan if this state can't (state-dependent)
@@ -560,6 +561,7 @@ function generateScramble(spec, opts={}){
       const all=opts2.flatMap(r=>r.moves), usual=all.filter(m=>m.layer<=p.maxLayers(m.face));
       const from=usual.length?usual:all, mv=from[Math.floor(rng()*from.length)];
       p.move(mv); blocker.record(mv); moves.push(formatMove(mv));
+      opening=mv.face+':'+mv.layer;
       plan=plan.slice(1);
     }
     const pool=candidateMoves(p,wide);
@@ -586,8 +588,15 @@ function generateScramble(spec, opts={}){
       // share one axis, so their order doesn't matter
       // stick to the axis found at the start: turning these layers can open up
       // other axes part-way through, which would make it more than one turn per layer
+      // The layer that reduced into the phase has had its turn already; turning
+      // it again could only add a second turn or undo the reduction.
       const byLayer=new Map();
-      for(const mv of usable.filter(m=>axes.has(AXIS[m.face]))){ const id=mv.face+':'+mv.layer; if(!byLayer.has(id)) byLayer.set(id,[]); byLayer.get(id).push(mv); }
+      for(const mv of usable.filter(m=>axes.has(AXIS[m.face]))){
+        const id=mv.face+':'+mv.layer;
+        if(id===opening) continue;
+        if(!byLayer.has(id)) byLayer.set(id,[]);
+        byLayer.get(id).push(mv);
+      }
       for(const options of byLayer.values()){
         const keeping=options.filter(mv=>keepsPhase(p,mv));
         if(!keeping.length) continue;
