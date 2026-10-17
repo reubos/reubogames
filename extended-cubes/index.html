@@ -253,6 +253,7 @@ function rebuild(){
 function doMove(mv){
   try {
     const parsed = parseMove(mv);
+    coarsen(cubies, [gW, gH, gD]);
     applyMove(cubies, parsed);
     history.push(mv);
     redraw();
@@ -262,20 +263,22 @@ function doMove(mv){
   }
 }
 
+function replayHistory(moves){
+  cubies=buildSolved(gW,gH,gD);
+  for(const m of moves){ coarsen(cubies,[gW,gH,gD]); applyMove(cubies,m); }
+}
+
 function undoMove(){
   if(!history.length) return;
   history.pop();
-  cubies=buildSolved(gW,gH,gD);
-  for(const m of history) applyMove(cubies, m);
+  replayHistory(history);
   redraw();
   updateHistory();
 }
 
 function rewindTo(idx){
-  // rewind to just before move at idx
   history=history.slice(0,idx);
-  cubies=buildSolved(gW,gH,gD);
-  for(const m of history) applyMove(cubies, m);
+  replayHistory(history);
   redraw();
   updateHistory();
 }
@@ -387,7 +390,7 @@ document.getElementById('btn-new').onclick=rebuild;
 document.getElementById('btn-undo').onclick=undoMove;
 document.getElementById('btn-reset').onclick=()=>{
   history=[];
-  cubies=buildSolved(gW,gH,gD);
+  replayHistory(history);
   redraw();
   updateHistory();
 };
