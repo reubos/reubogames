@@ -38,6 +38,9 @@
   #stage polygon { cursor: pointer; }
   #compass { position: absolute; top: 8px; left: 8px; cursor: pointer; border-radius: 50%; }
   #compass:hover circle:first-of-type { stroke: #888; }
+  #size-note { position: absolute; top: 10px; right: 10px; text-align: right; font-size: 12px; color: #888; pointer-events: none; line-height: 1.4; }
+  #size-note b { color: #eee; font-size: 14px; font-weight: 600; }
+  #size-note.reduced b { color: #ffb347; }
 
   .history-area { margin-top: 10px; }
   .history-area label { font-size: 12px; color: #888; margin-bottom: 4px; display: block; }
@@ -81,6 +84,7 @@
 <div class="stage-wrap">
   <svg id="stage" width="100%" height="420" viewBox="0 0 400 300" preserveAspectRatio="xMidYMid meet"></svg>
   <svg id="compass" viewBox="-50 -50 100 100" width="100" height="100"><title>Reset view</title></svg>
+  <div id="size-note"></div>
 </div>
 <p class="hint">Click a sticker to turn that layer clockwise (ctrl-click = anticlockwise, shift-click = double). Drag with the right mouse button to rotate the view; click the compass to reset it.</p>
 
@@ -408,8 +412,19 @@ function rewindTo(idx){
   updateHistory();
 }
 
+function updateSizeNote(){
+  const note=document.getElementById('size-note');
+  const full=`${gW}×${gH}×${gD}`, cur=eff.join('×');
+  const reduced=cur!==full;
+  note.className=reduced?'reduced':'';
+  note.innerHTML = reduced
+    ? `Reduced to<br><b>${cur}</b><br>from ${full}`
+    : `<b>${full}</b>`;
+}
+
 function redraw(){
   renderSVG(cubies, null, null);
+  updateSizeNote();
   document.getElementById('solved-indicator').innerHTML =
     isSolved(cubies) ? '<span class="solved-badge">Solved!</span>' : '';
 }
