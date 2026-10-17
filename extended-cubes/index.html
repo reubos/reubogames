@@ -67,6 +67,8 @@
   #move-msg { color: var(--error); font-size: 12px; min-height: 1.2em; margin: -4px 0 6px; }
 
   /* move buttons */
+  .move-options { margin-bottom: 6px; }
+  .move-options label { font-size: 12px; color: var(--muted-strong); }
   .move-panel { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
   .move-row { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
   .move-face { width: 18px; font-size: 12px; font-weight: 600; color: var(--muted-strong); border: none; }
@@ -128,7 +130,6 @@
 <div class="topbar">
   <h1>Extended Cuboid Simulator</h1>
   <div class="row">
-    <label title="Move buttons and scrambles use slice moves (eg. 3R), turning only that one layer. When off they use wide moves (eg. 3Rw), turning every layer from the outside to that one. Scrambles reach roughly equally random states either way."><input type="checkbox" id="opt-slice"> Slice moves</label>
     <label>Theme <select id="opt-theme" aria-label="Colour theme"><option value="auto">Auto</option><option value="light">Light</option><option value="dark">Dark</option></select></label>
   </div>
 </div>
@@ -169,6 +170,9 @@
   <p>Layer sizes leave out the face's own axis (U/D: W×D, R/L: H×D, F/B: W×H) and must match the core's parity on both sides, e.g. on the F face of a 3x4x5: 3x4, 5x4, 5x2, 1x2.</p>
 </details>
 
+<div class="move-options">
+  <label title="Move buttons and scrambles use slice moves (eg. 3R), turning only that one layer. When off they use wide moves (eg. 3Rw), turning every layer from the outside to that one. Scrambles reach roughly equally random states either way."><input type="checkbox" id="opt-slice"> Slice moves</label>
+</div>
 <div class="move-panel" id="move-panel">
   <!-- filled by JS -->
 </div>
