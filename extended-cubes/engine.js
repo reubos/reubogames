@@ -651,9 +651,13 @@ function generateScramble(spec, opts={}){
         if(!plan.length) break;
         opts2=reductionsFrom(p,wide,triggerMoves(p,wide)).filter(r=>boxEq(r.box,plan[0]));
       }
-      // prefer a move within the outer half, as the rest of the scramble uses
-      const all=opts2.flatMap(r=>r.moves), usual=all.filter(m=>m.layer<=p.maxLayers(m.face));
-      const from=usual.length?usual:all, mv=from[Math.floor(rng()*from.length)];
+      // Prefer a move within the outer half, as the rest of the scramble uses,
+      // and one the no-repeat rule allows: the move before it may well have
+      // turned the same layer (R2 then R is just R'). Relax those only if no
+      // reducing move meets them.
+      const all=opts2.flatMap(r=>r.moves), outer=m=>m.layer<=p.maxLayers(m.face);
+      const tiers=[m=>outer(m)&&blocker.allows(m,false), m=>blocker.allows(m,false), m=>outer(m)&&blocker.allows(m,true), m=>blocker.allows(m,true), outer, ()=>true];
+      const from=tiers.map(f=>all.filter(f)).find(l=>l.length), mv=from[Math.floor(rng()*from.length)];
       p.move(mv); blocker.record(mv); moves.push(formatMove(mv));
       opening=mv.face+':'+mv.layer;
       plan=plan.slice(1);

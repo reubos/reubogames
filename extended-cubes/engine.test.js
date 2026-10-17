@@ -300,6 +300,11 @@ console.log('      phases per preset: '+Object.entries(PRESETS).map(([n,s])=>{
       if(new Set(rest.map(m=>E.AXIS[E.parseMove(m).face])).size>1) problems.push(`${spec} phase ${i+1} ${ph.name}: single-axis phase turned several axes (${ph.moves.join(' ')})`);
     });
     if(!efficient) res.phases.forEach((ph,i)=>{ if(!ph.singleAxis && ph.moves.length<25) problems.push(`${spec} (${wide?'wide':'slice'}${efficient?', efficient':''}) phase ${i+1} ${ph.name}: only ${ph.moves.length} of 25 moves`); });
+    // no move turns the same layer as the one before it (R2 R is just R')
+    for(let i=1;i<res.moves.length;i++){
+      const a=E.parseMove(res.moves[i-1]), b=E.parseMove(res.moves[i]);
+      if(a.face===b.face && a.layer===b.layer) problems.push(`${spec}: ${res.moves[i-1]} then ${res.moves[i]} wastes a move`);
+    }
     if(wide && res.moves.some(m=>/^\d+[RLUDFB](?!w)/.test(m))) problems.push(`${spec}: slice move in wide mode`);
     if(!wide && res.moves.some(m=>m.includes('w'))) problems.push(`${spec}: wide move in slice mode`);
   }
