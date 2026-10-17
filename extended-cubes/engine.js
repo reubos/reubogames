@@ -230,11 +230,15 @@ class Puzzle {
     return q;
   }
   layerCount(k){ return new Set(this.cubies.map(c=>c.fc[k])).size; }
-  // the fc values a move would turn, or null if it names no layer
+  // the fc values a move would turn, or null if it names no layer or would
+  // turn every piece (a whole-puzzle rotation, e.g. U once a 1-layer core has
+  // bandaged all its tiers together)
   selection(mv){
     const k=IDX[AXIS[mv.face]];
     if(mv.layer<1 || (!mv.wide && mv.layer>this.layerCount(k))) return null;
-    return {axK:k, fcs:selectCoords(this.cubies,mv)};
+    const fcs=selectCoords(this.cubies,mv);
+    if(this.cubies.every(c=>fcs.has(c.fc[k]))) return null;
+    return {axK:k, fcs};
   }
   // the phase box after `mv` (=== this.eff when it keeps the phase), or null if
   // the move can't be made
@@ -275,8 +279,15 @@ class Puzzle {
   }
   isSolved(){ return this.cubies.every(c=>vecEq(c.pos,c.home)&&matEq(c.ori,I3)); }
   isReduced(){ return !boxEq(this.eff,this.fullBox); }
-  // turnable layers a face can name: up to half the axis, as on an N×N×N
-  maxLayers(face){ return Math.floor(boxSize(this.eff)[IDX[AXIS[face]]]/2); }
+  // Layers a face can name: up to half the axis, as on an N×N×N, where a middle
+  // slice is equivalent to the two outer layers plus a rotation. On an
+  // off-centre axis (a Triangle Prism's base-to-apex) that equivalence fails,
+  // so the middle layer is reachable too.
+  maxLayers(face){
+    const k=IDX[AXIS[face]], n=boxSize(this.eff)[k];
+    return this.offCentre(k) ? Math.ceil(n/2) : Math.floor(n/2);
+  }
+  offCentre(k){ return this.eff[k][0]!==-this.eff[k][1]; }
   boxName(box=this.eff){
     if(boxEq(box,this.fullBox)) return formatSpec(this.spec);
     return describeBox(this.spec,this.shape,box) || boxSize(box).join('x')+' box';
@@ -291,7 +302,9 @@ class Puzzle {
 function candidateMoves(p, wide){
   const out=[];
   for(const face of FACES){
-    const max=p.maxLayers(face);
+    const k=IDX[AXIS[face]], n=boxSize(p.eff)[k];
+    // an off-centre odd axis adds its middle layer, offered from one face only
+    const max = p.offCentre(k) && n%2===1 && !POSITIVE.has(face) ? Math.floor(n/2) : p.maxLayers(face);
     for(let l=1;l<=max;l++) for(const mod of ['',"'",'2']) out.push({face,layer:l,mod,wide:wide&&l>1});
   }
   return out;

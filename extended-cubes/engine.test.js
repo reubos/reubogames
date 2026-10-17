@@ -90,6 +90,18 @@ eq(trace('3x3x3 +R +L +D',['2R']), ['3x3x3 +R +L'], 'T-cube: 2R reduces to 3x3x3
   check(q.isSolved() && !q.isReduced(), "...R R' is solved and unreduced");
 }
 
+{
+  // Triangle Prism: core one layer tall, so the turning centre is in the base
+  const p=new E.Puzzle('5x1x5 +U(3x5,1x5)');
+  p.move('F2');
+  eq([p.boxName(), p.layerCount(1), p.move('U')], ['5x1x5',1,false], 'Triangle Prism: F2 bandages every tier to the base, and U (a whole-puzzle rotation) is refused');
+  eq(trace('3x3x1',['F','F2','U2']), ['✗','✗','3x3x1'], '3x3x1: F and F2 would turn every piece, so they are refused');
+  const q=new E.Puzzle('5x1x5 +U(3x5,1x5)'); q.move('2Uw');
+  const moves=new Set(E.generateScramble('5x1x5 +U(3x5,1x5)',{movesPerPhase:[60],rng:mulberry32(4)}).phases
+    .find(ph=>ph.name==='3x1x3 +U(3x3,1x3)').moves.map(m=>m.replace(/['2]$/,'')));
+  check(moves.has('2U') || moves.has('2Uw'), `Triangle Prism phase 3x1x3 +U(3x3,1x3) also turns the middle tier (${[...moves].join(', ')})`);
+}
+
 console.log('--- replay determinism');
 {
   const rng=mulberry32(1), moves=['R','L','U','D','F','B'], mods=['',"'",'2'];
