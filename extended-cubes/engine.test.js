@@ -115,7 +115,20 @@ eq(trace('3x3x3 +R +L +D',['2R']), ['5x3x3'], 'T-cube: 2R reduces to 3x3x3 +R +L
   p.move('2Rw2'); const mid=p.isReduced(); p.move('2Lw2');
   const s=p.selection(E.parseMove('D'));
   eq([mid, p.isReduced(), p.boxName(), p.cubies.filter(c=>s.fcs.has(c.fc[1])).length, p.effAfter(E.parseMove('D'))===p.eff],
-    [true, false, '3x3x3 +U +R', 9, true], 'L-cube 2Rw2 2Lw2: upside down but whole, so D turns just the 3x3 slab without reducing');
+    [true, false, '3x3x3 +D +R', 9, true], 'L-cube 2Rw2 2Lw2: upside down but whole (named 3x3x3 +D +R), so D turns just the 3x3 slab without reducing');
+  // rotateSpec must build exactly the rotated shape, for every rotation of
+  // layouts with uneven sizes
+  const keyOf=ps=>ps.map(q=>q.join(',')).sort().join('|');
+  let bad=0;
+  for(const s of ['3x4x5 +F(5x4,3x2) +R(2x3)','5x1x5 +U(3x5,1x5)','3x3x3 +D(5x5) +L(5x5) +B(5x5)','2x3x4 +U(4x2)']){
+    const sp=E.parseSpec(s), shape=E.shapePositions(sp);
+    const perms=[[0,1,2],[0,2,1],[1,0,2],[1,2,0],[2,0,1],[2,1,0]];
+    for(const pm of perms) for(const sg of [[1,1,1],[1,1,-1],[1,-1,1],[1,-1,-1],[-1,1,1],[-1,1,-1],[-1,-1,1],[-1,-1,-1]]){
+      const M=[0,1,2].map(r=>[0,1,2].map(c=>c===pm[r]?sg[r]:0));
+      if(keyOf(shape.map(q=>E.matVec(M,q)))!==keyOf(E.shapePositions(E.rotateSpec(sp,M)))) bad++;
+    }
+  }
+  check(bad===0, `rotateSpec rebuilds exactly the rotated shape for every axis mapping (${bad} mismatches)`);
   const q=new E.Puzzle('3x3x3 +R +U');
   E.parseSequence("R2 U2 R U R U R2 U2 R2 U2 R2 U2 R U' R2 U R U R' U2 R' U' R U R' U' R U2 R' U' R U R2 U' R' U' R U2 R U 2Lw' L2 R 2Rw L' L R R2 2Rw 2Rw' 2Rw2 L' R2 R L L2 L' 2Rw' 2Lw 2Lw 2Lw L R").forEach(m=>q.move(m));
   check(!q.isReduced() && q.effAfter(E.parseMove('D'))===q.eff, "L-cube: the user's long sequence ends unreduced with D free");

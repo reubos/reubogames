@@ -314,6 +314,25 @@ function rotateBox(M, b){
     return M[r][c]>0 ? [b[c][0],b[c][1]] : [-b[c][1],-b[c][0]]; });
 }
 
+// A layout turned by a whole-puzzle rotation: the core's sizes move to their
+// new axes and each face's stack moves to the face it now points at, so
+// "3x3x3 +U +R" turned upside down is "3x3x3 +D +R".
+function rotateSpec(spec, M){
+  const NAME={'0,1':'R','0,-1':'L','1,1':'U','1,-1':'D','2,1':'F','2,-1':'B'};
+  const newAxis=k=>[0,1,2].find(r=>M[r][k]!==0);
+  const core=[0,0,0];
+  for(let k=0;k<3;k++) core[newAxis(k)]=spec.core[k];
+  const ext={}; for(const f of FACE_ORDER) ext[f]=[];
+  for(const f of FACE_ORDER){
+    const k=IDX[AXIS[f]], r=newAxis(k), to=NAME[r+','+FACE_SIGN[f]*M[r][k]];
+    const [a]=FACE_AXES[f], [A]=FACE_AXES[to];
+    // sizes are written in W,H,D order without the face's axis: keep each
+    // size with its axis as the axes move
+    ext[to]=spec.ext[f].map(([p,q])=> newAxis(a)===A ? [p,q] : [q,p]);
+  }
+  return {core, ext};
+}
+
 class Puzzle {
   constructor(spec){
     this.spec = typeof spec==='string' ? parseSpec(spec) : spec;
@@ -458,7 +477,7 @@ class Puzzle {
   // simplest name for its shape's pieces inside its box. Boxes passed in from
   // a plan are in the solved orientation; the current phase uses its own.
   boxName(box=this.eff, frame = box===this.eff ? this.frame : I3){
-    if(boxEq(box,rotateBox(frame,this.fullBox))) return formatSpec(this.spec);
+    if(boxEq(box,rotateBox(frame,this.fullBox))) return formatSpec(matEq(frame,I3) ? this.spec : rotateSpec(this.spec,frame));
     const k=boxKey(box)+'/'+frameKey(frame), s=this.shared;
     if(!s.names.has(k))
       s.names.set(k, nameShape(this.cellsFor(box,frame).map(c=>c.split(',').map(Number))) || boxSize(box).join('x')+' box');
@@ -689,7 +708,7 @@ function generateScramble(spec, opts={}){
 const Engine = {
   COLORS, DIRS, I3, AXIS, IDX, POSITIVE, FACES, FACE_ORDER,
   matVec, transpose, matMul, vecEq,
-  parseSpec, formatSpec, shapePositions, buildSolved, nameShape,
+  parseSpec, formatSpec, rotateSpec, shapePositions, buildSolved, nameShape,
   boundingBox, layerGrid, boxSize, inBox, boxEq, boxKey, clampToBox,
   parseMove, moveStr, formatMove, parseSequence, moveSweep, selectCoords, applyMove, worldStickers,
   Puzzle, planPhases, generateScramble, keepsPhase, phaseHasMoves, phaseSummary,

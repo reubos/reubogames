@@ -215,7 +215,7 @@
   <div id="scramble-out"></div>
 </section>
 
-<script src="engine.js?v=80414ee9"></script>
+<script src="engine.js?v=00eb067e"></script>
 <script>
 const { DIRS, AXIS, IDX, POSITIVE, matVec, parseSpec, formatSpec, parseMove, moveStr,
   worldStickers, inBox, boxSize, Puzzle, planPhases, generateScramble, phaseSummary, parseSequence, moveSweep } = Engine;
@@ -531,7 +531,8 @@ function updateSizeNote(){
   // arm standing upright that the named shape has lying flat).
   const occ=new Set(puzzle.cubies.map(c=>c.pos.join(',')));
   boxHoverWhole = reduced && ![...puzzle.shapeCells()].every(k=>occ.has(k));
-  note.innerHTML = !reduced ? `<b>${full}</b>`
+  // unreduced: the layout as it currently sits (an upside-down L-cube is +D +R)
+  note.innerHTML = !reduced ? `<b>${pretty(puzzle.boxName())}</b>`
     : boxHoverWhole
       ? `Turns as<br><b title="Highlight the pieces in this layer grid">${boxSize(puzzle.eff).join('×')}</b><br>from ${full}`
       : `Reduced to<br><b title="Highlight this shape">${pretty(puzzle.boxName())}</b><br>from ${full}`;
