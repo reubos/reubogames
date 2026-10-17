@@ -310,8 +310,10 @@ function renderSVG(cubies){
       if(-nc[0]*cv[0]-nc[1]*cv[1]+nc[2]*(eye-cv[2]) <= 1e-9) continue;
       const corners=[[+1,+1],[+1,-1],[-1,-1],[-1,+1]].map(([su,sv])=>
         projectPt([center[0]+su*u0[0]+sv*v0[0], center[1]+su*u0[1]+sv*v0[1], center[2]+su*u0[2]+sv*v0[2]]));
-      const highlighting = boxHover || hover;
-      const isHi = boxHover ? inBox(c.pos,eff) : hover && c.fc[hover.axK]===hover.fc;
+      const highlighting = boxHover || btnHover || hover;
+      const isHi = boxHover ? inBox(c.pos,eff)
+        : btnHover ? btnHover.fcs.has(c.fc[btnHover.axK])
+        : hover && c.fc[hover.axK]===hover.fc;
       // headlight, as in cuboid-scrambler: brightness tracks how face-on a side is
       const light=(AMBIENT+DIFFUSE*Math.max(0,nc[2])) * (highlighting && !isHi ? 0.45 : 1);
       const col = shade(HEX[ws[dir]]||HEX.Body, light);
@@ -408,6 +410,7 @@ let cubies = buildSolved(gShape);
 let history = [];
 let currentLayer = 1;
 let hover = null; // {axK, fc} of the layer under the cursor
+let hoveredBtn = null, btnHover = null; // move button under the pointer, and {axK, fcs} it would turn
 let boxHover = false; // pointer is on the reduced size: highlight that sub-cuboid
 
 function rebuild(){
@@ -626,10 +629,26 @@ function refreshMoveLabels(){
     btn.disabled = !m;
     btn.title = m ? `Turn ${m}` : 'This face has no turnable layer';
   }
+  updateBtnHover();
+}
+// the same group performMove would turn for the hovered button's move
+function updateBtnHover(){
+  btnHover=null;
+  const m=hoveredBtn && buttonMove(hoveredBtn.dataset.face, hoveredBtn.dataset.mod);
+  if(!m) return;
+  const mv=parseMove(m), k=IDX[AXIS[mv.face]];
+  if(!mv.wide && mv.layer>new Set(cubies.map(c=>c.fc[k])).size) return;
+  btnHover={axK:k, fcs:selectCoords(cubies,mv)};
+}
+function setHoveredBtn(btn){
+  hoveredBtn=btn;
+  updateBtnHover();
+  renderSVG(cubies);
 }
 function updateMoveButtons(){
   const panel=document.getElementById('move-panel');
   panel.innerHTML='';
+  hoveredBtn=null; btnHover=null;
   const pairs=[['R','L'],['U','D'],['F','B']];
   for(const [a,b] of pairs){
     for(const [face,mods] of [[a,['',"'","2"]],[b,['',"'","2"]]]){
@@ -638,6 +657,8 @@ function updateMoveButtons(){
         btn.className=`btn mbtn ${COL_CLASS[face]}`;
         btn.dataset.face=face; btn.dataset.mod=mod;
         btn.onclick=()=>{ const m=buttonMove(face,mod); if(m) doMove(m); };
+        btn.addEventListener('pointerenter',()=>setHoveredBtn(btn));
+        btn.addEventListener('pointerleave',()=>setHoveredBtn(null));
         panel.appendChild(btn);
       }
       // separator between the two halves of a pair
