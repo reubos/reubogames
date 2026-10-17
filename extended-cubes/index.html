@@ -56,6 +56,20 @@
   .muted { color: #888; font-size: 12px; }
   .solved-badge { display: inline-block; padding: 2px 8px; background: #1a5; border-radius: 4px; font-size: 12px; font-weight: 600; margin-left: 8px; }
   .hint { font-size: 11px; color: #666; margin-top: 4px; }
+
+  .scramble-area { margin-top: 18px; border-top: 1px solid #333; padding-top: 12px; }
+  .scramble-area h2 { font-size: 14px; font-weight: 600; margin: 0 0 10px; }
+  .slider-row { display: grid; grid-template-columns: minmax(0,1fr) minmax(80px,180px) 52px; gap: 8px; align-items: center; font-size: 12px; margin-bottom: 6px; }
+  .slider-row span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #aaa; }
+  .slider-row input[type=range] { width: 100%; }
+  .phase-label { font-size: 12px; color: #aaa; margin: 10px 0 4px; }
+  .phase-label b { color: #ffb347; font-weight: 600; }
+  .phase-moves { font-size: 14px; line-height: 1.8; word-break: break-word; }
+  .smove { cursor: pointer; padding: 1px 3px; border-radius: 3px; }
+  .smove:hover { background: #335; }
+  .smove.done { color: #777; }
+  .smove.cur { background: #446; color: #fff; }
+  .full-scramble { font-family: ui-monospace, Consolas, monospace; font-size: 12px; background: #181818; border: 1px solid #333; border-radius: 5px; padding: 6px 8px; word-break: break-word; margin-top: 4px; }
 </style>
 </head>
 <body>
@@ -124,142 +138,23 @@
   </div>
 </div>
 
+<section class="scramble-area">
+  <h2>Scramble</h2>
+  <div id="phase-sliders"></div>
+  <div class="row">
+    <label title="Scramble using slice moves (eg. 3R), turning only that one layer. When off, scramble using wide moves (eg. 3Rw), turning every layer from the outside to that one. Both reach roughly equally random states."><input type="checkbox" id="opt-slice"> Slice moves</label>
+    <label title="On the axis that bandages next phase, only scramble the layers whose independence is about to be lost. Deeper layers survive the reduction and get mixed in later phases."><input type="checkbox" id="opt-efficient"> Efficient mode</label>
+    <button id="btn-scramble">Generate scramble</button>
+  </div>
+  <div id="scramble-out"></div>
+</section>
+
+<script src="engine.js"></script>
 <script>
-/* ===================== engine (from sim-proto.js) ===================== */
-const COLORS = { '+x':'Red','-x':'Orange','+y':'White','-y':'Yellow','+z':'Green','-z':'Blue' };
+const { DIRS, AXIS, IDX, POSITIVE, matVec, parseSpec, formatSpec, parseMove, moveStr,
+  worldStickers, inBox, boxSize, Puzzle, planPhases, generateScramble, phaseHasMoves } = Engine;
 const HEX = { Red:'#dd2222', Orange:'#ff8800', White:'#f0f0f0', Yellow:'#ffdd00', Green:'#00aa55', Blue:'#0066cc', Body:'#2a2a2a' };
-const DIRS = { '+x':[1,0,0],'-x':[-1,0,0],'+y':[0,1,0],'-y':[0,-1,0],'+z':[0,0,1],'-z':[0,0,-1] };
-const I3 = [[1,0,0],[0,1,0],[0,0,1]];
-const dot = (a,b) => a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
-const matVec = (M,v) => [dot(M[0],v),dot(M[1],v),dot(M[2],v)];
-const transpose = (M) => [0,1,2].map(i=>[M[0][i],M[1][i],M[2][i]]);
-const matMul = (A,B) => { const Bt=transpose(B); return A.map(r=>Bt.map(c=>dot(r,c))); };
-const vecEq = (a,b) => a[0]===b[0]&&a[1]===b[1]&&a[2]===b[2];
-const matEq = (A,B) => A.every((r,i)=>vecEq(r,B[i]));
-const P = { x:[[1,0,0],[0,0,-1],[0,1,0]], y:[[0,0,1],[0,1,0],[-1,0,0]], z:[[0,-1,0],[1,0,0],[0,0,1]] };
-const matPow = (M,e) => e===1?M:e===-1?transpose(M):matMul(M,M);
-const AXIS = {R:'x',L:'x',U:'y',D:'y',F:'z',B:'z'};
-const IDX = {x:0,y:1,z:2};
-const POSITIVE = new Set(['R','U','F']);
-const baseSign = f => POSITIVE.has(f)?-1:1;
-// Puzzle notation: "3x3x3 +R +2U +F(5x4) +B(5x4,3x2)". The core W×H×D is
-// centred on the turning centre; each +face adds layers outwards from the
-// core's face. A bare face is a layer the size of the core's face. Sizes use
-// W,H,D order without the face's own axis (U/D: W×D, R/L: H×D, F/B: W×H) and
-// must share parity with the core there, which keeps every turn on the lattice.
-// Boxes are per-axis [lo,hi] bounds on the doubled lattice.
-const FACE_AXES = {U:[0,2],D:[0,2],R:[1,2],L:[1,2],F:[0,1],B:[0,1]};
-const FACE_SIGN = {R:1,U:1,F:1,L:-1,D:-1,B:-1};
-const FACE_ORDER = ['U','D','R','L','F','B'];
 const MAX_CUBIES = 4000;
-const centred = n => { const r=[]; for(let v=-(n-1);v<=n-1;v+=2) r.push(v); return r; };
-
-function parseSpec(text){
-  const toks=text.trim().replace(/×/g,'x').split(/\s+/).filter(Boolean);
-  const m=(toks.shift()||'').match(/^(\d+)x(\d+)x(\d+)$/i);
-  if(!m) throw new Error('Start with the core size, e.g. 3x3x3');
-  const core=[+m[1],+m[2],+m[3]];
-  if(core.some(n=>n<1)) throw new Error('Core sizes must be at least 1');
-  const ext={}; for(const f of FACE_ORDER) ext[f]=[];
-  for(const t of toks){
-    const e=t.match(/^\+(\d*)([UDRLFB])(?:\(([^)]*)\))?$/i);
-    if(!e) throw new Error(`Can't read "${t}" (expected e.g. +U, +2U or +F(5x4))`);
-    const face=e[2].toUpperCase(), [a,b]=FACE_AXES[face], count=e[1]===''?1:+e[1];
-    const sizes = e[3]===undefined ? [[core[a],core[b]]] : e[3].split(',').map(s=>{
-      const q=s.trim().match(/^(\d+)x(\d+)$/i);
-      if(!q) throw new Error(`Can't read the size "${s}" in "${t}"`);
-      return [+q[1],+q[2]];
-    });
-    if(e[1]!=='' && sizes.length>1) throw new Error(`"${t}": give a count or a list of sizes, not both`);
-    for(const [p,q] of sizes){
-      if(p<1 || q<1) throw new Error(`"${t}": layer sizes must be at least 1`);
-      if(p%2!==core[a]%2 || q%2!==core[b]%2)
-        throw new Error(`"${t}": a ${p}x${q} layer doesn't match the parity of the core's ${core[a]}x${core[b]} ${face} face`);
-    }
-    for(let i=0;i<count;i++) ext[face].push(...sizes);
-  }
-  return {core, ext};
-}
-
-function formatSpec({core,ext}){
-  let s=core.join('x');
-  for(const f of FACE_ORDER){
-    const L=ext[f]; if(!L.length) continue;
-    const [a,b]=FACE_AXES[f];
-    if(L.every(([p,q])=>p===core[a]&&q===core[b])) s+=` +${L.length>1?L.length:''}${f}`;
-    else if(L.every(([p,q])=>p===L[0][0]&&q===L[0][1])) s+=` +${L.length>1?L.length:''}${f}(${L[0].join('x')})`;
-    else s+=` +${f}(${L.map(l=>l.join('x')).join(',')})`;
-  }
-  return s;
-}
-
-function shapePositions({core,ext}){
-  const map=new Map(), add=p=>map.set(p.join(','),p);
-  for(const x of centred(core[0])) for(const y of centred(core[1])) for(const z of centred(core[2])) add([x,y,z]);
-  for(const f of FACE_ORDER){
-    const k=IDX[AXIS[f]], [a,b]=FACE_AXES[f];
-    ext[f].forEach(([p,q],i)=>{
-      const c=FACE_SIGN[f]*((core[k]-1)+2*(i+1));
-      for(const u of centred(p)) for(const v of centred(q)){ const pos=[0,0,0]; pos[k]=c; pos[a]=u; pos[b]=v; add(pos); }
-    });
-  }
-  return [...map.values()];
-}
-
-const boundingBox = ps => [0,1,2].map(k=>[Math.min(...ps.map(p=>p[k])), Math.max(...ps.map(p=>p[k]))]);
-const boxSize = b => b.map(([lo,hi])=>(hi-lo)/2+1);
-const inBox = (p,b) => p.every((v,k)=>v>=b[k][0] && v<=b[k][1]);
-const boxEq = (a,b) => a.every((r,k)=>r[0]===b[k][0] && r[1]===b[k][1]);
-
-// every exposed side of the solved shape is stickered in that direction's colour
-function buildSolved(shape){
-  const occ=new Set(shape.map(p=>p.join(',')));
-  return shape.map(p=>{
-    const st={};
-    for(const [dir,n] of Object.entries(DIRS))
-      if(!occ.has([p[0]+2*n[0],p[1]+2*n[1],p[2]+2*n[2]].join(','))) st[dir]=COLORS[dir];
-    return {home:[...p],pos:[...p],ori:I3,fc:[...p],stickers:st};
-  });
-}
-
-function parseMove(m){
-  const x=m.match(/^(\d+)?([RLUDFB])(w?)(2|')?$/);
-  if(!x)throw new Error('bad move: '+m);
-  return {layer:x[1]?+x[1]:1,face:x[2],wide:x[3]==='w',mod:x[4]||''};
-}
-function selectCoords(cubies,mv){
-  const {face,layer,wide}=mv;
-  const k=IDX[AXIS[face]], pos=POSITIVE.has(face);
-  const coords=[...new Set(cubies.map(c=>c.fc[k]))].sort((a,b)=>pos?b-a:a-b);
-  return new Set(wide?coords.slice(0,layer):[coords[layer-1]]);
-}
-function applyMove(cubies,move){
-  const mv=typeof move==='string'?parseMove(move):move;
-  const ax=AXIS[mv.face], k=IDX[ax];
-  const sel=selectCoords(cubies,mv);
-  const sign=baseSign(mv.face), exp=mv.mod==='2'?2:mv.mod==="'"?-sign:sign, R=matPow(P[ax],exp);
-  for(const c of cubies){
-    if(!sel.has(c.fc[k]))continue;
-    c.pos=matVec(R,c.pos); c.ori=matMul(R,c.ori); c.fc=matVec(R,c.fc);
-  }
-}
-function worldStickers(c){
-  const out={}, oriT=transpose(c.ori);
-  for(const [key,wv] of Object.entries(DIRS)){
-    const lv=matVec(oriT,wv);
-    const lk=Object.keys(DIRS).find(kk=>vecEq(DIRS[kk],lv));
-    if(c.stickers[lk])out[key]=c.stickers[lk];
-  }
-  return out;
-}
-function isSolved(cubies){
-  return cubies.every(c=>vecEq(c.pos,c.home)&&matEq(c.ori,I3));
-}
-const clampToBox = (p,b) => p.map((v,k)=>Math.max(b[k][0],Math.min(b[k][1],v)));
-function coarsen(cubies,box){
-  for(const c of cubies) c.fc=clampToBox(c.fc,box);
-}
-function moveStr(face,layer,mod){ return (layer>1?String(layer):'')+face+mod; }
 
 /* ===================== renderer ===================== */
 const S=20;
@@ -288,8 +183,8 @@ function shade(hex,f){
 const INPLANE = {'+x':[[0,1,0],[0,0,1]], '+y':[[1,0,0],[0,0,1]], '+z':[[1,0,0],[0,1,0]]};
 INPLANE['-x']=INPLANE['+x']; INPLANE['-y']=INPLANE['+y']; INPLANE['-z']=INPLANE['+z'];
 
-function renderSVG(cubies){
-  const M=viewMatrix();
+function renderSVG(){
+  const cubies=puzzle.cubies, M=viewMatrix();
   const toCam=p=>matVec(M,p);
   const E=[0,1,2].map(k=>Math.max(...cubies.map(c=>Math.abs(c.pos[k])+1)));
   const Rw=Math.hypot(...E)||1, eye=PERSP*Rw;
@@ -310,10 +205,11 @@ function renderSVG(cubies){
       if(-nc[0]*cv[0]-nc[1]*cv[1]+nc[2]*(eye-cv[2]) <= 1e-9) continue;
       const corners=[[+1,+1],[+1,-1],[-1,-1],[-1,+1]].map(([su,sv])=>
         projectPt([center[0]+su*u0[0]+sv*v0[0], center[1]+su*u0[1]+sv*v0[1], center[2]+su*u0[2]+sv*v0[2]]));
-      const highlighting = boxHover || btnHover || hover;
-      const isHi = boxHover ? inBox(c.pos,eff)
+      const highlighting = boxHover || btnHover || hover || stepHi;
+      const isHi = boxHover ? inBox(c.pos,puzzle.eff)
         : btnHover ? btnHover.fcs.has(c.fc[btnHover.axK])
-        : hover && c.fc[hover.axK]===hover.fc;
+        : hover ? c.fc[hover.axK]===hover.fc
+        : stepHi && stepHi.fcs.has(c.fc[stepHi.axK]);
       // headlight, as in cuboid-scrambler: brightness tracks how face-on a side is
       const light=(AMBIENT+DIFFUSE*Math.max(0,nc[2])) * (highlighting && !isHi ? 0.45 : 1);
       const col = shade(HEX[ws[dir]]||HEX.Body, light);
@@ -366,7 +262,7 @@ function renderCompass(M){
   const setHover=h=>{
     if((h&&hover&&h.axK===hover.axK&&h.fc===hover.fc) || (!h&&!hover)) return;
     hover=h ? {axK:h.axK, fc:h.fc} : null;
-    renderSVG(cubies);
+    renderSVG();
   };
   svg.addEventListener('contextmenu',e=>e.preventDefault());
   svg.addEventListener('pointerdown',e=>{
@@ -390,7 +286,7 @@ function renderCompass(M){
       viewYaw+=(e.clientX-drag.x)*0.01;
       viewPitch=Math.max(-Math.PI/2,Math.min(Math.PI/2,viewPitch+(e.clientY-drag.y)*0.01));
       drag.x=e.clientX; drag.y=e.clientY;
-      renderSVG(cubies);
+      renderSVG();
       return;
     }
     setHover(hitOf(e.target));
@@ -404,114 +300,42 @@ function renderCompass(M){
 })();
 
 /* ===================== state ===================== */
-let gSpec = parseSpec('3x3x3');
-let gShape = shapePositions(gSpec); // solved positions
-let cubies = buildSolved(gShape);
+let puzzle = new Puzzle('3x3x3');
 let history = [];
 let currentLayer = 1;
 let hover = null; // {axK, fc} of the layer under the cursor
 let hoveredBtn = null, btnHover = null; // move button under the pointer, and {axK, fcs} it would turn
-let boxHover = false; // pointer is on the reduced size: highlight that sub-cuboid
+let boxHover = false; // pointer is on the reduced size: highlight that shape
+const pretty = s => s.replace(/(\d)x(?=\d)/g,'$1×');
 
 function rebuild(){
-  let spec;
-  try { spec=parseSpec(document.getElementById('spec').value); }
+  let next;
+  try { next=new Puzzle(document.getElementById('spec').value); }
   catch(e){ showMsg(e.message); return; }
-  const shape=shapePositions(spec);
-  if(shape.length>MAX_CUBIES){ showMsg(`That puzzle has ${shape.length} cubies, more than the ${MAX_CUBIES} this can draw`); return; }
-  gSpec=spec; gShape=shape;
-  document.getElementById('spec').value=formatSpec(gSpec);
+  if(next.cubies.length>MAX_CUBIES){ showMsg(`That puzzle has ${next.cubies.length} cubies, more than the ${MAX_CUBIES} this can draw`); return; }
+  puzzle=next;
+  document.getElementById('spec').value=formatSpec(puzzle.spec);
   syncPreset();
-  cubies=buildSolved(gShape);
-  resetPhases();
   history=[];
   currentLayer=1;
   showMsg('');
+  clearScramble();
+  renderPhaseSliders();
   updateLayerButtons();
   updateMoveButtons();
   redraw();
   updateHistory();
 }
 
-// Reduction phases, as in cuboid-scrambler. `eff` is the current phase's box
-// ([lo,hi] per axis); pieces' functional coords are clamped into it. What
-// matters for a turn is the cross-section of the layer actually being turned
-// (in functional coords). A quarter turn keeps the phase if that cross-section
-// is a square centred on the turning axis; otherwise, if both sides share
-// parity, it starts a new phase: those two sides of the box shrink to the
-// largest centred square inside the cross-section, so the outer layers bandage
-// onto the outermost remaining one (coarsen) before the turn is applied. On a
-// plain cuboid this is the scrambler's "larger side reduces to the smaller".
-// A half turn only needs each side centred, so it never reduces a plain
-// cuboid, but an I-cube's R2 trims each side to its largest centred range.
-let eff = boundingBox(gShape);
-let phaseStack = []; // boxes of the phases left behind, oldest first
-const parity = v => ((v%2)+2)%2;
-function crossSection(members,a){
-  return [Math.min(...members.map(c=>c.fc[a])), Math.max(...members.map(c=>c.fc[a]))];
-}
-function effAfterQuarterTurn(k,members){
-  const [i,j]=[0,1,2].filter(a=>a!==k);
-  const [li,hi]=crossSection(members,i), [lj,hj]=crossSection(members,j);
-  if(li===-hi && lj===-hj && hi===hj) return eff;
-  const r=Math.min(hi,-li,hj,-lj);
-  if(boxSize(eff)[k]<2 || r<1 || parity(hi)!==parity(hj)) return null;
-  const nb=eff.map(x=>[...x]);
-  nb[i]=[-r,r]; nb[j]=[-r,r];
-  return nb;
-}
-function effAfterHalfTurn(k,members){
-  const sides=[0,1,2].filter(a=>a!==k).map(a=>[a,crossSection(members,a)]);
-  if(sides.every(([,[l,h]])=>l===-h)) return eff;
-  const nb=eff.map(x=>[...x]);
-  for(const [a,[l,h]] of sides) if(l!==-h){ const r=Math.min(h,-l); nb[a]=[-r,r]; }
-  return nb;
-}
-function performMove(mv){
-  const k=IDX[AXIS[mv.face]];
-  if(!mv.wide && mv.layer>new Set(cubies.map(c=>c.fc[k])).size) return false;
-  const sel=selectCoords(cubies,mv), members=cubies.filter(c=>sel.has(c.fc[k]));
-  const ne = mv.mod==='2' ? effAfterHalfTurn(k,members) : effAfterQuarterTurn(k,members);
-  if(!ne) return false;
-  // a reduction never changes the turning axis's range, so the same layer is
-  // still selected after coarsening
-  if(ne!==eff) phaseStack.push(eff);
-  eff=ne;
-  coarsen(cubies,eff);
-  applyMove(cubies,mv);
-  coarsen(cubies,eff);
-  undoReductions();
-  return true;
-}
-// An earlier phase is turnable again once every position the solved shape has
-// inside its box is filled (for a cuboid: the sub-cuboid is intact). Pieces
-// outside the box attach to the layer they touch. The earliest such phase wins.
-function undoReductions(){
-  if(!phaseStack.length) return;
-  const occ=new Set(cubies.map(c=>c.pos.join(',')));
-  for(let i=0;i<phaseStack.length;i++){
-    const e=phaseStack[i];
-    if(!gShape.every(p=>!inBox(p,e) || occ.has(p.join(',')))) continue;
-    eff=e;
-    phaseStack.length=i;
-    for(const c of cubies) c.fc=clampToBox(c.pos,e);
-    return;
-  }
-}
-function resetPhases(){
-  eff=boundingBox(gShape);
-  phaseStack=[];
-}
-
 function doMove(mv){
   let parsed;
   try { parsed=parseMove(mv); } catch(e){ showMsg(`"${mv}" isn't a valid move`); return; }
-  if(!performMove(parsed)){
+  if(!puzzle.move(parsed)){
     showMsg(`${mv} isn't possible in the current shape`);
     return;
   }
   showMsg('');
-  hover=null;
+  hover=null; stepHi=null;
   history.push(mv);
   updateLayerButtons();
   redraw();
@@ -519,10 +343,9 @@ function doMove(mv){
 }
 
 function replayHistory(moves){
-  cubies=buildSolved(gShape);
-  resetPhases();
-  for(const m of moves) performMove(parseMove(m));
-  hover=null;
+  puzzle.reset();
+  for(const m of moves) puzzle.move(m);
+  hover=null; stepHi=null;
   updateLayerButtons();
 }
 
@@ -543,57 +366,30 @@ function rewindTo(idx){
   updateHistory();
 }
 
-// Name the reduced phase (the solved shape's positions inside its box) in the
-// puzzle notation, checking the name rebuilds exactly those positions.
-function describePhase(box){
-  const S=gShape.filter(p=>inBox(p,box)), key=ps=>ps.map(p=>p.join(',')).sort().join('|');
-  const core=gSpec.core.map((n,k)=>{
-    const lo=Math.max(-(n-1),box[k][0]), hi=Math.min(n-1,box[k][1]);
-    return lo===-hi ? hi+1 : null;
-  });
-  if(core.includes(null)) return null;
-  const ext={};
-  for(const f of FACE_ORDER){
-    ext[f]=[];
-    const k=IDX[AXIS[f]], [a,b]=FACE_AXES[f];
-    for(let i=1;;i++){
-      const c=FACE_SIGN[f]*((core[k]-1)+2*i), L=S.filter(p=>p[k]===c);
-      if(!L.length) break;
-      const [ra,rb]=[a,b].map(ax=>[Math.min(...L.map(p=>p[ax])), Math.max(...L.map(p=>p[ax]))]);
-      if(ra[0]!==-ra[1] || rb[0]!==-rb[1]) return null;
-      ext[f].push([ra[1]+1, rb[1]+1]);
-    }
-  }
-  const spec={core,ext};
-  return key(shapePositions(spec))===key(S) ? formatSpec(spec) : null;
-}
-const pretty = s => s.replace(/(\d)x(?=\d)/g,'$1×');
-
 function updateSizeNote(){
   const note=document.getElementById('size-note');
-  const full=pretty(formatSpec(gSpec));
-  const reduced=!boxEq(eff,boundingBox(gShape));
-  const cur = reduced ? pretty(describePhase(eff) || boxSize(eff).join('×')+' box') : full;
+  const full=pretty(puzzle.boxName(puzzle.fullBox));
+  const reduced=puzzle.isReduced();
   note.className=reduced?'reduced':'';
   note.innerHTML = reduced
-    ? `Reduced to<br><b title="Highlight this shape">${cur}</b><br>from ${full}`
+    ? `Reduced to<br><b title="Highlight this shape">${pretty(puzzle.boxName())}</b><br>from ${full}`
     : `<b>${full}</b>`;
   if(!reduced){ boxHover=false; return; }
   const b=note.querySelector('b');
-  b.addEventListener('pointerenter',()=>{ boxHover=true; renderSVG(cubies); });
-  b.addEventListener('pointerleave',()=>{ boxHover=false; renderSVG(cubies); });
+  b.addEventListener('pointerenter',()=>{ boxHover=true; renderSVG(); });
+  b.addEventListener('pointerleave',()=>{ boxHover=false; renderSVG(); });
 }
 
 function redraw(){
-  renderSVG(cubies, null, null);
+  renderSVG();
   updateSizeNote();
   document.getElementById('solved-indicator').innerHTML =
-    isSolved(cubies) ? '<span class="solved-badge">Solved!</span>' : '';
+    puzzle.isSolved() ? '<span class="solved-badge">Solved!</span>' : '';
 }
 
 function handleFaceClick(face, axK, fcVal, mod){
   const pos=POSITIVE.has(face);
-  const coords=[...new Set(cubies.map(c=>c.fc[axK]))].sort((a,b)=>pos?b-a:a-b);
+  const coords=[...new Set(puzzle.cubies.map(c=>c.fc[axK]))].sort((a,b)=>pos?b-a:a-b);
   const layer=coords.indexOf(fcVal)+1;
   if(layer<1) return;
   doMove(moveStr(face,layer,mod));
@@ -601,10 +397,10 @@ function handleFaceClick(face, axK, fcVal, mod){
 
 /* ===================== layer buttons ===================== */
 function maxLayersFor(face){
-  return Math.floor(boxSize(eff)[IDX[AXIS[face]]]/2);
+  return puzzle.maxLayers(face);
 }
 function maxLayerGlobal(){
-  return Math.max(...boxSize(eff).map(e=>Math.floor(e/2)));
+  return Math.max(...boxSize(puzzle.eff).map(e=>Math.floor(e/2)));
 }
 
 function updateLayerButtons(){
@@ -636,14 +432,12 @@ function updateBtnHover(){
   btnHover=null;
   const m=hoveredBtn && buttonMove(hoveredBtn.dataset.face, hoveredBtn.dataset.mod);
   if(!m) return;
-  const mv=parseMove(m), k=IDX[AXIS[mv.face]];
-  if(!mv.wide && mv.layer>new Set(cubies.map(c=>c.fc[k])).size) return;
-  btnHover={axK:k, fcs:selectCoords(cubies,mv)};
+  btnHover=puzzle.selection(parseMove(m));
 }
 function setHoveredBtn(btn){
   hoveredBtn=btn;
   updateBtnHover();
-  renderSVG(cubies);
+  renderSVG();
 }
 function updateMoveButtons(){
   const panel=document.getElementById('move-panel');
@@ -682,6 +476,7 @@ function updateMoveButtons(){
 
 /* ===================== history display ===================== */
 function updateHistory(){
+  renderScramble();
   const box=document.getElementById('historybox');
   if(!history.length){ box.innerHTML='<span class="muted">(solved)</span>'; return; }
   box.innerHTML=history.map((m,i)=>`<span class="move-token" title="Rewind to before this move" data-idx="${i}">${m}</span>`).join(' ');
@@ -702,6 +497,107 @@ function applySequence(){
   document.getElementById('seq-input').value='';
 }
 
+/* ===================== scrambler ===================== */
+let scramble = null;       // {phases, moves} of the last generated scramble
+let stepHi = null;         // {axK, fcs} turned by the scramble move about to be made
+let plannedPhases = [];    // boxes of the phases after the first
+
+const isWide = () => !document.getElementById('opt-slice').checked;
+
+// one slider per planned phase, defaulting like cuboid-scrambler (10 × the
+// phase's largest dimension, 5–100); `keep` preserves the current values
+function renderPhaseSliders(keep){
+  const prev = keep ? [...document.querySelectorAll('.phase-num')].map(i=>+i.value) : [];
+  plannedPhases=planPhases(puzzle.clone(), isWide());
+  const boxes=[puzzle.fullBox, ...plannedPhases];
+  // an off-centre start can have no turn that keeps its shape
+  const startLocked=!phaseHasMoves(puzzle.clone(), isWide());
+  const wrap=document.getElementById('phase-sliders');
+  wrap.innerHTML=boxes.map((b,i)=>{
+    const val=prev[i] ?? Math.min(100,Math.max(5,10*Math.max(...boxSize(b))));
+    const locked = i===0 && startLocked;
+    const name = boxes.length===1 ? 'Moves' : `Phase ${i+1} · ${pretty(puzzle.boxName(b))}`;
+    const label = locked ? `${name} · every turn reduces it` : name;
+    return `<div class="slider-row"><span title="${label}">${label}</span>`+
+      `<input type="range" class="phase-range" min="5" max="100" value="${val}" data-i="${i}" aria-label="${name} moves"${locked?' disabled':''}>`+
+      `<input type="number" class="phase-num" min="5" max="100" value="${val}" data-i="${i}" aria-label="${name} moves"${locked?' disabled':''}></div>`;
+  }).join('');
+  wrap.querySelectorAll('.phase-range').forEach(r=>{
+    const num=wrap.querySelector(`.phase-num[data-i="${r.dataset.i}"]`);
+    r.addEventListener('input',()=>{ num.value=r.value; });
+    num.addEventListener('change',()=>{ const v=Math.min(100,Math.max(5,+num.value||5)); num.value=v; r.value=v; });
+  });
+}
+
+function generate(){
+  const counts=[...document.querySelectorAll('.phase-num')].map(i=>Math.min(100,Math.max(5,+i.value||5)));
+  const res=generateScramble(puzzle.spec,{
+    movesPerPhase:counts, wide:isWide(), plan:plannedPhases,
+    efficient:document.getElementById('opt-efficient').checked,
+  });
+  scramble={phases:res.phases, moves:res.moves};
+  history=[...res.moves];
+  replayHistory(history);
+  showMsg('');
+  redraw();
+  updateHistory();
+}
+
+function clearScramble(){ scramble=null; stepHi=null; renderScramble(); }
+
+// the puzzle just before scramble move i, with that move's layer highlighted
+function jumpToScramble(i){
+  history=scramble.moves.slice(0,i);
+  replayHistory(history);
+  stepHi=puzzle.selection(parseMove(scramble.moves[i]));
+  redraw();
+  updateHistory();
+}
+
+function renderScramble(){
+  const out=document.getElementById('scramble-out');
+  if(!scramble){ out.innerHTML=''; return; }
+  const onTrack=history.length<=scramble.moves.length && history.every((m,i)=>m===scramble.moves[i]);
+  const pos=onTrack ? history.length : -1;
+  let i=0, html='<p class="hint">Click a move to see the puzzle just before it, with that move\'s layer highlighted.</p>';
+  for(const ph of scramble.phases){
+    html+=`<div class="phase-label"><b>${pretty(ph.name)}</b> · ${ph.moves.length} moves</div><div class="phase-moves">`;
+    html+=ph.moves.map(m=>{
+      const cls = i<pos ? 'done' : (i===pos && stepHi ? 'cur' : '');
+      return `<span class="smove ${cls}" data-i="${i++}">${m}</span>`;
+    }).join(' ');
+    html+='</div>';
+  }
+  html+=`<div class="row" style="margin:12px 0 0;"><span class="muted">Full scramble (${scramble.moves.length} moves)</span>`+
+    `<button id="btn-copy-scramble">Copy</button><button id="btn-show-scrambled">Show scrambled</button></div>`+
+    `<div class="full-scramble">${scramble.moves.join(' ')}</div>`;
+  out.innerHTML=html;
+  out.querySelectorAll('.smove').forEach(el=>el.addEventListener('click',()=>jumpToScramble(+el.dataset.i)));
+  document.getElementById('btn-copy-scramble').onclick=()=>navigator.clipboard.writeText(scramble.moves.join(' ')).catch(()=>{});
+  document.getElementById('btn-show-scrambled').onclick=()=>{
+    history=[...scramble.moves]; replayHistory(history); redraw(); updateHistory();
+  };
+}
+
+function loadOptions(){
+  try{
+    const o=JSON.parse(localStorage.getItem('extended-cubes-options')||'{}');
+    document.getElementById('opt-slice').checked=!!o.slice;
+    document.getElementById('opt-efficient').checked=!!o.efficient;
+  }catch(e){}
+}
+function saveOptions(){
+  try{
+    localStorage.setItem('extended-cubes-options', JSON.stringify({
+      slice:document.getElementById('opt-slice').checked,
+      efficient:document.getElementById('opt-efficient').checked,
+    }));
+  }catch(e){}
+}
+document.getElementById('opt-slice').onchange=()=>{ saveOptions(); clearScramble(); renderPhaseSliders(true); };
+document.getElementById('opt-efficient').onchange=()=>{ saveOptions(); clearScramble(); };
+document.getElementById('btn-scramble').onclick=generate;
+
 /* ===================== wiring ===================== */
 document.getElementById('layer-input').addEventListener('change', e=>{
   currentLayer=Math.max(1,+e.target.value||1);
@@ -714,10 +610,10 @@ document.getElementById('layer-inc').onclick=()=>{
   const max=Math.max(maxLayerGlobal(),1);
   currentLayer=Math.min(max,currentLayer+1); updateLayerButtons();
 };
-document.getElementById('compass').onclick=()=>{ viewYaw=-0.6; viewPitch=0.5; renderSVG(cubies); };
+document.getElementById('compass').onclick=()=>{ viewYaw=-0.6; viewPitch=0.5; renderSVG(); };
 document.getElementById('btn-new').onclick=rebuild;
 function syncPreset(){
-  const cur=formatSpec(gSpec), sel=document.getElementById('preset');
+  const cur=formatSpec(puzzle.spec), sel=document.getElementById('preset');
   const match=[...sel.options].find(o=>o.value && formatSpec(parseSpec(o.value))===cur);
   sel.value = match ? match.value : '';
 }
@@ -742,7 +638,8 @@ document.getElementById('btn-apply').onclick=applySequence;
 document.getElementById('seq-input').addEventListener('keydown',e=>{ if(e.key==='Enter') applySequence(); });
 
 // init
-resetPhases();
+loadOptions();
+renderPhaseSliders(false);
 updateLayerButtons();
 updateMoveButtons();
 redraw();
