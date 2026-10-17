@@ -119,6 +119,28 @@ console.log('--- phase names');
   eq(E.nameShape(E.shapePositions(E.parseSpec('3x5x3 +R(3x3) +L(3x3)'))), '3x3x3 +U +D +R +L', 'nameShape: equal-length names prefer bare faces to written sizes');
 }
 
+console.log('--- no lost cubies');
+{
+  // random legal moves on every preset and some cuboids: no two cubies may
+  // ever share a position (the Diorama's B D L used to stack four pairs)
+  const rng=mulberry32(11), faces=['R','L','U','D','F','B'], mods=['',"'",'2'];
+  const clash=p=>{ const s=new Set(); for(const c of p.cubies){ const k=c.pos.join(','); if(s.has(k)) return true; s.add(k); } return false; };
+  const bad=[];
+  for(const spec of Object.values(PRESETS).concat(['3x5x7','2x4x6','3x3x5','3x4x5 +F(5x4,3x2)','3x3x3 +F(5x3)'])){
+    for(let t=0;t<20 && bad.length<5;t++){
+      const p=new E.Puzzle(spec), hist=[];
+      for(let i=0;i<60;i++){
+        const m=E.moveStr(faces[Math.floor(rng()*6)],1+Math.floor(rng()*3),mods[Math.floor(rng()*3)]);
+        if(!p.move(m)) continue;
+        hist.push(m);
+        if(clash(p)){ bad.push(`${spec}: ${hist.join(' ')}`); break; }
+      }
+    }
+  }
+  check(!bad.length, 'no two cubies ever share a position'+(bad.length?'\n        '+bad.join('\n        '):''));
+  eq(trace('3x3x3 +D(5x5) +L(5x5) +B(5x5)',['B','D','L']).length, 3, 'Diorama: B D L all turn');
+}
+
 console.log('--- replay determinism');
 {
   const rng=mulberry32(1), moves=['R','L','U','D','F','B'], mods=['',"'",'2'];

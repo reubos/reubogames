@@ -287,9 +287,14 @@ class Puzzle {
     // still selected after coarsening
     if(ne!==this.eff) this.phaseStack.push(this.eff);
     this.eff=ne;
-    for(const c of this.cubies) c.fc=clampToBox(c.fc,this.eff);
+    // Every piece belongs to the layer it touches: its position clamped into
+    // the phase box. A turn then always moves whole planes of pieces about its
+    // own axis, so it can never collide with pieces it leaves behind. (Rotating
+    // a remembered layer along with the piece, as cuboid-scrambler did, let an
+    // overhang carried round a slab keep its old layer and pass through others.)
+    for(const c of this.cubies) c.fc=clampToBox(c.pos,this.eff);
     applyMove(this.cubies,mv);
-    for(const c of this.cubies) c.fc=clampToBox(c.fc,this.eff);
+    for(const c of this.cubies) c.fc=clampToBox(c.pos,this.eff);
     this.undoReductions();
     return true;
   }
