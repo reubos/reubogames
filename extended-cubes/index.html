@@ -12,7 +12,12 @@
   .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
   label { font-size: 13px; display: flex; align-items: center; gap: 5px; }
   input[type=number] { width: 52px; }
-  .ext-row input[type=number] { width: 42px; }
+  select { font: inherit; padding: 4px 6px; background: #222; color: #eee; border: 1px solid #444; border-radius: 5px; }
+  #spec { font-family: ui-monospace, Consolas, monospace; }
+  .notation-help { font-size: 12px; color: #aaa; margin-bottom: 10px; }
+  .notation-help summary { cursor: pointer; color: #888; }
+  .notation-help p, .notation-help ul { margin: 6px 0; }
+  .notation-help code { color: #eee; background: #222; padding: 0 4px; border-radius: 3px; }
   input[type=text] { flex: 1; min-width: 200px; }
   input, button { font: inherit; padding: 4px 6px; background: #222; color: #eee; border: 1px solid #444; border-radius: 5px; }
   button { cursor: pointer; }
@@ -57,23 +62,33 @@
 <h1>Extended Cuboid Simulator</h1>
 
 <div class="row">
-  <label>W <input type="number" id="iw" min="1" max="13" value="3"></label>
-  <label>H <input type="number" id="ih" min="1" max="13" value="3"></label>
-  <label>D <input type="number" id="id" min="1" max="13" value="3"></label>
+  <select id="preset">
+    <option value="3x3x3">Cuboid</option>
+    <option value="3x3x3 +U">I-cube</option>
+    <option value="3x3x3 +2U">Double I-cube</option>
+    <option value="3x3x3 +R +L +D">T-cube</option>
+    <option value="3x3x3 +R +U">L-cube</option>
+    <option value="3x3x3 +U +D +R +L">X-cube</option>
+    <option value="3x3x3 +U +D +R +L +F +B">Cross Cube</option>
+    <option value="3x3x3 +U +R +F">Corner Cube</option>
+    <option value="3x3x3 +2U +2D +R +L">Super Shapeshifter</option>
+    <option value="">Custom</option>
+  </select>
+  <input type="text" id="spec" value="3x3x3" spellcheck="false" autocomplete="off" aria-label="Puzzle layout">
   <button id="btn-new">New Puzzle</button>
   <span id="solved-indicator"></span>
-  <span id="move-msg" style="color:#e88;font-size:12px;"></span>
 </div>
-<div class="row ext-row">
-  <span class="muted">Extra layers:</span>
-  <label>U <input type="number" id="ext-U" min="0" max="6" value="0"></label>
-  <label>D <input type="number" id="ext-D" min="0" max="6" value="0"></label>
-  <label>R <input type="number" id="ext-R" min="0" max="6" value="0"></label>
-  <label>L <input type="number" id="ext-L" min="0" max="6" value="0"></label>
-  <label>F <input type="number" id="ext-F" min="0" max="6" value="0"></label>
-  <label>B <input type="number" id="ext-B" min="0" max="6" value="0"></label>
-  <button id="btn-icube" title="3×3×3 with one extra layer on U">I-cube</button>
-</div>
+<div id="move-msg" style="color:#e88;font-size:12px;min-height:1.2em;margin:-4px 0 6px;"></div>
+<details class="notation-help">
+  <summary>Layout notation</summary>
+  <p>Core size first, then one <code>+face</code> per stack of extra layers, outwards from the core:</p>
+  <ul>
+    <li><code>3x5x7</code>: a plain cuboid (W×H×D)</li>
+    <li><code>+U</code>: one layer the size of the core's U face; <code>+2U</code>: two of them</li>
+    <li><code>+F(5x4)</code>: a custom-size layer; <code>+F(5x4,3x2)</code>: stacked layers of different sizes</li>
+  </ul>
+  <p>Layer sizes leave out the face's own axis (U/D: W×D, R/L: H×D, F/B: W×H) and must match the core's parity on both sides, e.g. on the F face of a 3x4x5: 3x4, 5x4, 5x2, 1x2.</p>
+</details>
 
 <div class="layer-row">
   <span>Layer:</span>
@@ -127,28 +142,84 @@ const AXIS = {R:'x',L:'x',U:'y',D:'y',F:'z',B:'z'};
 const IDX = {x:0,y:1,z:2};
 const POSITIVE = new Set(['R','U','F']);
 const baseSign = f => POSITIVE.has(f)?-1:1;
-// A puzzle is a core cuboid centred on the origin (every turn rotates about its
-// centre) plus `ext[face]` whole extra layers on each face. Boxes are per-axis
-// [lo,hi] bounds on the doubled lattice, so they can sit off-centre.
-function shapeBox(core,ext){
-  const neg={0:'L',1:'D',2:'B'}, pos={0:'R',1:'U',2:'F'};
-  return core.map((n,k)=>[-(n-1)-2*(ext[neg[k]]||0), (n-1)+2*(ext[pos[k]]||0)]);
+// Puzzle notation: "3x3x3 +R +2U +F(5x4) +B(5x4,3x2)". The core W×H×D is
+// centred on the turning centre; each +face adds layers outwards from the
+// core's face. A bare face is a layer the size of the core's face. Sizes use
+// W,H,D order without the face's own axis (U/D: W×D, R/L: H×D, F/B: W×H) and
+// must share parity with the core there, which keeps every turn on the lattice.
+// Boxes are per-axis [lo,hi] bounds on the doubled lattice.
+const FACE_AXES = {U:[0,2],D:[0,2],R:[1,2],L:[1,2],F:[0,1],B:[0,1]};
+const FACE_SIGN = {R:1,U:1,F:1,L:-1,D:-1,B:-1};
+const FACE_ORDER = ['U','D','R','L','F','B'];
+const MAX_CUBIES = 4000;
+const centred = n => { const r=[]; for(let v=-(n-1);v<=n-1;v+=2) r.push(v); return r; };
+
+function parseSpec(text){
+  const toks=text.trim().replace(/×/g,'x').split(/\s+/).filter(Boolean);
+  const m=(toks.shift()||'').match(/^(\d+)x(\d+)x(\d+)$/i);
+  if(!m) throw new Error('Start with the core size, e.g. 3x3x3');
+  const core=[+m[1],+m[2],+m[3]];
+  if(core.some(n=>n<1)) throw new Error('Core sizes must be at least 1');
+  const ext={}; for(const f of FACE_ORDER) ext[f]=[];
+  for(const t of toks){
+    const e=t.match(/^\+(\d*)([UDRLFB])(?:\(([^)]*)\))?$/i);
+    if(!e) throw new Error(`Can't read "${t}" (expected e.g. +U, +2U or +F(5x4))`);
+    const face=e[2].toUpperCase(), [a,b]=FACE_AXES[face], count=e[1]===''?1:+e[1];
+    const sizes = e[3]===undefined ? [[core[a],core[b]]] : e[3].split(',').map(s=>{
+      const q=s.trim().match(/^(\d+)x(\d+)$/i);
+      if(!q) throw new Error(`Can't read the size "${s}" in "${t}"`);
+      return [+q[1],+q[2]];
+    });
+    if(e[1]!=='' && sizes.length>1) throw new Error(`"${t}": give a count or a list of sizes, not both`);
+    for(const [p,q] of sizes){
+      if(p<1 || q<1) throw new Error(`"${t}": layer sizes must be at least 1`);
+      if(p%2!==core[a]%2 || q%2!==core[b]%2)
+        throw new Error(`"${t}": a ${p}x${q} layer doesn't match the parity of the core's ${core[a]}x${core[b]} ${face} face`);
+    }
+    for(let i=0;i<count;i++) ext[face].push(...sizes);
+  }
+  return {core, ext};
 }
+
+function formatSpec({core,ext}){
+  let s=core.join('x');
+  for(const f of FACE_ORDER){
+    const L=ext[f]; if(!L.length) continue;
+    const [a,b]=FACE_AXES[f];
+    if(L.every(([p,q])=>p===core[a]&&q===core[b])) s+=` +${L.length>1?L.length:''}${f}`;
+    else if(L.every(([p,q])=>p===L[0][0]&&q===L[0][1])) s+=` +${L.length>1?L.length:''}${f}(${L[0].join('x')})`;
+    else s+=` +${f}(${L.map(l=>l.join('x')).join(',')})`;
+  }
+  return s;
+}
+
+function shapePositions({core,ext}){
+  const map=new Map(), add=p=>map.set(p.join(','),p);
+  for(const x of centred(core[0])) for(const y of centred(core[1])) for(const z of centred(core[2])) add([x,y,z]);
+  for(const f of FACE_ORDER){
+    const k=IDX[AXIS[f]], [a,b]=FACE_AXES[f];
+    ext[f].forEach(([p,q],i)=>{
+      const c=FACE_SIGN[f]*((core[k]-1)+2*(i+1));
+      for(const u of centred(p)) for(const v of centred(q)){ const pos=[0,0,0]; pos[k]=c; pos[a]=u; pos[b]=v; add(pos); }
+    });
+  }
+  return [...map.values()];
+}
+
+const boundingBox = ps => [0,1,2].map(k=>[Math.min(...ps.map(p=>p[k])), Math.max(...ps.map(p=>p[k]))]);
 const boxSize = b => b.map(([lo,hi])=>(hi-lo)/2+1);
 const inBox = (p,b) => p.every((v,k)=>v>=b[k][0] && v<=b[k][1]);
 const boxEq = (a,b) => a.every((r,k)=>r[0]===b[k][0] && r[1]===b[k][1]);
 
-function buildSolved(core,ext){
-  const b=shapeBox(core,ext), range=([lo,hi])=>{ const r=[]; for(let v=lo;v<=hi;v+=2) r.push(v); return r; };
-  const cubies=[];
-  for(const x of range(b[0])) for(const y of range(b[1])) for(const z of range(b[2])){
+// every exposed side of the solved shape is stickered in that direction's colour
+function buildSolved(shape){
+  const occ=new Set(shape.map(p=>p.join(',')));
+  return shape.map(p=>{
     const st={};
-    if(x===b[0][1])st['+x']=COLORS['+x']; if(x===b[0][0])st['-x']=COLORS['-x'];
-    if(y===b[1][1])st['+y']=COLORS['+y']; if(y===b[1][0])st['-y']=COLORS['-y'];
-    if(z===b[2][1])st['+z']=COLORS['+z']; if(z===b[2][0])st['-z']=COLORS['-z'];
-    cubies.push({home:[x,y,z],pos:[x,y,z],ori:I3,fc:[x,y,z],stickers:st});
-  }
-  return cubies;
+    for(const [dir,n] of Object.entries(DIRS))
+      if(!occ.has([p[0]+2*n[0],p[1]+2*n[1],p[2]+2*n[2]].join(','))) st[dir]=COLORS[dir];
+    return {home:[...p],pos:[...p],ori:I3,fc:[...p],stickers:st};
+  });
 }
 
 function parseMove(m){
@@ -331,19 +402,24 @@ function renderCompass(M){
 })();
 
 /* ===================== state ===================== */
-const EXT_FACES=['U','D','R','L','F','B'];
-let gCore=[3,3,3], gExt={};
-let cubies = buildSolved(gCore, gExt);
+let gSpec = parseSpec('3x3x3');
+let gShape = shapePositions(gSpec); // solved positions
+let cubies = buildSolved(gShape);
 let history = [];
 let currentLayer = 1;
 let hover = null; // {axK, fc} of the layer under the cursor
 let boxHover = false; // pointer is on the reduced size: highlight that sub-cuboid
 
 function rebuild(){
-  gCore=['iw','ih','id'].map(id=>Math.max(1,+document.getElementById(id).value||1));
-  gExt={};
-  for(const f of EXT_FACES) gExt[f]=Math.max(0,+document.getElementById('ext-'+f).value||0);
-  cubies=buildSolved(gCore,gExt);
+  let spec;
+  try { spec=parseSpec(document.getElementById('spec').value); }
+  catch(e){ showMsg(e.message); return; }
+  const shape=shapePositions(spec);
+  if(shape.length>MAX_CUBIES){ showMsg(`That puzzle has ${shape.length} cubies, more than the ${MAX_CUBIES} this can draw`); return; }
+  gSpec=spec; gShape=shape;
+  document.getElementById('spec').value=formatSpec(gSpec);
+  syncPreset();
+  cubies=buildSolved(gShape);
   resetPhases();
   history=[];
   currentLayer=1;
@@ -355,21 +431,25 @@ function rebuild(){
 }
 
 // Reduction phases, as in cuboid-scrambler. `eff` is the current phase's box
-// ([lo,hi] per axis). A quarter turn keeps the box in shape only if its
-// cross-section is square and centred on the turning axis. Otherwise, if both
-// sides share parity, the turn starts a new phase: the cross-section shrinks to
-// the largest centred square inside it and the outer layers bandage onto the
-// outermost remaining one (coarsen) before the turn is applied. On a plain
-// cuboid this is the scrambler's "larger side reduces to the smaller".
-// A half turn only needs each side centred, so on a plain cuboid it never
-// reduces, but on an extended one (an I-cube's R2) it trims each side to its
-// largest centred range.
-let eff = shapeBox(gCore, gExt);
+// ([lo,hi] per axis); pieces' functional coords are clamped into it. What
+// matters for a turn is the cross-section of the layer actually being turned
+// (in functional coords). A quarter turn keeps the phase if that cross-section
+// is a square centred on the turning axis; otherwise, if both sides share
+// parity, it starts a new phase: those two sides of the box shrink to the
+// largest centred square inside the cross-section, so the outer layers bandage
+// onto the outermost remaining one (coarsen) before the turn is applied. On a
+// plain cuboid this is the scrambler's "larger side reduces to the smaller".
+// A half turn only needs each side centred, so it never reduces a plain
+// cuboid, but an I-cube's R2 trims each side to its largest centred range.
+let eff = boundingBox(gShape);
 let phaseStack = []; // boxes of the phases left behind, oldest first
 const parity = v => ((v%2)+2)%2;
-function effAfterQuarterTurn(face){
-  const k=IDX[AXIS[face]], [i,j]=[0,1,2].filter(a=>a!==k);
-  const [li,hi]=eff[i], [lj,hj]=eff[j];
+function crossSection(members,a){
+  return [Math.min(...members.map(c=>c.fc[a])), Math.max(...members.map(c=>c.fc[a]))];
+}
+function effAfterQuarterTurn(k,members){
+  const [i,j]=[0,1,2].filter(a=>a!==k);
+  const [li,hi]=crossSection(members,i), [lj,hj]=crossSection(members,j);
   if(li===-hi && lj===-hj && hi===hj) return eff;
   const r=Math.min(hi,-li,hj,-lj);
   if(boxSize(eff)[k]<2 || r<1 || parity(hi)!==parity(hj)) return null;
@@ -377,19 +457,21 @@ function effAfterQuarterTurn(face){
   nb[i]=[-r,r]; nb[j]=[-r,r];
   return nb;
 }
-function effAfterHalfTurn(face){
-  const k=IDX[AXIS[face]], sides=[0,1,2].filter(a=>a!==k);
-  if(sides.every(a=>eff[a][0]===-eff[a][1])) return eff;
+function effAfterHalfTurn(k,members){
+  const sides=[0,1,2].filter(a=>a!==k).map(a=>[a,crossSection(members,a)]);
+  if(sides.every(([,[l,h]])=>l===-h)) return eff;
   const nb=eff.map(x=>[...x]);
-  for(const a of sides){ const r=Math.min(eff[a][1],-eff[a][0]); nb[a]=[-r,r]; }
+  for(const [a,[l,h]] of sides) if(l!==-h){ const r=Math.min(h,-l); nb[a]=[-r,r]; }
   return nb;
 }
 function performMove(mv){
-  const ne = mv.mod==='2' ? effAfterHalfTurn(mv.face) : effAfterQuarterTurn(mv.face);
+  const k=IDX[AXIS[mv.face]];
+  if(!mv.wide && mv.layer>new Set(cubies.map(c=>c.fc[k])).size) return false;
+  const sel=selectCoords(cubies,mv), members=cubies.filter(c=>sel.has(c.fc[k]));
+  const ne = mv.mod==='2' ? effAfterHalfTurn(k,members) : effAfterQuarterTurn(k,members);
   if(!ne) return false;
-  const k=IDX[AXIS[mv.face]], [lo,hi]=ne[k];
-  const layers=new Set(cubies.map(c=>Math.max(lo,Math.min(hi,c.fc[k])))).size;
-  if(!mv.wide && mv.layer>layers) return false;
+  // a reduction never changes the turning axis's range, so the same layer is
+  // still selected after coarsening
   if(ne!==eff) phaseStack.push(eff);
   eff=ne;
   coarsen(cubies,eff);
@@ -398,13 +480,15 @@ function performMove(mv){
   undoReductions();
   return true;
 }
-// An earlier phase is turnable again once its central sub-cuboid has a piece
-// in every position: each layer of it is then a whole slab. Pieces outside the
-// box attach to the layer they touch. The earliest such phase wins.
+// An earlier phase is turnable again once every position the solved shape has
+// inside its box is filled (for a cuboid: the sub-cuboid is intact). Pieces
+// outside the box attach to the layer they touch. The earliest such phase wins.
 function undoReductions(){
+  if(!phaseStack.length) return;
+  const occ=new Set(cubies.map(c=>c.pos.join(',')));
   for(let i=0;i<phaseStack.length;i++){
-    const e=phaseStack[i], s=boxSize(e);
-    if(cubies.filter(c=>inBox(c.pos,e)).length!==s[0]*s[1]*s[2]) continue;
+    const e=phaseStack[i];
+    if(!gShape.every(p=>!inBox(p,e) || occ.has(p.join(',')))) continue;
     eff=e;
     phaseStack.length=i;
     for(const c of cubies) c.fc=clampToBox(c.pos,e);
@@ -412,7 +496,7 @@ function undoReductions(){
   }
 }
 function resetPhases(){
-  eff=shapeBox(gCore,gExt);
+  eff=boundingBox(gShape);
   phaseStack=[];
 }
 
@@ -432,7 +516,7 @@ function doMove(mv){
 }
 
 function replayHistory(moves){
-  cubies=buildSolved(gCore,gExt);
+  cubies=buildSolved(gShape);
   resetPhases();
   for(const m of moves) performMove(parseMove(m));
   hover=null;
@@ -456,14 +540,40 @@ function rewindTo(idx){
   updateHistory();
 }
 
+// Name the reduced phase (the solved shape's positions inside its box) in the
+// puzzle notation, checking the name rebuilds exactly those positions.
+function describePhase(box){
+  const S=gShape.filter(p=>inBox(p,box)), key=ps=>ps.map(p=>p.join(',')).sort().join('|');
+  const core=gSpec.core.map((n,k)=>{
+    const lo=Math.max(-(n-1),box[k][0]), hi=Math.min(n-1,box[k][1]);
+    return lo===-hi ? hi+1 : null;
+  });
+  if(core.includes(null)) return null;
+  const ext={};
+  for(const f of FACE_ORDER){
+    ext[f]=[];
+    const k=IDX[AXIS[f]], [a,b]=FACE_AXES[f];
+    for(let i=1;;i++){
+      const c=FACE_SIGN[f]*((core[k]-1)+2*i), L=S.filter(p=>p[k]===c);
+      if(!L.length) break;
+      const [ra,rb]=[a,b].map(ax=>[Math.min(...L.map(p=>p[ax])), Math.max(...L.map(p=>p[ax]))]);
+      if(ra[0]!==-ra[1] || rb[0]!==-rb[1]) return null;
+      ext[f].push([ra[1]+1, rb[1]+1]);
+    }
+  }
+  const spec={core,ext};
+  return key(shapePositions(spec))===key(S) ? formatSpec(spec) : null;
+}
+const pretty = s => s.replace(/(\d)x(?=\d)/g,'$1×');
+
 function updateSizeNote(){
   const note=document.getElementById('size-note');
-  const exts=EXT_FACES.filter(f=>gExt[f]).map(f=>f+(gExt[f]>1?gExt[f]:'')).join(' ');
-  const full=gCore.join('×')+(exts?` + ${exts}`:''), cur=boxSize(eff).join('×');
-  const reduced=!boxEq(eff,shapeBox(gCore,gExt));
+  const full=pretty(formatSpec(gSpec));
+  const reduced=!boxEq(eff,boundingBox(gShape));
+  const cur = reduced ? pretty(describePhase(eff) || boxSize(eff).join('×')+' box') : full;
   note.className=reduced?'reduced':'';
   note.innerHTML = reduced
-    ? `Reduced to<br><b title="Highlight this sub-cuboid">${cur}</b><br>from ${full}`
+    ? `Reduced to<br><b title="Highlight this shape">${cur}</b><br>from ${full}`
     : `<b>${full}</b>`;
   if(!reduced){ boxHover=false; return; }
   const b=note.querySelector('b');
@@ -575,11 +685,18 @@ document.getElementById('layer-inc').onclick=()=>{
 };
 document.getElementById('compass').onclick=()=>{ viewYaw=-0.6; viewPitch=0.5; renderSVG(cubies); };
 document.getElementById('btn-new').onclick=rebuild;
-document.getElementById('btn-icube').onclick=()=>{
-  ['iw','ih','id'].forEach(id=>document.getElementById(id).value=3);
-  for(const f of EXT_FACES) document.getElementById('ext-'+f).value = f==='U' ? 1 : 0;
+function syncPreset(){
+  const cur=formatSpec(gSpec), sel=document.getElementById('preset');
+  const match=[...sel.options].find(o=>o.value && formatSpec(parseSpec(o.value))===cur);
+  sel.value = match ? match.value : '';
+}
+document.getElementById('preset').onchange=e=>{
+  if(!e.target.value) return;
+  document.getElementById('spec').value=e.target.value;
   rebuild();
 };
+document.getElementById('spec').addEventListener('keydown',e=>{ if(e.key==='Enter') rebuild(); });
+document.getElementById('spec').addEventListener('input',()=>{ document.getElementById('preset').value=''; });
 document.getElementById('btn-undo').onclick=undoMove;
 document.getElementById('btn-reset').onclick=()=>{
   history=[];
