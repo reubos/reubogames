@@ -58,6 +58,7 @@
   <label>D <input type="number" id="id" min="1" max="13" value="3"></label>
   <button id="btn-new">New Puzzle</button>
   <span id="solved-indicator"></span>
+  <span id="move-msg" style="color:#e88;font-size:12px;"></span>
 </div>
 
 <div class="layer-row">
@@ -182,7 +183,7 @@ function viewMatrix(){
 const PERSP=4.5;
 // exact worst-case magnification of the divide over the bounding sphere
 const PERSP_MAG=1/Math.sqrt(1-1/(PERSP*PERSP));
-const LIGHT=(()=>{ const v=[0.35,0.6,1], l=Math.hypot(...v); return v.map(x=>x/l); })();
+const AMBIENT=0.48, DIFFUSE=0.52;
 const FACE_FROM_DIR = {'+x':'R','-x':'L','+y':'U','-y':'D','+z':'F','-z':'B'};
 const AXK_FROM_DIR = {'+x':0,'-x':0,'+y':1,'-y':1,'+z':2,'-z':2};
 const COL_CLASS = {R:'r-col', L:'l-col', U:'u-col', D:'d-col', F:'f-col', B:'b-col'};
@@ -218,7 +219,8 @@ function renderSVG(cubies){
       const corners=[[+1,+1],[+1,-1],[-1,-1],[-1,+1]].map(([su,sv])=>
         projectPt([center[0]+su*u0[0]+sv*v0[0], center[1]+su*u0[1]+sv*v0[1], center[2]+su*u0[2]+sv*v0[2]]));
       const isHi = hover && c.fc[hover.axK]===hover.fc;
-      const light=(0.55+0.45*Math.max(0,dot(nc,LIGHT))) * (hover && !isHi ? 0.45 : 1);
+      // headlight, as in cuboid-scrambler: brightness tracks how face-on a side is
+      const light=(AMBIENT+DIFFUSE*Math.max(0,nc[2])) * (hover && !isHi ? 0.45 : 1);
       const col = shade(HEX[ws[dir]]||HEX.Body, light);
       const axK = AXK_FROM_DIR[dir];
       faces.push({corners, col, isHi, depth:cv[2], face:FACE_FROM_DIR[dir], axK, fcVal:c.fc[axK]});
@@ -318,35 +320,68 @@ function rebuild(){
   gH=Math.max(1,+document.getElementById('ih').value||1);
   gD=Math.max(1,+document.getElementById('id').value||1);
   cubies=buildSolved(gW,gH,gD);
+  eff=[gW,gH,gD];
   history=[];
   currentLayer=1;
+  showMsg('');
   updateLayerButtons();
   updateMoveButtons();
   redraw();
   updateHistory();
 }
 
+// Reduction phases, as in cuboid-scrambler. `eff` is the current phase's
+// effective dims. A quarter turn needs the turning face's cross-section to be
+// square in eff; if it isn't but both sides share parity, the turn starts a new
+// phase: the larger side reduces to the smaller and the outer layers bandage
+// onto the outermost remaining one (coarsen) before the turn is applied.
+// Half turns keep the shape, so they never change the phase.
+let eff = [gW, gH, gD];
+function effAfterQuarterTurn(face){
+  const k=IDX[AXIS[face]], [i,j]=[0,1,2].filter(a=>a!==k);
+  if(eff[i]===eff[j]) return eff;
+  if(eff[k]<2 || eff[i]<2 || eff[j]<2 || eff[i]%2!==eff[j]%2) return null;
+  const nd=[...eff], lo=Math.min(eff[i],eff[j]);
+  nd[i]=lo; nd[j]=lo;
+  return nd;
+}
+function performMove(mv){
+  const ne = mv.mod==='2' ? eff : effAfterQuarterTurn(mv.face);
+  if(!ne) return false;
+  const k=IDX[AXIS[mv.face]], lim=ne[k]-1;
+  const layers=new Set(cubies.map(c=>Math.max(-lim,Math.min(lim,c.fc[k])))).size;
+  if(!mv.wide && mv.layer>layers) return false;
+  eff=ne;
+  coarsen(cubies,eff);
+  applyMove(cubies,mv);
+  coarsen(cubies,eff);
+  return true;
+}
+
 function doMove(mv){
-  try {
-    const parsed = parseMove(mv);
-    coarsen(cubies, [gW, gH, gD]);
-    applyMove(cubies, parsed);
-    coarsen(cubies, [gW, gH, gD]);
-    hover=null;
-    history.push(mv);
-    redraw();
-    updateHistory();
-  } catch(e){
-    console.warn('invalid move', mv, e);
+  let parsed;
+  try { parsed=parseMove(mv); } catch(e){ showMsg(`"${mv}" isn't a valid move`); return; }
+  if(!performMove(parsed)){
+    showMsg(`${mv} isn't possible in the current shape`);
+    return;
   }
+  showMsg('');
+  hover=null;
+  history.push(mv);
+  updateLayerButtons();
+  redraw();
+  updateHistory();
 }
 
 function replayHistory(moves){
   cubies=buildSolved(gW,gH,gD);
-  for(const m of moves){ coarsen(cubies,[gW,gH,gD]); applyMove(cubies,m); }
-  coarsen(cubies,[gW,gH,gD]);
+  eff=[gW,gH,gD];
+  for(const m of moves) performMove(parseMove(m));
   hover=null;
+  updateLayerButtons();
 }
+
+function showMsg(t){ document.getElementById('move-msg').textContent=t; }
 
 function undoMove(){
   if(!history.length) return;
@@ -379,12 +414,10 @@ function handleFaceClick(face, axK, fcVal, mod){
 
 /* ===================== layer buttons ===================== */
 function maxLayersFor(face){
-  if(face==='R'||face==='L') return Math.floor(gW/2);
-  if(face==='U'||face==='D') return Math.floor(gH/2);
-  return Math.floor(gD/2);
+  return Math.floor(eff[IDX[AXIS[face]]]/2);
 }
 function maxLayerGlobal(){
-  return Math.max(Math.floor(gW/2), Math.floor(gH/2), Math.floor(gD/2));
+  return Math.max(...eff.map(e=>Math.floor(e/2)));
 }
 
 function updateLayerButtons(){
