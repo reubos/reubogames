@@ -307,6 +307,19 @@ console.log('      phases per preset: '+Object.entries(PRESETS).map(([n,s])=>{
   console.log(`      moves deeper than half the puzzle (only when no shallower move reduces): ${deep.length ? deep.join(', ') : 'none'}`);
 }
 {
+  // scrambling from a position part-way through: replays on top of that
+  // position, plans from its own phase, and keep-shape never leaves it
+  const spec='3x5x7', start=new E.Puzzle(spec); ['U','R','F2'].forEach(m=>start.move(m));
+  const res=E.generateScramble(spec,{start,movesPerPhase:[20],rng:mulberry32(5)});
+  const q=start.clone(); const ok=res.moves.every(m=>q.move(m));
+  check(ok && E.boxEq(q.eff,res.phases[res.phases.length-1].box) && res.phases[0].name===start.boxName(), `scramble from a reduced position (${start.boxName()}) replays on top of it`);
+  const keep=E.generateScramble(spec,{start,keepShape:true,movesPerPhase:[40],rng:mulberry32(6)});
+  const k=start.clone(); const kept=keep.moves.every(m=>{ const d=k.phaseStack.length, b=k.eff; return k.move(m) && k.phaseStack.length===d && E.boxEq(k.eff,b); });
+  check(kept && keep.phases.length===1 && keep.moves.length===40, `keep-shape scramble: 40 moves, none leaving ${start.boxName()}`);
+  const cube=new E.Puzzle('3x3x3 +R +U'), keepL=E.generateScramble('3x3x3 +R +U',{start:cube,keepShape:true,movesPerPhase:[30],rng:mulberry32(7)});
+  const c=cube.clone(); check(keepL.moves.every(m=>c.move(m)) && !c.isReduced(), `keep-shape scramble on a solved L-cube stays unreduced (${keepL.moves.slice(0,8).join(' ')}...)`);
+}
+{
   const res=E.generateScramble('3x5x7',{movesPerPhase:[30],wide:true,efficient:true,rng:mulberry32(9)});
   // phase 1 -> 2 narrows z from 7 to 5: only the outer F/B layer is about to freeze
   const zMoves=res.phases[0].moves.filter(m=>/[FB]/.test(m));

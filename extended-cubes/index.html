@@ -70,6 +70,7 @@
   .move-options { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center; margin-bottom: 6px; }
   .move-options label { font-size: 12px; color: var(--muted-strong); }
   .move-options input[type=range] { width: 90px; }
+  .scramble-buttons { margin-left: auto; display: flex; gap: 6px; }
   .move-panel { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
   .move-row { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
   .move-face { width: 18px; font-size: 12px; font-weight: 600; color: var(--muted-strong); border: none; }
@@ -177,6 +178,10 @@
   <label title="Move buttons and scrambles use slice moves (eg. 3R), turning only that one layer. When off they use wide moves (eg. 3Rw), turning every layer from the outside to that one. Scrambles reach roughly equally random states either way."><input type="checkbox" id="opt-slice"> Slice moves</label>
   <label title="Animate turns from clicks, buttons and typed sequences of up to 12 moves. Longer sequences, scrambles, undo and rewind always apply instantly."><input type="checkbox" id="opt-animate" checked> Animate</label>
   <label>Speed <input type="range" id="opt-speed" min="1" max="5" step="1" value="3" aria-label="Animation speed"></label>
+  <span class="scramble-buttons">
+    <button id="btn-scramble" title="Scramble from the current position through each reduction phase (settings in the Scramble section below)">Scramble</button>
+    <button id="btn-scramble-keep" title="Scramble using only moves that keep the current shape">Scramble (keep shape)</button>
+  </span>
 </div>
 <div class="move-panel" id="move-panel">
   <!-- filled by JS -->
@@ -210,12 +215,12 @@
   <div id="phase-sliders"></div>
   <div class="row">
     <label title="On the axis that bandages next phase, only scramble the layers whose independence is about to be lost. Deeper layers survive the reduction and get mixed in later phases."><input type="checkbox" id="opt-efficient"> Efficient mode</label>
-    <button id="btn-scramble">Generate scramble</button>
+    <span class="muted">Moves per phase, used by the Scramble buttons above the moves</span>
   </div>
   <div id="scramble-out"></div>
 </section>
 
-<script src="engine.js?v=00eb067e"></script>
+<script src="engine.js?v=d95a32dc"></script>
 <script>
 const { DIRS, AXIS, IDX, POSITIVE, matVec, parseSpec, formatSpec, parseMove, moveStr,
   worldStickers, inBox, boxSize, Puzzle, planPhases, generateScramble, phaseSummary, parseSequence, moveSweep } = Engine;
@@ -715,23 +720,35 @@ function renderPhaseSliders(keep){
   });
 }
 
-function generate(){
-  const counts=[...document.querySelectorAll('.phase-num')].map(i=>Math.min(100,Math.max(5,+i.value||5)));
+// Scramble from wherever the puzzle is now, adding to its history. A phase
+// that the plan from solved reaches gets that phase's slider count; any other
+// (scrambling from part-way, or with the whole puzzle turned) the usual
+// default. keepShape: only moves that keep the current phase.
+function generate(keepShape){
+  const counts=new Map();
+  [puzzle.fullBox, ...plannedPhases].forEach((b,i)=>{
+    const n=document.querySelector(`.phase-num[data-i="${i}"]`);
+    if(n) counts.set(Engine.boxKey(b), Math.min(100,Math.max(5,+n.value||5)));
+  });
+  const countFor=(i,box)=>counts.get(Engine.boxKey(box)) ?? Math.min(100,Math.max(5,10*Math.max(...boxSize(box))));
+  stopAnimation();
+  const start=puzzle.clone(), base=[...history];
   const res=generateScramble(puzzle.spec,{
-    movesPerPhase:counts, wide:isWide(), plan:plannedPhases,
+    start, keepShape, countFor, wide:isWide(),
     efficient:document.getElementById('opt-efficient').checked,
   });
-  scramble={phases:res.phases, moves:res.moves};
-  history=[...res.moves];
+  if(!res.moves.length){ showMsg(keepShape ? 'No move keeps the current shape' : 'No scramble moves possible from here'); return; }
+  scramble={phases:res.phases, moves:res.moves, base};
+  history=base.concat(res.moves);
   replayHistory(history);
-  // With animation on, play the scramble back quickly from solved, pausing
-  // briefly between phases; the puzzle is already scrambled underneath, so any
-  // other action just jumps to the end.
-  if(animationOn() && res.moves.length){
+  // With animation on, play the scramble back quickly from where it started,
+  // pausing briefly between phases; the puzzle is already scrambled
+  // underneath, so any other action just jumps to the end.
+  if(animationOn()){
     // half turns take 1.5 quarter-turn times
     const weight=res.moves.reduce((s,m)=>s+(m.endsWith('2')?1.5:1),0);
     const quarterMs=Math.max(SCRAMBLE_MIN_MS, Math.min(SCRAMBLE_MAX_MS, SCRAMBLE_TOTAL_MS/weight));
-    const p=new Puzzle(puzzle.spec), items=[];
+    const p=start, items=[];
     res.phases.forEach((ph,i)=>{
       if(i>0) items.push(pauseOn(p.clone().cubies, PHASE_PAUSE_MS));
       for(const m of ph.moves){
@@ -751,7 +768,7 @@ function clearScramble(){ scramble=null; stepHi=null; renderScramble(); }
 
 // the puzzle just before scramble move i, with that move's layer highlighted
 function jumpToScramble(i){
-  history=scramble.moves.slice(0,i);
+  history=scramble.base.concat(scramble.moves.slice(0,i));
   replayHistory(history);
   stepHi=puzzle.selection(parseMove(scramble.moves[i]));
   redraw();
@@ -761,8 +778,10 @@ function jumpToScramble(i){
 function renderScramble(){
   const out=document.getElementById('scramble-out');
   if(!scramble){ out.innerHTML=''; return; }
-  const onTrack=history.length<=scramble.moves.length && history.every((m,i)=>m===scramble.moves[i]);
-  const pos=onTrack ? history.length : -1;
+  // where the history is within the scramble, if it's still following it
+  const b=scramble.base.length, full=scramble.base.concat(scramble.moves);
+  const onTrack=history.length>=b && history.length<=full.length && history.every((m,i)=>m===full[i]);
+  const pos=onTrack ? history.length-b : -1;
   let i=0, html='<p class="hint">Click a move to see the puzzle just before it, with that move\'s layer highlighted.</p>';
   for(const ph of scramble.phases){
     const count = ph.singleAxis ? 'one random turn per layer (one axis only)' : `${ph.moves.length} moves`;
@@ -780,7 +799,7 @@ function renderScramble(){
   out.querySelectorAll('.smove').forEach(el=>el.addEventListener('click',()=>jumpToScramble(+el.dataset.i)));
   document.getElementById('btn-copy-scramble').onclick=()=>navigator.clipboard.writeText(scramble.moves.join(' ')).catch(()=>{});
   document.getElementById('btn-show-scrambled').onclick=()=>{
-    history=[...scramble.moves]; replayHistory(history); redraw(); updateHistory();
+    history=scramble.base.concat(scramble.moves); replayHistory(history); redraw(); updateHistory();
   };
 }
 
@@ -820,7 +839,8 @@ document.getElementById('opt-speed').onchange=saveOptions;
 
 document.getElementById('opt-slice').onchange=()=>{ saveOptions(); clearScramble(); renderPhaseSliders(true); refreshMoveButtons(); };
 document.getElementById('opt-efficient').onchange=()=>{ saveOptions(); clearScramble(); };
-document.getElementById('btn-scramble').onclick=generate;
+document.getElementById('btn-scramble').onclick=()=>generate(false);
+document.getElementById('btn-scramble-keep').onclick=()=>generate(true);
 
 /* ===================== wiring ===================== */
 document.getElementById('compass').onclick=()=>{ viewYaw=-0.6; viewPitch=0.5; renderSVG(); };

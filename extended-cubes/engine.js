@@ -621,15 +621,19 @@ function makeBlocker(){
   };
 }
 
-// opts: movesPerPhase (array, last value repeats), wide, efficient, rng, and
-// plan (boxes from planPhases, so a UI can label phases before generating)
+// opts: movesPerPhase (array, last value repeats) or countFor(i, box) giving
+// phase i's move count, wide, efficient, rng, plan (boxes from planPhases, so a
+// UI can label phases before generating), start (a Puzzle to scramble from
+// instead of solved) and keepShape (stay in the starting phase: only moves
+// that don't change it).
 function generateScramble(spec, opts={}){
   const rng=opts.rng||Math.random, wide=opts.wide!==false, perPhase=opts.movesPerPhase||[20];
-  const p=new Puzzle(spec);
-  let plan=opts.plan ? [...opts.plan] : planPhases(p.clone(),wide,rng);
+  const p=opts.start ? opts.start.clone() : new Puzzle(spec);
+  let plan = opts.keepShape ? [] : opts.plan ? [...opts.plan] : planPhases(p.clone(),wide,rng);
   const phases=[], blocker=makeBlocker();
   for(let i=0;;i++){
-    const n=perPhase[Math.min(i,perPhase.length-1)];
+    // (before a later phase's reducing move, its box is the next one planned)
+    const n=opts.countFor ? opts.countFor(i, i===0 || !plan.length ? p.eff : plan[0]) : perPhase[Math.min(i,perPhase.length-1)];
     const moves=[];
     let opening=null;   // face:layer of the move that reduced into this phase
     if(i>0){
