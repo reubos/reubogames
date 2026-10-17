@@ -155,6 +155,10 @@ function worldStickers(c){
 function isSolved(cubies){
   return cubies.every(c=>vecEq(c.pos,c.home)&&matEq(c.ori,I3));
 }
+function coarsen(cubies,eff){
+  const lim=eff.map(e=>e-1);
+  for(const c of cubies) c.fc=c.fc.map((v,k)=>Math.max(-lim[k],Math.min(lim[k],v)));
+}
 function moveStr(face,layer,mod){ return (layer>1?String(layer):'')+face+mod; }
 
 /* ===================== renderer ===================== */
