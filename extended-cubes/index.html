@@ -67,8 +67,9 @@
   #move-msg { color: var(--error); font-size: 12px; min-height: 1.2em; margin: -4px 0 6px; }
 
   /* move buttons */
-  .move-options { margin-bottom: 6px; }
+  .move-options { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center; margin-bottom: 6px; }
   .move-options label { font-size: 12px; color: var(--muted-strong); }
+  .move-options input[type=range] { width: 90px; }
   .move-panel { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
   .move-row { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
   .move-face { width: 18px; font-size: 12px; font-weight: 600; color: var(--muted-strong); border: none; }
@@ -172,6 +173,8 @@
 
 <div class="move-options">
   <label title="Move buttons and scrambles use slice moves (eg. 3R), turning only that one layer. When off they use wide moves (eg. 3Rw), turning every layer from the outside to that one. Scrambles reach roughly equally random states either way."><input type="checkbox" id="opt-slice"> Slice moves</label>
+  <label title="Animate turns from clicks, buttons and typed sequences of up to 12 moves. Longer sequences, scrambles, undo and rewind always apply instantly."><input type="checkbox" id="opt-animate" checked> Animate</label>
+  <label>Speed <input type="range" id="opt-speed" min="1" max="5" step="1" value="3" aria-label="Animation speed"></label>
 </div>
 <div class="move-panel" id="move-panel">
   <!-- filled by JS -->
@@ -209,10 +212,10 @@
   <div id="scramble-out"></div>
 </section>
 
-<script src="engine.js?v=304f0bcb"></script>
+<script src="engine.js?v=d7add915"></script>
 <script>
 const { DIRS, AXIS, IDX, POSITIVE, matVec, parseSpec, formatSpec, parseMove, moveStr,
-  worldStickers, inBox, boxSize, Puzzle, planPhases, generateScramble, phaseSummary, parseSequence } = Engine;
+  worldStickers, inBox, boxSize, Puzzle, planPhases, generateScramble, phaseSummary, parseSequence, moveSweep } = Engine;
 const HEX = { Red:'#dd2222', Orange:'#ff8800', White:'#f0f0f0', Yellow:'#ffdd00', Green:'#00aa55', Blue:'#0066cc', Body:'#2a2a2a' };
 const MAX_CUBIES = 4000;
 
@@ -244,40 +247,71 @@ const INPLANE = {'+x':[[0,1,0],[0,0,1]], '+y':[[1,0,0],[0,0,1]], '+z':[[1,0,0],[
 INPLANE['-x']=INPLANE['+x']; INPLANE['-y']=INPLANE['+y']; INPLANE['-z']=INPLANE['+z'];
 
 function renderSVG(){
-  const cubies=puzzle.cubies, M=viewMatrix();
+  if(anim) drawAnimationFrame();
+  else drawPuzzle(puzzle.cubies, null);
+}
+
+// rotation by `a` radians about axis k, right-handed
+function axisRotation(k,a){
+  const c=Math.cos(a), s=Math.sin(a);
+  return k===0 ? [[1,0,0],[0,c,-s],[0,s,c]] : k===1 ? [[c,0,s],[0,1,0],[-s,0,c]] : [[c,-s,0],[s,c,0],[0,0,1]];
+}
+
+// Draw `cubies`; `spin` = {members:Set of indices, axK, angle} draws those
+// pieces part-way through a turn (no highlights, not clickable).
+function drawPuzzle(cubies, spin){
+  const M=viewMatrix();
   const toCam=p=>matVec(M,p);
   const E=[0,1,2].map(k=>Math.max(...cubies.map(c=>Math.abs(c.pos[k])+1)));
   const Rw=Math.hypot(...E)||1, eye=PERSP*Rw;
   const projectPt=p=>{ const q=toCam(p), f=eye/(eye-q[2]); return [q[0]*S*f, -q[1]*S*f]; };
-  const occ = new Set(cubies.map(c=>c.pos.join(',')));
+  const Rs = spin ? axisRotation(spin.axK, spin.angle) : null;
+  const moving = i => !!spin && spin.members.has(i);
+  // a face is hidden only by a neighbour that moves with it: mid-turn, the
+  // faces along the cut are exposed (in the body colour)
+  const occ=[new Set(), new Set()];
+  cubies.forEach((c,i)=>occ[moving(i)?1:0].add(c.pos.join(',')));
+  // The turning pieces and the rest are separated by flat cuts across the
+  // turning axis, so drawing whole regions farthest-from-the-eye first keeps
+  // them from showing through each other; within a region, sort by depth.
+  let regionOrder=null;
+  if(spin){
+    const k=spin.axK, eyeK=eye*M[2][k], ks=cubies.map(c=>c.pos[k]);
+    const mk=ks.filter((_,i)=>moving(i)), lo=Math.min(...mk), hi=Math.max(...mk);
+    const bounds=[[-Infinity,lo-1],[lo,hi],[hi+1,Infinity]];
+    const dist=([a,b])=>eyeK<a ? a-eyeK : eyeK>b ? eyeK-b : 0;
+    regionOrder=i=>{ const r=moving(i)?1:(ks[i]<lo?0:2); return -dist(bounds[r]); };
+  }
   const faces = [];
-  for(const c of cubies){
-    const ws = worldStickers(c);
+  cubies.forEach((c,i)=>{
+    const ws = worldStickers(c), turning=moving(i), group=occ[turning?1:0];
+    const place = p => turning ? matVec(Rs,p) : p;
     for(const dir of Object.keys(DIRS)){
-      const n=DIRS[dir];
-      const nc=toCam(n);
-      const nb=[c.pos[0]+2*n[0],c.pos[1]+2*n[1],c.pos[2]+2*n[2]];
-      if(occ.has(nb.join(',')))continue;
+      const n0=DIRS[dir];
+      const nb=[c.pos[0]+2*n0[0],c.pos[1]+2*n0[1],c.pos[2]+2*n0[2]];
+      if(group.has(nb.join(',')))continue;
       const [u0,v0]=INPLANE[dir];
-      const center=[c.pos[0]+n[0],c.pos[1]+n[1],c.pos[2]+n[2]];
-      const cv=toCam(center);
+      const center0=[c.pos[0]+n0[0],c.pos[1]+n0[1],c.pos[2]+n0[2]];
+      const n=place(n0), center=place(center0), nc=toCam(n), cv=toCam(center);
       // with a finite eye at (0,0,eye), facing depends on the face's position too
       if(-nc[0]*cv[0]-nc[1]*cv[1]+nc[2]*(eye-cv[2]) <= 1e-9) continue;
       const corners=[[+1,+1],[+1,-1],[-1,-1],[-1,+1]].map(([su,sv])=>
-        projectPt([center[0]+su*u0[0]+sv*v0[0], center[1]+su*u0[1]+sv*v0[1], center[2]+su*u0[2]+sv*v0[2]]));
-      const highlighting = boxHover || btnHover || hover || stepHi;
-      const isHi = boxHover ? inBox(c.pos,puzzle.eff)
+        projectPt(place([center0[0]+su*u0[0]+sv*v0[0], center0[1]+su*u0[1]+sv*v0[1], center0[2]+su*u0[2]+sv*v0[2]])));
+      const highlighting = !spin && (boxHover || btnHover || hover || stepHi);
+      const isHi = !highlighting ? false
+        : boxHover ? inBox(c.pos,puzzle.eff)
         : btnHover ? btnHover.fcs.has(c.fc[btnHover.axK])
         : hover ? c.fc[hover.axK]===hover.fc
-        : stepHi && stepHi.fcs.has(c.fc[stepHi.axK]);
+        : stepHi.fcs.has(c.fc[stepHi.axK]);
       // headlight, as in cuboid-scrambler: brightness tracks how face-on a side is
       const light=(AMBIENT+DIFFUSE*Math.max(0,nc[2])) * (highlighting && !isHi ? 0.45 : 1);
       const col = shade(HEX[ws[dir]]||HEX.Body, light);
       const axK = AXK_FROM_DIR[dir];
-      faces.push({corners, col, isHi, depth:cv[2], face:FACE_FROM_DIR[dir], axK, fcVal:c.fc[axK]});
+      faces.push({corners, col, isHi, depth:cv[2], region:regionOrder?regionOrder(i):0,
+        face:spin?null:FACE_FROM_DIR[dir], axK, fcVal:c.fc[axK]});
     }
-  }
-  faces.sort((a,b)=>a.depth-b.depth);
+  });
+  faces.sort((a,b)=>a.region-b.region || a.depth-b.depth);
 
   // fixed frame from the bounding sphere so rotating never rescales the view
   const R=Rw*S*PERSP_MAG+10;
@@ -285,12 +319,63 @@ function renderSVG(){
   svg.setAttribute('viewBox',`${(-R).toFixed(1)} ${(-R).toFixed(1)} ${(2*R).toFixed(1)} ${(2*R).toFixed(1)}`);
   let body='';
   for(const f of faces){
-    body+=`<polygon data-face="${f.face}" data-axk="${f.axK}" data-fc="${f.fcVal}" `+
+    body+=`<polygon ${f.face ? `data-face="${f.face}" data-axk="${f.axK}" data-fc="${f.fcVal}" ` : ''}`+
       `points="${f.corners.map(p=>p[0].toFixed(1)+','+p[1].toFixed(1)).join(' ')}" fill="${f.col}" stroke="${f.isHi?'#ffffff':'#111'}" stroke-width="${f.isHi?1.4:1}" stroke-linejoin="round"/>`;
   }
   svg.innerHTML=body;
   renderCompass(M);
 }
+
+/* ===================== move animation ===================== */
+// A move is applied to the puzzle at once (so buttons, history and phase are
+// right straight away); the view then plays the turn from a snapshot of the
+// state just before it. A new move cuts any running animation short.
+let anim=null, animFrame=null;
+const QUARTER_MS=[450,320,220,150,90];   // by speed setting 1..5
+const ANIMATE_MAX_CUBIES=1500;           // past this a frame is too slow to draw
+const ANIMATE_MAX_SEQUENCE=12;           // longer typed sequences apply instantly
+
+function animationOn(){
+  return document.getElementById('opt-animate').checked && puzzle.cubies.length<=ANIMATE_MAX_CUBIES;
+}
+function turnDuration(angle){
+  const q=QUARTER_MS[Math.min(5,Math.max(1,+document.getElementById('opt-speed').value||3))-1];
+  return Math.abs(angle)>Math.PI/2+1e-6 ? q*1.5 : q;
+}
+// one turn to play: the pieces as they were just before it, and which move
+function sweepFrom(before, mv){
+  const sel=before.selection(mv), sw=moveSweep(mv), members=new Set();
+  before.cubies.forEach((c,i)=>{ if(sel.fcs.has(c.fc[sel.axK])) members.add(i); });
+  return {cubies:before.cubies, members, axK:sw.axK, angle:sw.angle};
+}
+function playTurns(items){
+  stopAnimation();
+  if(!items.length) return;
+  anim={items, i:0, t0:performance.now()};
+  animFrame=requestAnimationFrame(stepAnimation);
+}
+function drawAnimationFrame(){
+  const it=anim.items[anim.i];
+  const t=Math.min(1,(performance.now()-anim.t0)/turnDuration(it.angle)), eased=t*t*(3-2*t);
+  drawPuzzle(it.cubies, {members:it.members, axK:it.axK, angle:it.angle*eased});
+}
+function stepAnimation(now){
+  if(!anim) return;
+  if(now-anim.t0>=turnDuration(anim.items[anim.i].angle)){
+    anim.i++; anim.t0=now;
+    if(anim.i>=anim.items.length){ anim=null; animFrame=null; renderSVG(); return; }
+  }
+  drawAnimationFrame();
+  animFrame=requestAnimationFrame(stepAnimation);
+}
+// jump to the end of any running animation
+function stopAnimation(){
+  if(animFrame) cancelAnimationFrame(animFrame);
+  animFrame=null;
+  if(anim){ anim=null; renderSVG(); }
+}
+// a hidden page gets no animation frames, so finish rather than stay mid-turn
+document.addEventListener('visibilitychange',()=>{ if(document.hidden) stopAnimation(); });
 
 const COMPASS_AXES=[
   {label:'F', v:[0,0,1], col:'#00cc66'},
@@ -332,7 +417,10 @@ function renderCompass(M){
       svg.style.cursor='grabbing';
       setHover(null);
     } else if(e.button===0){
-      const h=hitOf(e.target);
+      // mid-turn the drawing is of the old state: finish it, then hit-test again
+      let target=e.target;
+      if(anim){ stopAnimation(); target=document.elementFromPoint(e.clientX,e.clientY)||target; }
+      const h=hitOf(target);
       if(!h) return;
       const mod = e.shiftKey ? '2' : (e.ctrlKey||e.metaKey) ? "'" : '';
       handleFaceClick(h.face, h.axK, h.fc, mod);
@@ -372,6 +460,7 @@ function rebuild(){
   try { next=new Puzzle(document.getElementById('spec').value); }
   catch(e){ showMsg(e.message); return; }
   if(next.cubies.length>MAX_CUBIES){ showMsg(`That puzzle has ${next.cubies.length} cubies, more than the ${MAX_CUBIES} this can draw`); return; }
+  stopAnimation();
   puzzle=next;
   document.getElementById('spec').value=formatSpec(puzzle.spec);
   syncPreset();
@@ -387,6 +476,7 @@ function rebuild(){
 function doMove(mv){
   let parsed;
   try { parsed=parseMove(mv); } catch(e){ showMsg(`"${mv}" isn't a valid move`); return; }
+  const before = animationOn() ? puzzle.clone() : null;
   if(!puzzle.move(parsed)){
     showMsg(`${mv} isn't possible in the current shape`);
     return;
@@ -394,12 +484,14 @@ function doMove(mv){
   showMsg('');
   hover=null; stepHi=null;
   history.push(mv);
+  if(before) playTurns([sweepFrom(before,parsed)]); else stopAnimation();
   refreshMoveButtons();
   redraw();
   updateHistory();
 }
 
 function replayHistory(moves){
+  stopAnimation();
   puzzle.reset();
   for(const m of moves) puzzle.move(m);
   hover=null; stepHi=null;
@@ -543,11 +635,16 @@ function applySequence(){
   let moves;
   try { moves=parseSequence(input.value); }
   catch(e){ showMsg(e.message); return; }
+  // short sequences play turn by turn; longer ones apply instantly
+  const animate=animationOn() && moves.length<=ANIMATE_MAX_SEQUENCE, turns=[];
   let done=0;
   for(const m of moves){
+    const before = animate ? puzzle.clone() : null;
     if(!puzzle.move(m)) break;
+    if(before) turns.push(sweepFrom(before,parseMove(m)));
     history.push(m); done++;
   }
+  if(animate) playTurns(turns); else stopAnimation();
   hover=null; stepHi=null;
   showMsg(done<moves.length
     ? `Stopped at move ${done+1} of ${moves.length}: ${moves[done]} isn't possible in the current shape`
@@ -649,6 +746,8 @@ function loadOptions(){
     document.getElementById('opt-slice').checked=!!o.slice;
     document.getElementById('opt-efficient').checked=!!o.efficient;
     if(['auto','light','dark'].includes(o.theme)) document.getElementById('opt-theme').value=o.theme;
+    if(typeof o.animate==='boolean') document.getElementById('opt-animate').checked=o.animate;
+    if(o.speed>=1 && o.speed<=5) document.getElementById('opt-speed').value=o.speed;
   }catch(e){}
 }
 function saveOptions(){
@@ -657,6 +756,8 @@ function saveOptions(){
       slice:document.getElementById('opt-slice').checked,
       efficient:document.getElementById('opt-efficient').checked,
       theme:document.getElementById('opt-theme').value,
+      animate:document.getElementById('opt-animate').checked,
+      speed:+document.getElementById('opt-speed').value,
     }));
   }catch(e){}
 }
@@ -670,6 +771,8 @@ function applyTheme(){
 }
 prefersLight.addEventListener('change',applyTheme);
 document.getElementById('opt-theme').onchange=()=>{ saveOptions(); applyTheme(); };
+document.getElementById('opt-animate').onchange=()=>{ saveOptions(); if(!document.getElementById('opt-animate').checked) stopAnimation(); };
+document.getElementById('opt-speed').onchange=saveOptions;
 
 document.getElementById('opt-slice').onchange=()=>{ saveOptions(); clearScramble(); renderPhaseSliders(true); refreshMoveButtons(); };
 document.getElementById('opt-efficient').onchange=()=>{ saveOptions(); clearScramble(); };

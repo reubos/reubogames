@@ -240,6 +240,12 @@ function moveRotation(mv){
   const sign=baseSign(mv.face), exp=mv.mod==='2'?2:mv.mod==="'"?-sign:sign;
   return matPow(P[AXIS[mv.face]],exp);
 }
+// For animating: the axis index and the signed angle (radians) to sweep about
+// it, right-handed. A half turn sweeps the face's clockwise way.
+function moveSweep(mv){
+  const sign=baseSign(mv.face), quarters=mv.mod==='2'?2*sign:mv.mod==="'"?-sign:sign;
+  return {axK:IDX[AXIS[mv.face]], angle:quarters*Math.PI/2};
+}
 function applyMove(cubies,mv){
   const ax=AXIS[mv.face], k=IDX[ax];
   const sel=selectCoords(cubies,mv), R=moveRotation(mv);
@@ -626,7 +632,7 @@ const Engine = {
   matVec, transpose, matMul, vecEq,
   parseSpec, formatSpec, shapePositions, buildSolved, nameShape,
   boundingBox, layerGrid, boxSize, inBox, boxEq, boxKey, clampToBox,
-  parseMove, moveStr, formatMove, parseSequence, selectCoords, applyMove, worldStickers,
+  parseMove, moveStr, formatMove, parseSequence, moveSweep, selectCoords, applyMove, worldStickers,
   Puzzle, planPhases, generateScramble, keepsPhase, phaseHasMoves, phaseSummary,
 };
 if(typeof module!=='undefined' && module.exports) module.exports=Engine;
