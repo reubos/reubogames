@@ -4,84 +4,129 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Extended Cuboid Simulator</title>
+<script>
+// apply the saved theme before first paint, so a light page doesn't flash dark
+(function(){
+  let t='auto';
+  try{ t=JSON.parse(localStorage.getItem('extended-cubes-options')||'{}').theme||'auto'; }catch(e){}
+  const light = t==='light' || (t==='auto' && matchMedia('(prefers-color-scheme: light)').matches);
+  document.documentElement.dataset.theme = light ? 'light' : 'dark';
+})();
+</script>
 <style>
-  :root { color-scheme: light dark; }
+  /* theme: dark by default; data-theme="light" on <html> switches palettes
+     (set from the Auto/Light/Dark toggle, Auto following the browser) */
+  :root {
+    color-scheme: dark;
+    --bg: #111; --text: #eee; --panel: #181818;
+    --control: #222; --control-hover: #333; --control-active: #444;
+    --border: #444; --border-soft: #333;
+    --muted: #888; --muted-strong: #aaa; --faint: #666; --done: #777;
+    --accent: #ffb347; --error: #e88; --solved: #1a5;
+    --reduce: #4a3210; --reduce-hover: #64441a;
+    --restore: #15402a; --restore-hover: #1d573a;
+    --pick: #335; --current: #446; --current-text: #fff;
+    --face-r: #992222; --face-l: #885500; --face-u: #888888;
+    --face-d: #998800; --face-f: #006633; --face-b: #004488;
+  }
+  :root[data-theme="light"] {
+    color-scheme: light;
+    --bg: #f4f4f2; --text: #1d1d1f; --panel: #ffffff;
+    --control: #ffffff; --control-hover: #ececec; --control-active: #dedede;
+    --border: #c4c4c4; --border-soft: #dadada;
+    --muted: #6b6b6b; --muted-strong: #555; --faint: #888; --done: #9a9a9a;
+    --accent: #b5620a; --error: #c0392b; --solved: #1a8f4c;
+    --reduce: #ffe1b8; --reduce-hover: #ffd29a;
+    --restore: #cdeedb; --restore-hover: #b5e4c8;
+    --pick: #dce4ff; --current: #c9d4ff; --current-text: #111;
+    --face-r: #d33; --face-l: #e08a1a; --face-u: #9a9a9a;
+    --face-d: #c9a800; --face-f: #1b9a55; --face-b: #2a6fd1;
+  }
   * { box-sizing: border-box; }
-  body { font-family: system-ui, sans-serif; margin: 0; padding: 16px; background: #111; color: #eee; }
-  h1 { font-size: 16px; font-weight: 600; margin: 0 0 12px; }
+  body { font-family: system-ui, sans-serif; margin: 0; padding: 16px; background: var(--bg); color: var(--text); }
+  .topbar { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+  .topbar .row { margin: 0; }
+  h1 { font-size: 16px; font-weight: 600; margin: 0; }
   .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
   label { font-size: 13px; display: flex; align-items: center; gap: 5px; }
   input[type=number] { width: 52px; }
   #preset { max-width: 100%; }
-  select { font: inherit; padding: 4px 6px; background: #222; color: #eee; border: 1px solid #444; border-radius: 5px; }
+  select { font: inherit; padding: 4px 6px; background: var(--control); color: var(--text); border: 1px solid var(--border); border-radius: 5px; }
   #spec { font-family: ui-monospace, Consolas, monospace; }
-  .notation-help { font-size: 12px; color: #aaa; margin-bottom: 10px; }
-  .notation-help summary { cursor: pointer; color: #888; }
+  .notation-help { font-size: 12px; color: var(--muted-strong); margin-bottom: 10px; }
+  .notation-help summary { cursor: pointer; color: var(--muted); }
   .notation-help p, .notation-help ul { margin: 6px 0; }
-  .notation-help code { color: #eee; background: #222; padding: 0 4px; border-radius: 3px; }
+  .notation-help code { color: var(--text); background: var(--control); padding: 0 4px; border-radius: 3px; }
   input[type=text] { flex: 1; min-width: 200px; }
-  input, button { font: inherit; padding: 4px 6px; background: #222; color: #eee; border: 1px solid #444; border-radius: 5px; }
+  input, button { font: inherit; padding: 4px 6px; background: var(--control); color: var(--text); border: 1px solid var(--border); border-radius: 5px; }
+  input[type=checkbox], input[type=range] { accent-color: var(--accent); }
   button { cursor: pointer; }
-  button:hover { background: #333; }
+  button:hover { background: var(--control-hover); }
+  #move-msg { color: var(--error); font-size: 12px; min-height: 1.2em; margin: -4px 0 6px; }
 
-  /* move button grid */
+  /* move buttons */
   .move-panel { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
   .move-row { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
-  .move-face { width: 18px; font-size: 12px; font-weight: 600; color: #aaa; border: none; }
+  .move-face { width: 18px; font-size: 12px; font-weight: 600; color: var(--muted-strong); border: none; }
   .mbtn { min-width: 40px; text-align: center; padding: 4px 6px; font-size: 13px; }
   /* what a move does to the shape: background tint (the border shows the face) */
-  .mbtn.mv-reduces { background: #4a3210; }
-  .mbtn.mv-reduces:hover { background: #64441a; }
-  .mbtn.mv-restores { background: #15402a; }
-  .mbtn.mv-restores:hover { background: #1d573a; }
-  .move-key { display: flex; gap: 12px; font-size: 11px; color: #888; margin-top: 2px; }
-  .move-key span::before { content: ''; display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; border: 1px solid #444; background: #222; }
-  .move-key .mv-reduces::before { background: #4a3210; }
-  .move-key .mv-restores::before { background: #15402a; }
-  .mbtn:active { background: #444; }
-  .r-col { border-color: #992222; }
-  .l-col { border-color: #885500; }
-  .u-col { border-color: #888888; }
-  .d-col { border-color: #998800; }
-  .f-col { border-color: #006633; }
-  .b-col { border-color: #004488; }
-
+  .mbtn.mv-reduces { background: var(--reduce); }
+  .mbtn.mv-reduces:hover { background: var(--reduce-hover); }
+  .mbtn.mv-restores { background: var(--restore); }
+  .mbtn.mv-restores:hover { background: var(--restore-hover); }
+  .move-key { display: flex; gap: 12px; font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .move-key span::before { content: ''; display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; border: 1px solid var(--border); background: var(--control); }
+  .move-key .mv-reduces::before { background: var(--reduce); }
+  .move-key .mv-restores::before { background: var(--restore); }
+  .mbtn:active { background: var(--control-active); }
+  .r-col { border-color: var(--face-r); }
+  .l-col { border-color: var(--face-l); }
+  .u-col { border-color: var(--face-u); }
+  .d-col { border-color: var(--face-d); }
+  .f-col { border-color: var(--face-f); }
+  .b-col { border-color: var(--face-b); }
 
   .stage-wrap { position: relative; margin-top: 4px; }
-  #stage { background: #181818; border: 1px solid #333; border-radius: 8px; display: block; touch-action: none; user-select: none; }
+  #stage { background: var(--panel); border: 1px solid var(--border-soft); border-radius: 8px; display: block; touch-action: none; user-select: none; }
   #stage polygon { cursor: pointer; }
   #compass { position: absolute; top: 8px; left: 8px; cursor: pointer; border-radius: 50%; }
   #compass:hover circle:first-of-type { stroke: #888; }
-  #size-note { position: absolute; top: 10px; right: 10px; text-align: right; font-size: 12px; color: #888; pointer-events: none; line-height: 1.4; }
-  #size-note b { color: #eee; font-size: 14px; font-weight: 600; }
-  #size-note.reduced b { color: #ffb347; pointer-events: auto; cursor: help; border-bottom: 1px dotted #ffb347; }
+  #size-note { position: absolute; top: 10px; right: 10px; text-align: right; font-size: 12px; color: var(--muted); pointer-events: none; line-height: 1.4; }
+  #size-note b { color: var(--text); font-size: 14px; font-weight: 600; }
+  #size-note.reduced b { color: var(--accent); pointer-events: auto; cursor: help; border-bottom: 1px dotted var(--accent); }
 
   .history-area { margin-top: 10px; }
-  .history-area label { font-size: 12px; color: #888; margin-bottom: 4px; display: block; }
-  #historybox { font-size: 13px; letter-spacing: 0.5px; word-break: break-all; min-height: 1.6em; padding: 6px 8px; background: #181818; border: 1px solid #333; border-radius: 5px; max-height: 80px; overflow-y: auto; }
+  .history-area label { font-size: 12px; color: var(--muted); margin-bottom: 4px; display: block; }
+  #historybox { font-size: 13px; letter-spacing: 0.5px; word-break: break-all; min-height: 1.6em; padding: 6px 8px; background: var(--panel); border: 1px solid var(--border-soft); border-radius: 5px; max-height: 80px; overflow-y: auto; }
   #historybox .move-token { cursor: pointer; padding: 1px 3px; border-radius: 3px; }
-  #historybox .move-token:hover { background: #335; }
-  .muted { color: #888; font-size: 12px; }
-  .solved-badge { display: inline-block; padding: 2px 8px; background: #1a5; border-radius: 4px; font-size: 12px; font-weight: 600; margin-left: 8px; }
-  .hint { font-size: 11px; color: #666; margin-top: 4px; }
+  #historybox .move-token:hover { background: var(--pick); }
+  .muted { color: var(--muted); font-size: 12px; }
+  .solved-badge { display: inline-block; padding: 2px 8px; background: var(--solved); color: #fff; border-radius: 4px; font-size: 12px; font-weight: 600; margin-left: 8px; }
+  .hint { font-size: 11px; color: var(--faint); margin-top: 4px; }
 
-  .scramble-area { margin-top: 18px; border-top: 1px solid #333; padding-top: 12px; }
+  .scramble-area { margin-top: 18px; border-top: 1px solid var(--border-soft); padding-top: 12px; }
   .scramble-area h2 { font-size: 14px; font-weight: 600; margin: 0 0 10px; }
   .slider-row { display: grid; grid-template-columns: minmax(0,1fr) minmax(80px,180px) 52px; gap: 8px; align-items: center; font-size: 12px; margin-bottom: 6px; }
-  .slider-row span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #aaa; }
+  .slider-row span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted-strong); }
   .slider-row input[type=range] { width: 100%; }
-  .phase-label { font-size: 12px; color: #aaa; margin: 10px 0 4px; }
-  .phase-label b { color: #ffb347; font-weight: 600; }
+  .phase-label { font-size: 12px; color: var(--muted-strong); margin: 10px 0 4px; }
+  .phase-label b { color: var(--accent); font-weight: 600; }
   .phase-moves { font-size: 14px; line-height: 1.8; word-break: break-word; }
   .smove { cursor: pointer; padding: 1px 3px; border-radius: 3px; }
-  .smove:hover { background: #335; }
-  .smove.done { color: #777; }
-  .smove.cur { background: #446; color: #fff; }
-  .full-scramble { font-family: ui-monospace, Consolas, monospace; font-size: 12px; background: #181818; border: 1px solid #333; border-radius: 5px; padding: 6px 8px; word-break: break-word; margin-top: 4px; }
+  .smove:hover { background: var(--pick); }
+  .smove.done { color: var(--done); }
+  .smove.cur { background: var(--current); color: var(--current-text); }
+  .full-scramble { font-family: ui-monospace, Consolas, monospace; font-size: 12px; background: var(--panel); border: 1px solid var(--border-soft); border-radius: 5px; padding: 6px 8px; word-break: break-word; margin-top: 4px; }
 </style>
 </head>
 <body>
-<h1>Extended Cuboid Simulator</h1>
+<div class="topbar">
+  <h1>Extended Cuboid Simulator</h1>
+  <div class="row">
+    <label title="Move buttons and scrambles use slice moves (eg. 3R), turning only that one layer. When off they use wide moves (eg. 3Rw), turning every layer from the outside to that one. Scrambles reach roughly equally random states either way."><input type="checkbox" id="opt-slice"> Slice moves</label>
+    <label>Theme <select id="opt-theme" aria-label="Colour theme"><option value="auto">Auto</option><option value="light">Light</option><option value="dark">Dark</option></select></label>
+  </div>
+</div>
 
 <div class="row">
   <select id="preset">
@@ -107,7 +152,7 @@
   <button id="btn-new">New Puzzle</button>
   <span id="solved-indicator"></span>
 </div>
-<div id="move-msg" style="color:#e88;font-size:12px;min-height:1.2em;margin:-4px 0 6px;"></div>
+<div id="move-msg"></div>
 <details class="notation-help">
   <summary>Layout notation</summary>
   <p>Core size first, then one <code>+face</code> per stack of extra layers, outwards from the core:</p>
@@ -149,7 +194,6 @@
   <h2>Scramble</h2>
   <div id="phase-sliders"></div>
   <div class="row">
-    <label title="Scramble using slice moves (eg. 3R), turning only that one layer. When off, scramble using wide moves (eg. 3Rw), turning every layer from the outside to that one. Both reach roughly equally random states."><input type="checkbox" id="opt-slice"> Slice moves</label>
     <label title="On the axis that bandages next phase, only scramble the layers whose independence is about to be lost. Deeper layers survive the reduction and get mixed in later phases."><input type="checkbox" id="opt-efficient"> Efficient mode</label>
     <button id="btn-scramble">Generate scramble</button>
   </div>
@@ -407,11 +451,12 @@ const MOVE_FACES=['R','L','U','D','F','B'];
 let lastPointer=null;
 document.addEventListener('pointermove',e=>{ lastPointer=[e.clientX,e.clientY]; });
 
+// slice moves (2R) or wide moves (2Rw), following the Slice moves tickbox
 function possibleMoves(face){
-  const out=[];
+  const out=[], wide=isWide();
   for(let l=1;l<=puzzle.listedLayers(face);l++)
     for(const mod of ['',"'",'2'])
-      if(puzzle.effAfter({face,layer:l,mod,wide:false})) out.push(moveStr(face,l,mod));
+      if(puzzle.effAfter({face,layer:l,mod,wide:wide&&l>1})) out.push(moveStr(face,l,mod,wide));
   return out;
 }
 
@@ -582,6 +627,7 @@ function loadOptions(){
     const o=JSON.parse(localStorage.getItem('extended-cubes-options')||'{}');
     document.getElementById('opt-slice').checked=!!o.slice;
     document.getElementById('opt-efficient').checked=!!o.efficient;
+    if(['auto','light','dark'].includes(o.theme)) document.getElementById('opt-theme').value=o.theme;
   }catch(e){}
 }
 function saveOptions(){
@@ -589,10 +635,22 @@ function saveOptions(){
     localStorage.setItem('extended-cubes-options', JSON.stringify({
       slice:document.getElementById('opt-slice').checked,
       efficient:document.getElementById('opt-efficient').checked,
+      theme:document.getElementById('opt-theme').value,
     }));
   }catch(e){}
 }
-document.getElementById('opt-slice').onchange=()=>{ saveOptions(); clearScramble(); renderPhaseSliders(true); };
+
+// Auto follows the browser's light/dark preference, including live changes
+const prefersLight=matchMedia('(prefers-color-scheme: light)');
+function applyTheme(){
+  const t=document.getElementById('opt-theme').value;
+  const light = t==='light' || (t==='auto' && prefersLight.matches);
+  document.documentElement.dataset.theme = light ? 'light' : 'dark';
+}
+prefersLight.addEventListener('change',applyTheme);
+document.getElementById('opt-theme').onchange=()=>{ saveOptions(); applyTheme(); };
+
+document.getElementById('opt-slice').onchange=()=>{ saveOptions(); clearScramble(); renderPhaseSliders(true); refreshMoveButtons(); };
 document.getElementById('opt-efficient').onchange=()=>{ saveOptions(); clearScramble(); };
 document.getElementById('btn-scramble').onclick=generate;
 
@@ -629,6 +687,7 @@ document.getElementById('seq-input').addEventListener('keydown',e=>{ if(e.key===
 for(const o of document.getElementById('preset').options)
   if(o.value) o.textContent=`${o.textContent} · ${pretty(formatSpec(parseSpec(o.value)))}`;
 loadOptions();
+applyTheme();
 renderPhaseSliders(false);
 refreshMoveButtons();
 redraw();
