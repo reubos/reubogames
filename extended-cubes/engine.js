@@ -395,6 +395,15 @@ class Puzzle {
     const k=IDX[AXIS[face]], n=boxSize(this.eff)[k];
     return this.offCentre(k) && n%2===1 && !POSITIVE.has(face) ? Math.floor(n/2) : this.maxLayers(face);
   }
+  // The cells a phase's name describes: the solved shape's positions inside its
+  // box (a phase box can be larger than its shape, e.g. a 5x3x3 box around
+  // the Diamond Prism's plus-shaped 3x1x3 +U +D +R +L).
+  shapeCells(box=this.eff){
+    const k=boxKey(box);
+    this.cells = this.cells || new Map();
+    if(!this.cells.has(k)) this.cells.set(k, new Set(this.shape.filter(p=>inBox(p,box)).map(p=>p.join(','))));
+    return this.cells.get(k);
+  }
   // the unreduced puzzle keeps the layout as written; a reduced phase gets the
   // simplest name for the solved shape's pieces inside its box
   boxName(box=this.eff){

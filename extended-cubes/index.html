@@ -212,7 +212,7 @@
   <div id="scramble-out"></div>
 </section>
 
-<script src="engine.js?v=d7add915"></script>
+<script src="engine.js?v=5db6b7d4"></script>
 <script>
 const { DIRS, AXIS, IDX, POSITIVE, matVec, parseSpec, formatSpec, parseMove, moveStr,
   worldStickers, inBox, boxSize, Puzzle, planPhases, generateScramble, phaseSummary, parseSequence, moveSweep } = Engine;
@@ -266,6 +266,8 @@ function drawPuzzle(cubies, spin){
   const Rw=Math.hypot(...E)||1, eye=PERSP*Rw;
   const projectPt=p=>{ const q=toCam(p), f=eye/(eye-q[2]); return [q[0]*S*f, -q[1]*S*f]; };
   const Rs = spin ? axisRotation(spin.axK, spin.angle) : null;
+  // hovering the reduced size highlights the pieces on that named shape's cells
+  const reducedCells = boxHover ? puzzle.shapeCells() : null;
   const moving = i => !!spin && spin.members.has(i);
   // a face is hidden only by a neighbour that moves with it: mid-turn, the
   // faces along the cut are exposed (in the body colour)
@@ -299,7 +301,7 @@ function drawPuzzle(cubies, spin){
         projectPt(place([center0[0]+su*u0[0]+sv*v0[0], center0[1]+su*u0[1]+sv*v0[1], center0[2]+su*u0[2]+sv*v0[2]])));
       const highlighting = !spin && (boxHover || btnHover || hover || stepHi);
       const isHi = !highlighting ? false
-        : boxHover ? inBox(c.pos,puzzle.eff)
+        : boxHover ? reducedCells.has(c.pos.join(','))
         : btnHover ? btnHover.fcs.has(c.fc[btnHover.axK])
         : hover ? c.fc[hover.axK]===hover.fc
         : stepHi.fcs.has(c.fc[stepHi.axK]);
