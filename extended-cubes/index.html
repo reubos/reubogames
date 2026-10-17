@@ -153,6 +153,7 @@ function applyMove(cubies,move){
   for(const c of cubies){
     if(!sel.has(c.fc[k]))continue;
     c.pos=matVec(R,c.pos); c.ori=matMul(R,c.ori); c.fc=matVec(R,c.fc);
+    if(c.shadow) c.shadow=c.shadow.map(v=>matVec(R,v));
   }
 }
 function worldStickers(c){
@@ -324,7 +325,7 @@ function rebuild(){
   gH=Math.max(1,+document.getElementById('ih').value||1);
   gD=Math.max(1,+document.getElementById('id').value||1);
   cubies=buildSolved(gW,gH,gD);
-  eff=[gW,gH,gD];
+  resetPhases();
   history=[];
   currentLayer=1;
   showMsg('');
@@ -341,6 +342,7 @@ function rebuild(){
 // onto the outermost remaining one (coarsen) before the turn is applied.
 // Half turns keep the shape, so they never change the phase.
 let eff = [gW, gH, gD];
+let phaseStack = []; // effective dims of the phases left behind, oldest first
 function effAfterQuarterTurn(face){
   const k=IDX[AXIS[face]], [i,j]=[0,1,2].filter(a=>a!==k);
   if(eff[i]===eff[j]) return eff;
@@ -355,21 +357,35 @@ function performMove(mv){
   const k=IDX[AXIS[mv.face]], lim=ne[k]-1;
   const layers=new Set(cubies.map(c=>Math.max(-lim,Math.min(lim,c.fc[k])))).size;
   if(!mv.wide && mv.layer>layers) return false;
+  if(ne!==eff){
+    // remember the phase being left, with each piece's coordinates in it
+    phaseStack.push(eff);
+    for(const c of cubies) c.shadow.push([...c.fc]);
+  }
   eff=ne;
   coarsen(cubies,eff);
   applyMove(cubies,mv);
   coarsen(cubies,eff);
-  // Back in the original cuboid shape, every original cut plane exists again,
-  // so all layers are independently turnable: return to the first phase.
-  if(isOriginalShape()){
-    eff=[gW,gH,gD];
-    for(const c of cubies) c.fc=[...c.pos];
-  }
+  undoReductions();
   return true;
 }
-function isOriginalShape(){
-  const lim=[gW-1,gH-1,gD-1];
-  return cubies.every(c=>c.pos.every((v,k)=>Math.abs(v)<=lim[k]));
+// Each earlier phase's coordinates turn with the pieces. Once every piece's
+// coordinates fit that phase's box again, its layers line up as whole slabs,
+// so the reduction is undone; the earliest such phase wins.
+function undoReductions(){
+  for(let i=0;i<phaseStack.length;i++){
+    const lim=phaseStack[i].map(e=>e-1);
+    if(!cubies.every(c=>c.shadow[i].every((v,k)=>Math.abs(v)<=lim[k]))) continue;
+    eff=phaseStack[i];
+    for(const c of cubies){ c.fc=c.shadow[i]; c.shadow.length=i; }
+    phaseStack.length=i;
+    return;
+  }
+}
+function resetPhases(){
+  eff=[gW,gH,gD];
+  phaseStack=[];
+  for(const c of cubies) c.shadow=[];
 }
 
 function doMove(mv){
@@ -389,7 +405,7 @@ function doMove(mv){
 
 function replayHistory(moves){
   cubies=buildSolved(gW,gH,gD);
-  eff=[gW,gH,gD];
+  resetPhases();
   for(const m of moves) performMove(parseMove(m));
   hover=null;
   updateLayerButtons();
@@ -540,6 +556,7 @@ document.getElementById('btn-apply').onclick=applySequence;
 document.getElementById('seq-input').addEventListener('keydown',e=>{ if(e.key==='Enter') applySequence(); });
 
 // init
+resetPhases();
 updateLayerButtons();
 updateMoveButtons();
 redraw();
