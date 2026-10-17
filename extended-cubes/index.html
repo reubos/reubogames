@@ -543,6 +543,8 @@ function handleFaceClick(face, axK, fcVal, mod){
   const coords=[...new Set(puzzle.cubies.map(c=>c.fc[axK]))].sort((a,b)=>pos?b-a:a-b);
   const layer=coords.indexOf(fcVal)+1;
   if(layer<1) return;
+  // a layer that can only half-turn (R on a 3x3x4) does that on a plain click
+  if(mod!=='2' && !puzzle.effAfter({face,layer,mod,wide:false}) && puzzle.effAfter({face,layer,mod:'2',wide:false})) mod='2';
   doMove(moveStr(face,layer,mod));
 }
 
