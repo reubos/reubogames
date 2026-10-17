@@ -267,7 +267,7 @@ function drawPuzzle(cubies, spin){
   const projectPt=p=>{ const q=toCam(p), f=eye/(eye-q[2]); return [q[0]*S*f, -q[1]*S*f]; };
   const Rs = spin ? axisRotation(spin.axK, spin.angle) : null;
   // hovering the reduced size highlights the pieces on that named shape's cells
-  const reducedCells = boxHover ? puzzle.shapeCells() : null;
+  const reducedCells = boxHover && !boxHoverWhole ? puzzle.shapeCells() : null;
   const moving = i => !!spin && spin.members.has(i);
   // a face is hidden only by a neighbour that moves with it: mid-turn, the
   // faces along the cut are exposed (in the body colour)
@@ -301,7 +301,7 @@ function drawPuzzle(cubies, spin){
         projectPt(place([center0[0]+su*u0[0]+sv*v0[0], center0[1]+su*u0[1]+sv*v0[1], center0[2]+su*u0[2]+sv*v0[2]])));
       const highlighting = !spin && (boxHover || btnHover || hover || stepHi);
       const isHi = !highlighting ? false
-        : boxHover ? reducedCells.has(c.pos.join(','))
+        : boxHover ? (boxHoverWhole ? inBox(c.pos,puzzle.eff) : reducedCells.has(c.pos.join(',')))
         : btnHover ? btnHover.fcs.has(c.fc[btnHover.axK])
         : hover ? c.fc[hover.axK]===hover.fc
         : stepHi.fcs.has(c.fc[stepHi.axK]);
@@ -455,6 +455,7 @@ let history = [];
 let hover = null; // {axK, fc} of the layer under the cursor
 let hoveredBtn = null, btnHover = null; // move button under the pointer, and {axK, fcs} it would turn
 let boxHover = false; // pointer is on the reduced size: highlight that shape
+let boxHoverWhole = false; // the note names a layer grid, so highlight everything in it
 const pretty = s => s.replace(/(\d)x(?=\d)/g,'$1×');
 
 function rebuild(){
@@ -522,9 +523,15 @@ function updateSizeNote(){
   const full=pretty(puzzle.boxName(puzzle.fullBox));
   const reduced=puzzle.isReduced();
   note.className=reduced?'reduced':'';
-  note.innerHTML = reduced
-    ? `Reduced to<br><b title="Highlight this shape">${pretty(puzzle.boxName())}</b><br>from ${full}`
-    : `<b>${full}</b>`;
+  // Name the reduced shape only while the pieces actually form it; otherwise
+  // say which layer grid the puzzle turns as (a reduction can leave e.g. an
+  // arm standing upright that the named shape has lying flat).
+  const occ=new Set(puzzle.cubies.map(c=>c.pos.join(',')));
+  boxHoverWhole = reduced && ![...puzzle.shapeCells()].every(k=>occ.has(k));
+  note.innerHTML = !reduced ? `<b>${full}</b>`
+    : boxHoverWhole
+      ? `Turns as<br><b title="Highlight the pieces in this layer grid">${boxSize(puzzle.eff).join('×')}</b><br>from ${full}`
+      : `Reduced to<br><b title="Highlight this shape">${pretty(puzzle.boxName())}</b><br>from ${full}`;
   if(!reduced){ boxHover=false; return; }
   const b=note.querySelector('b');
   b.addEventListener('pointerenter',()=>{ boxHover=true; renderSVG(); });
