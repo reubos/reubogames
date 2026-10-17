@@ -544,9 +544,8 @@ function updateSizeNote(){
 function redraw(){
   renderSVG();
   updateSizeNote();
-  // solved as it started, or solved but the whole puzzle turned some way
-  const Q=puzzle.solvedRotation(), turned=Q && !Q.every((r,i)=>r.every((v,j)=>v===(i===j?1:0)));
-  const badge = !Q ? '' : `<span class="solved-badge" title="${turned ? 'Every piece is in place, with the whole puzzle turned' : 'Back to the starting position'}">Solved${turned?' (rotated)':''}</span>`;
+  // solved as it started, or with the whole puzzle turned some way
+  const badge = puzzle.solvedRotation() ? '<span class="solved-badge">Solved</span>' : '';
   document.getElementById('solved-indicator').innerHTML = badge;
   document.getElementById('stage-solved').innerHTML = badge;
 }
