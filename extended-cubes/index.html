@@ -141,9 +141,9 @@
 <div class="row">
   <select id="preset">
     <optgroup label="Cuboids">
-    <option value="3x3x3">Standard Cube</option>
     <option value="3x3x1" data-plain>3x3x1</option>
     <option value="3x3x2" data-plain>3x3x2</option>
+    <option value="3x3x3" data-plain>3x3x3</option>
     <option value="3x3x4" data-plain>3x3x4</option>
     <option value="3x3x5" data-plain>3x3x5</option>
     <option value="3x5x5" data-plain>3x5x5</option>
@@ -890,6 +890,7 @@ for(const o of document.getElementById('preset').options){
 }
 loadOptions();
 applyTheme();
+syncPreset();
 renderPhaseSliders(false);
 refreshMoveButtons();
 redraw();
