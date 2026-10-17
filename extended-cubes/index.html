@@ -220,7 +220,7 @@
   <div id="scramble-out"></div>
 </section>
 
-<script src="engine.js?v=d95a32dc"></script>
+<script src="engine.js?v=8db5bc70"></script>
 <script>
 const { DIRS, AXIS, IDX, POSITIVE, matVec, parseSpec, formatSpec, parseMove, moveStr,
   worldStickers, inBox, boxSize, Puzzle, planPhases, generateScramble, phaseSummary, parseSequence, moveSweep } = Engine;
@@ -592,16 +592,13 @@ function possibleMoves(face){
   return out;
 }
 
-// What a move does to the phase, found by making it on a copy: adds a
-// reduction, undoes one, or neither (including a reduction that its own
-// turn immediately undoes).
+// What a move does to the phase: the engine's own check, the same one the
+// scrambler uses, plus the shape it leads to for the tooltip.
 function moveEffect(m){
-  const q=puzzle.clone(), before=q.phaseStack.length;
-  q.move(m);
-  const after=q.phaseStack.length;
-  if(after>before) return {kind:'reduces', to:q.boxName()};
-  if(after<before) return {kind:'restores', to:q.boxName()};
-  return {kind:'keeps'};
+  const mv=parseMove(m), kind=Engine.moveEffect(puzzle,mv);
+  if(kind==='keeps') return {kind};
+  const q=puzzle.clone(); q.move(mv);
+  return {kind, to:q.boxName()};
 }
 
 function refreshMoveButtons(){

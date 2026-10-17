@@ -551,14 +551,20 @@ function planFrom(p, wide, rng, memo){
   return best;
 }
 
-// Does `mv` leave the phase exactly as it is? Only an undo can change it once
-// effAfter says the box is kept, and that needs an earlier phase to exist.
-function keepsPhase(p, mv){
-  if(p.effAfter(mv)!==p.eff) return false;
-  if(!p.phaseStack.length) return true;
+// What `mv` does to the phase, judged by the net result: 'reduces', 'restores',
+// 'keeps', or null if it can't be made. A move that reduces and is whole again
+// by the end of its own turn keeps the phase. The move buttons' tint and the
+// scrambler both use this, so "keeps the shape" means the same in both.
+function moveEffect(p, mv){
+  const ne=p.effAfter(mv);
+  if(!ne) return null;
+  if(ne===p.eff && !p.phaseStack.length) return 'keeps';   // nothing to undo either
   const q=p.clone(); q.move(mv);
-  return q.phaseStack.length===p.phaseStack.length;
+  if(q.phaseStack.length>p.phaseStack.length) return 'reduces';
+  if(q.phaseStack.length<p.phaseStack.length) return 'restores';
+  return 'keeps';
 }
+const keepsPhase = (p, mv) => moveEffect(p,mv)==='keeps';
 
 // can anything be turned in p's phase without leaving it?
 function phaseHasMoves(p, wide){
@@ -715,7 +721,7 @@ const Engine = {
   parseSpec, formatSpec, rotateSpec, shapePositions, buildSolved, nameShape,
   boundingBox, layerGrid, boxSize, inBox, boxEq, boxKey, clampToBox,
   parseMove, moveStr, formatMove, parseSequence, moveSweep, selectCoords, applyMove, worldStickers,
-  Puzzle, planPhases, generateScramble, keepsPhase, phaseHasMoves, phaseSummary,
+  Puzzle, planPhases, generateScramble, keepsPhase, moveEffect, phaseHasMoves, phaseSummary,
 };
 if(typeof module!=='undefined' && module.exports) module.exports=Engine;
 else root.Engine=Engine;
