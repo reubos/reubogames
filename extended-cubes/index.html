@@ -140,7 +140,16 @@
 
 <div class="row">
   <select id="preset">
+    <optgroup label="Cuboids">
     <option value="3x3x3">Standard Cube</option>
+    <option value="3x3x1" data-plain>3x3x1</option>
+    <option value="3x3x2" data-plain>3x3x2</option>
+    <option value="3x3x4" data-plain>3x3x4</option>
+    <option value="3x3x5" data-plain>3x3x5</option>
+    <option value="3x5x5" data-plain>3x5x5</option>
+    <option value="3x5x7" data-plain>3x5x7</option>
+    </optgroup>
+    <optgroup label="Extended">
     <option value="3x3x3 +U">I-cube</option>
     <option value="3x3x3 +2U">Double I-cube</option>
     <option value="3x3x3 +R +L +D">T-cube</option>
@@ -158,6 +167,7 @@
     <option value="5x1x5 +U(3x3,1x1) +D(3x3,1x1)">Lantern Cube</option>
     <option value="5x1x5 +U(3x5,1x5)">Triangle Prism Cube</option>
     <option value="3x3x5 +U(1x5) +D(1x5) +R(1x5) +L(1x5)">Diamond Prism Cube</option>
+    </optgroup>
     <option value="">Custom</option>
   </select>
   <input type="text" id="spec" value="3x3x3" spellcheck="false" autocomplete="off" aria-label="Puzzle layout">
@@ -872,8 +882,12 @@ document.getElementById('seq-input').addEventListener('keydown',e=>{ if(e.key===
 
 // init
 // show each preset's layout beside its name, written from the value it loads
-for(const o of document.getElementById('preset').options)
-  if(o.value) o.textContent=`${o.textContent} · ${pretty(formatSpec(parseSpec(o.value)))}`;
+// (plain cuboids are just their size)
+for(const o of document.getElementById('preset').options){
+  if(!o.value) continue;
+  const layout=pretty(formatSpec(parseSpec(o.value)));
+  o.textContent = 'plain' in o.dataset ? layout : `${o.textContent} · ${layout}`;
+}
 loadOptions();
 applyTheme();
 renderPhaseSliders(false);
