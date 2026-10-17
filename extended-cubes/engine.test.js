@@ -121,6 +121,12 @@ eq(trace('3x3x3 +R +L +D',['2R']), ['5x3x3'], 'T-cube: 2R reduces to 3x3x3 +R +L
   check(!q.isReduced() && q.effAfter(E.parseMove('D'))===q.eff, "L-cube: the user's long sequence ends unreduced with D free");
 }
 
+{
+  const solved=(spec,seq)=>{ const p=new E.Puzzle(spec); E.parseSequence(seq).forEach(m=>p.move(m)); const Q=p.solvedRotation(); return Q ? (Q.flat().join()==='1,0,0,0,1,0,0,0,1' ? 'exact' : 'rotated') : 'no'; };
+  eq([solved('3x3x3',''), solved('3x3x3','R L\' 2R'), solved('3x3x3','R'), solved('3x3x3 +R +U','2Rw2 2Lw2'), solved('3x3x3 +R +U','2Rw2'), solved('3x3x5',"(R U R' U')6")],
+    ['exact','rotated','no','rotated','no','exact'], 'solved, solved up to a whole-puzzle rotation, or not');
+}
+
 console.log('--- phase names');
 {
   // reduced phases get the simplest name for the same pieces, whatever the layout's core

@@ -100,6 +100,8 @@
   #compass { position: absolute; top: 8px; left: 8px; cursor: pointer; border-radius: 50%; }
   #compass:hover circle:first-of-type { stroke: #888; }
   #size-note { position: absolute; top: 10px; right: 10px; text-align: right; font-size: 12px; color: var(--muted); pointer-events: none; line-height: 1.4; }
+  #stage-solved { position: absolute; bottom: 10px; left: 10px; pointer-events: none; }
+  #stage-solved .solved-badge { margin-left: 0; font-size: 13px; padding: 3px 10px; }
   #size-note b { color: var(--text); font-size: 14px; font-weight: 600; }
   #size-note.reduced b { color: var(--accent); pointer-events: auto; cursor: help; border-bottom: 1px dotted var(--accent); }
 
@@ -189,6 +191,7 @@
   <svg id="stage" width="100%" height="420" viewBox="0 0 400 300" preserveAspectRatio="xMidYMid meet"></svg>
   <svg id="compass" viewBox="-50 -50 100 100" width="100" height="100"><title>Reset view</title></svg>
   <div id="size-note"></div>
+  <div id="stage-solved"></div>
 </div>
 <p class="hint">Click a sticker to turn that layer clockwise (ctrl-click = anticlockwise, shift-click = double). Drag with the right mouse button to rotate the view; click the compass to reset it.</p>
 
@@ -212,7 +215,7 @@
   <div id="scramble-out"></div>
 </section>
 
-<script src="engine.js?v=7fab6be3"></script>
+<script src="engine.js?v=80414ee9"></script>
 <script>
 const { DIRS, AXIS, IDX, POSITIVE, matVec, parseSpec, formatSpec, parseMove, moveStr,
   worldStickers, inBox, boxSize, Puzzle, planPhases, generateScramble, phaseSummary, parseSequence, moveSweep } = Engine;
@@ -541,8 +544,11 @@ function updateSizeNote(){
 function redraw(){
   renderSVG();
   updateSizeNote();
-  document.getElementById('solved-indicator').innerHTML =
-    puzzle.isSolved() ? '<span class="solved-badge">Solved!</span>' : '';
+  // solved as it started, or solved but the whole puzzle turned some way
+  const Q=puzzle.solvedRotation(), turned=Q && !Q.every((r,i)=>r.every((v,j)=>v===(i===j?1:0)));
+  const badge = !Q ? '' : `<span class="solved-badge" title="${turned ? 'Every piece is in place, with the whole puzzle turned' : 'Back to the starting position'}">Solved${turned?' (rotated)':''}</span>`;
+  document.getElementById('solved-indicator').innerHTML = badge;
+  document.getElementById('stage-solved').innerHTML = badge;
 }
 
 function handleFaceClick(face, axK, fcVal, mod){

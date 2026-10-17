@@ -419,6 +419,17 @@ class Puzzle {
     }
   }
   isSolved(){ return this.cubies.every(c=>vecEq(c.pos,c.home)&&matEq(c.ori,I3)); }
+  // Solved as a whole, possibly turned: every piece is where the solved puzzle
+  // rotated by Q puts it, and turned by Q too (so every sticker matches).
+  // Returns that rotation (identity when exactly solved), or null.
+  solvedRotation(){
+    const c0=this.cubies[0];
+    for(const Q of ROTATIONS){
+      if(!matEq(c0.ori,Q)) continue;   // the first piece's turn pins down Q
+      if(this.cubies.every(c=>matEq(c.ori,Q) && vecEq(c.pos,matVec(Q,c.home)))) return Q;
+    }
+    return null;
+  }
   // the full layer grid, in the current phase's orientation
   unreducedBox(){ return rotateBox(this.frame,this.fullBox); }
   isReduced(){ return !boxEq(this.eff,this.unreducedBox()); }
