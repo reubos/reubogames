@@ -36,8 +36,8 @@
   .stage-wrap { position: relative; margin-top: 4px; }
   #stage { background: #181818; border: 1px solid #333; border-radius: 8px; display: block; touch-action: none; user-select: none; }
   #stage polygon { cursor: pointer; }
-  #compass { position: absolute; top: 8px; left: 8px; pointer-events: none; }
-  .view-reset { position: absolute; top: 8px; right: 8px; font-size: 12px; padding: 3px 8px; }
+  #compass { position: absolute; top: 8px; left: 8px; cursor: pointer; border-radius: 50%; }
+  #compass:hover circle:first-of-type { stroke: #888; }
 
   .history-area { margin-top: 10px; }
   .history-area label { font-size: 12px; color: #888; margin-bottom: 4px; display: block; }
@@ -79,10 +79,9 @@
 
 <div class="stage-wrap">
   <svg id="stage" width="100%" height="420" viewBox="0 0 400 300" preserveAspectRatio="xMidYMid meet"></svg>
-  <svg id="compass" viewBox="-50 -50 100 100" width="100" height="100"></svg>
-  <button id="btn-view-reset" class="view-reset">Reset view</button>
+  <svg id="compass" viewBox="-50 -50 100 100" width="100" height="100"><title>Reset view</title></svg>
 </div>
-<p class="hint">Click a sticker to turn that layer (right-click = anticlockwise, shift-click = double). Drag with the right mouse button to rotate the view.</p>
+<p class="hint">Click a sticker to turn that layer clockwise (ctrl-click = anticlockwise, shift-click = double). Drag with the right mouse button to rotate the view; click the compass to reset it.</p>
 
 <div class="history-area">
   <label>Move history — click a move to rewind to just before it</label>
@@ -209,10 +208,11 @@ function renderSVG(cubies){
         const q=toCam([center[0]+su*u0[0]+sv*v0[0], center[1]+su*u0[1]+sv*v0[1], center[2]+su*u0[2]+sv*v0[2]]);
         return [q[0]*S, -q[1]*S];
       });
-      const light=0.55+0.45*Math.max(0,dot(nc,LIGHT));
+      const isHi = hover && c.fc[hover.axK]===hover.fc;
+      const light=(0.55+0.45*Math.max(0,dot(nc,LIGHT))) * (hover && !isHi ? 0.45 : 1);
       const col = shade(HEX[ws[dir]]||HEX.Body, light);
       const axK = AXK_FROM_DIR[dir];
-      faces.push({corners, col, depth:toCam(center)[2], face:FACE_FROM_DIR[dir], axK, fcVal:c.fc[axK]});
+      faces.push({corners, col, isHi, depth:toCam(center)[2], face:FACE_FROM_DIR[dir], axK, fcVal:c.fc[axK]});
     }
   }
   faces.sort((a,b)=>a.depth-b.depth);
@@ -224,7 +224,7 @@ function renderSVG(cubies){
   let body='';
   for(const f of faces){
     body+=`<polygon data-face="${f.face}" data-axk="${f.axK}" data-fc="${f.fcVal}" `+
-      `points="${f.corners.map(p=>p[0].toFixed(1)+','+p[1].toFixed(1)).join(' ')}" fill="${f.col}" stroke="#111" stroke-width="1" stroke-linejoin="round"/>`;
+      `points="${f.corners.map(p=>p[0].toFixed(1)+','+p[1].toFixed(1)).join(' ')}" fill="${f.col}" stroke="${f.isHi?'#ffffff':'#111'}" stroke-width="${f.isHi?1.4:1}" stroke-linejoin="round"/>`;
   }
   svg.innerHTML=body;
   renderCompass(M);
@@ -239,7 +239,7 @@ function renderCompass(M){
   const L=30;
   const items=COMPASS_AXES.map(a=>{ const q=matVec(M,a.v); return {...a, x:q[0]*L, y:-q[1]*L, z:q[2]}; })
     .sort((a,b)=>a.z-b.z);
-  let out='<circle cx="0" cy="0" r="44" fill="#0008" stroke="#333"/><circle cx="0" cy="0" r="2.5" fill="#888"/>';
+  let out='<title>Reset view</title><circle cx="0" cy="0" r="44" fill="#0008" stroke="#333"/><circle cx="0" cy="0" r="2.5" fill="#888"/>';
   for(const a of items){
     const away=a.z<0, op=away?0.4:1, len=Math.hypot(a.x,a.y)||1, ux=a.x/len, uy=a.y/len, h=6;
     const bx=a.x-ux*h, by=a.y-uy*h;
@@ -252,37 +252,49 @@ function renderCompass(M){
   document.getElementById('compass').innerHTML=out;
 }
 
-// left click = clockwise, right click (without dragging) = anticlockwise, shift = double; right drag = rotate view
+// left click = clockwise, ctrl = anticlockwise, shift = double; right drag = rotate view
 (function setupStageInput(){
   const svg=document.getElementById('stage');
   let drag=null;
+  const hitOf=t=>{ const p=t.closest('polygon[data-face]'); return p ? {face:p.dataset.face, axK:+p.dataset.axk, fc:+p.dataset.fc} : null; };
+  const setHover=h=>{
+    if((h&&hover&&h.axK===hover.axK&&h.fc===hover.fc) || (!h&&!hover)) return;
+    hover=h ? {axK:h.axK, fc:h.fc} : null;
+    renderSVG(cubies);
+  };
   svg.addEventListener('contextmenu',e=>e.preventDefault());
   svg.addEventListener('pointerdown',e=>{
-    if(e.button!==0 && e.button!==2) return;
-    const t=e.target.closest('polygon[data-face]');
-    drag={button:e.button, x:e.clientX, y:e.clientY, moved:false,
-      hit: t ? {face:t.dataset.face, axK:+t.dataset.axk, fc:+t.dataset.fc} : null};
-    if(e.button===2) svg.setPointerCapture(e.pointerId);
+    if(e.button===2){
+      drag={x:e.clientX, y:e.clientY};
+      svg.setPointerCapture(e.pointerId);
+      svg.style.cursor='grabbing';
+      setHover(null);
+    } else if(e.button===0){
+      const h=hitOf(e.target);
+      if(!h) return;
+      const mod = e.shiftKey ? '2' : (e.ctrlKey||e.metaKey) ? "'" : '';
+      handleFaceClick(h.face, h.axK, h.fc, mod);
+    }
   });
+  const endDrag=()=>{ drag=null; svg.style.cursor=''; };
+  svg.addEventListener('lostpointercapture',endDrag);
   svg.addEventListener('pointermove',e=>{
-    if(!drag || drag.button!==2) return;
-    const dx=e.clientX-drag.x, dy=e.clientY-drag.y;
-    if(!drag.moved && Math.hypot(dx,dy)<4) return;
-    drag.moved=true;
-    viewYaw+=dx*0.01;
-    viewPitch=Math.max(-Math.PI/2,Math.min(Math.PI/2,viewPitch+dy*0.01));
-    drag.x=e.clientX; drag.y=e.clientY;
-    svg.style.cursor='grabbing';
-    renderSVG(cubies);
+    if(drag && !(e.buttons & 2)) endDrag();
+    if(drag){
+      viewYaw+=(e.clientX-drag.x)*0.01;
+      viewPitch=Math.max(-Math.PI/2,Math.min(Math.PI/2,viewPitch+(e.clientY-drag.y)*0.01));
+      drag.x=e.clientX; drag.y=e.clientY;
+      renderSVG(cubies);
+      return;
+    }
+    setHover(hitOf(e.target));
   });
   svg.addEventListener('pointerup',e=>{
-    if(!drag || e.button!==drag.button) return;
-    const d=drag; drag=null;
-    svg.style.cursor='';
-    if(d.moved || !d.hit) return;
-    const mod = e.shiftKey ? '2' : d.button===2 ? "'" : '';
-    handleFaceClick(d.hit.face, d.hit.axK, d.hit.fc, mod);
+    if(e.button!==2 || !drag) return;
+    endDrag();
+    setHover(hitOf(document.elementFromPoint(e.clientX,e.clientY)||svg));
   });
+  svg.addEventListener('pointerleave',()=>{ if(!drag) setHover(null); });
 })();
 
 /* ===================== state ===================== */
@@ -290,7 +302,7 @@ let gW=3, gH=3, gD=3;
 let cubies = buildSolved(gW, gH, gD);
 let history = [];
 let currentLayer = 1;
-let hoveredFace = null; // {axK, fcSet}
+let hover = null; // {axK, fc} of the layer under the cursor
 
 function rebuild(){
   gW=Math.max(1,+document.getElementById('iw').value||1);
@@ -310,6 +322,8 @@ function doMove(mv){
     const parsed = parseMove(mv);
     coarsen(cubies, [gW, gH, gD]);
     applyMove(cubies, parsed);
+    coarsen(cubies, [gW, gH, gD]);
+    hover=null;
     history.push(mv);
     redraw();
     updateHistory();
@@ -321,6 +335,8 @@ function doMove(mv){
 function replayHistory(moves){
   cubies=buildSolved(gW,gH,gD);
   for(const m of moves){ coarsen(cubies,[gW,gH,gD]); applyMove(cubies,m); }
+  coarsen(cubies,[gW,gH,gD]);
+  hover=null;
 }
 
 function undoMove(){
@@ -441,7 +457,7 @@ document.getElementById('layer-inc').onclick=()=>{
   const max=Math.max(maxLayerGlobal(),1);
   currentLayer=Math.min(max,currentLayer+1); updateLayerButtons();
 };
-document.getElementById('btn-view-reset').onclick=()=>{ viewYaw=-0.6; viewPitch=0.5; renderSVG(cubies); };
+document.getElementById('compass').onclick=()=>{ viewYaw=-0.6; viewPitch=0.5; renderSVG(cubies); };
 document.getElementById('btn-new').onclick=rebuild;
 document.getElementById('btn-undo').onclick=undoMove;
 document.getElementById('btn-reset').onclick=()=>{
