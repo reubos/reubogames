@@ -76,7 +76,7 @@ console.log('--- extended shapes');
 eq(trace('3x3x3 +U',['U','R',"R'"]), ['3x3x3 +U','3x3x3','3x3x3 +U'], 'I-cube: U free, R reduces, R\' restores');
 eq(trace('3x3x3 +R +L +D',['R',"R'",'2D',"2D'"]),
   ['3x3x3 +D +R +L','3x3x3 +D +R +L','3x3x3 +D','3x3x3 +D +R +L'], 'T-cube: R free, 2D reduces to 3x3x3 +D, 2D\' restores');
-eq(trace('3x3x3 +R +L +D',['2R']), ['3x3x3 +R +L'], 'T-cube: 2R reduces to 3x3x3 +R +L');
+eq(trace('3x3x3 +R +L +D',['2R']), ['5x3x3'], 'T-cube: 2R reduces to 3x3x3 +R +L, named simply 5x3x3');
 
 {
   // overlapping oversized layers: a 4x4x4 grid from x,y,z = -4 to +2, with the
@@ -88,6 +88,10 @@ eq(trace('3x3x3 +R +L +D',['2R']), ['3x3x3 +R +L'], 'T-cube: 2R reduces to 3x3x3
   check(fringe.length>0 && fringe.every(c=>s.fcs.has(c.fc[0])), `...and R turns the overhanging x=+4 fringe (${fringe.length} cubies) with the x=+2 layer`);
   const q=p.clone(); q.move('R'); q.move("R'");
   check(q.isSolved() && !q.isReduced(), "...R R' is solved and unreduced");
+  // the 5x5 B, L and D slabs map onto themselves, so they turn without reducing
+  const free=[];
+  for(const f of E.FACES) for(let l=1;l<=p.maxLayers(f);l++) if(p.effAfter({face:f,layer:l,mod:'',wide:false})===p.eff) free.push(E.moveStr(f,l,''));
+  eq(free.sort(), ['B','D','L'], '...only its B, L and D slabs turn without reducing it');
 }
 
 {
@@ -98,9 +102,21 @@ eq(trace('3x3x3 +R +L +D',['2R']), ['3x3x3 +R +L'], 'T-cube: 2R reduces to 3x3x3
   eq(trace('3x3x1',['F','F2','U2']), ['✗','✗','3x3x1'], '3x3x1: F and F2 would turn every piece, so they are refused');
   const res=E.generateScramble('5x1x5 +U(3x5,1x5)',{movesPerPhase:[60],rng:mulberry32(4)});
   const mid=res.phases.find(ph=>ph.name==='3x1x3 +U(3x3,1x3)');
-  check(mid && mid.skipped && mid.moves.length===1, 'Triangle Prism: the U/D-only phase 3x1x3 +U(3x3,1x3) is skipped, keeping just its reducing move');
+  check(mid && mid.singleAxis && mid.moves.length<=4, `Triangle Prism: the U/D-only phase 3x1x3 +U(3x3,1x3) gets at most one turn per layer after its reducing move (${mid && mid.moves.join(' ')})`);
   const tp=new E.Puzzle('5x1x5 +U(3x5,1x5)');
   check(tp.maxLayers('U')===2 && tp.selection(E.parseMove('2U'))!==null, 'Triangle Prism: the middle tier is reachable as 2U on the off-centre axis');
+}
+
+console.log('--- phase names');
+{
+  // reduced phases get the simplest name for the same pieces, whatever the layout's core
+  const names=spec=>{ const p=new E.Puzzle(spec); return E.planPhases(p.clone(),true,mulberry32(2)).map(b=>p.boxName(b)); };
+  eq(names('5x1x5 +U(5x3,5x1) +D(5x3,5x1)').slice(-1), ['3x3x3'], 'Diamond Prism written along x: last phase is plainly 3x3x3, not 3x1x3 +U +D');
+  const n=new E.Puzzle('3x3x5 +U(1x5) +D(1x5) +R(1x5) +L(1x5)');
+  eq(E.nameShape(n.shape.filter(p=>E.inBox(p,[[-4,4],[-2,2],[-2,2]]))), '3x1x3 +U +D +R +L', 'a 5x3x3 layer grid with 1x3 side rows is a plus-shaped prism, not 5x3x3');
+  eq(E.nameShape(E.shapePositions(E.parseSpec('3x1x3 +U +D'))), '3x3x3', 'nameShape: 3x1x3 +U +D is 3x3x3');
+  eq(E.nameShape(E.shapePositions(E.parseSpec('3x3x3 +R +L'))), '5x3x3', 'nameShape: 3x3x3 +R +L is 5x3x3');
+  eq(E.nameShape(E.shapePositions(E.parseSpec('3x5x3 +R(3x3) +L(3x3)'))), '3x3x3 +U +D +R +L', 'nameShape: equal-length names prefer bare faces to written sizes');
 }
 
 console.log('--- replay determinism');
@@ -176,8 +192,11 @@ console.log('      phases per preset: '+Object.entries(PRESETS).map(([n,s])=>{
       if(!E.boxEq(p.eff,ph.box)) problems.push(`${spec} phase ${i+1} ended in the wrong box`);
     });
     const summary=E.phaseSummary(spec,E.planPhases(new E.Puzzle(spec),wide,mulberry32(3)),wide);
-    const planned=summary.length-(summary[0].skipped?1:0);
-    if(res.phases.length!==planned) problems.push(`${spec} (${wide?'wide':'slice'}): ${res.phases.length} phases, planned ${planned}`);
+    // a first phase is left out when it gets no moves: always if nothing can
+    // turn, and by chance if it's single-axis and every layer drew "no turn"
+    const planned=summary.length-(summary[0].axes===0?1:0);
+    const ok=res.phases.length===planned || (summary[0].singleAxis && res.phases.length===planned-1);
+    if(!ok) problems.push(`${spec} (${wide?'wide':'slice'}): ${res.phases.length} phases, planned ${planned}`);
     {
       const q=new E.Puzzle(spec);
       res.moves.forEach(m=>{ const mv=E.parseMove(m);
@@ -186,8 +205,14 @@ console.log('      phases per preset: '+Object.entries(PRESETS).map(([n,s])=>{
     }
     // efficient mode may leave a phase only one useful layer (an I-cube's U
     // slab), so only normal mode must fill every phase
-    res.phases.forEach((ph,i)=>{ if(ph.skipped && ph.moves.length!==1) problems.push(`${spec} phase ${i+1} ${ph.name}: skipped but has ${ph.moves.length} moves`); });
-    if(!efficient) res.phases.forEach((ph,i)=>{ if(!ph.skipped && ph.moves.length<25) problems.push(`${spec} (${wide?'wide':'slice'}${efficient?', efficient':''}) phase ${i+1} ${ph.name}: only ${ph.moves.length} of 25 moves`); });
+    // single-axis phases: at most one turn per layer after the reducing move
+    res.phases.forEach((ph,i)=>{
+      if(!ph.singleAxis) return;
+      const rest=ph.moves.slice(ph.opensWithReduction?1:0), layers=rest.map(m=>m.replace(/['2]$/,''));
+      if(new Set(layers).size!==layers.length) problems.push(`${spec} phase ${i+1} ${ph.name}: a layer turned twice (${ph.moves.join(' ')})`);
+      if(new Set(rest.map(m=>E.AXIS[E.parseMove(m).face])).size>1) problems.push(`${spec} phase ${i+1} ${ph.name}: single-axis phase turned several axes (${ph.moves.join(' ')})`);
+    });
+    if(!efficient) res.phases.forEach((ph,i)=>{ if(!ph.singleAxis && ph.moves.length<25) problems.push(`${spec} (${wide?'wide':'slice'}${efficient?', efficient':''}) phase ${i+1} ${ph.name}: only ${ph.moves.length} of 25 moves`); });
     if(wide && res.moves.some(m=>/^\d+[RLUDFB](?!w)/.test(m))) problems.push(`${spec}: slice move in wide mode`);
     if(!wide && res.moves.some(m=>m.includes('w'))) problems.push(`${spec}: wide move in slice mode`);
   }

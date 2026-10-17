@@ -475,15 +475,16 @@ function renderPhaseSliders(keep){
   const prev = keep ? [...document.querySelectorAll('.phase-num')].map(i=>+i.value) : [];
   plannedPhases=planPhases(puzzle.clone(), isWide());
   const boxes=[puzzle.fullBox, ...plannedPhases];
-  // phases that can turn about one axis or none are skipped by the scrambler
+  // phases that can turn about one axis get one random turn per layer instead
+  // of a move count, and ones that can't turn at all get none
   const summary=phaseSummary(puzzle.spec, plannedPhases, isWide());
   const wrap=document.getElementById('phase-sliders');
   wrap.innerHTML=boxes.map((b,i)=>{
     const val=prev[i] ?? Math.min(100,Math.max(5,10*Math.max(...boxSize(b))));
-    const s=summary[i], locked=!!(s && s.skipped);
+    const s=summary[i], locked=!!(s && s.singleAxis);
     const name = boxes.length===1 ? 'Moves' : `Phase ${i+1} · ${pretty(puzzle.boxName(b))}`;
     const label = !locked ? name
-      : `${name} · skipped (${s.axes ? 'turns about one axis only' : 'every turn reduces it'})`;
+      : `${name} · ${s.axes ? 'one random turn per layer (one axis only)' : 'no moves (every turn reduces it)'}`;
     return `<div class="slider-row"><span title="${label}">${label}</span>`+
       `<input type="range" class="phase-range" min="5" max="100" value="${val}" data-i="${i}" aria-label="${name} moves"${locked?' disabled':''}>`+
       `<input type="number" class="phase-num" min="5" max="100" value="${val}" data-i="${i}" aria-label="${name} moves"${locked?' disabled':''}></div>`;
@@ -527,7 +528,7 @@ function renderScramble(){
   const pos=onTrack ? history.length : -1;
   let i=0, html='<p class="hint">Click a move to see the puzzle just before it, with that move\'s layer highlighted.</p>';
   for(const ph of scramble.phases){
-    const count = ph.skipped ? 'skipped, only turns about one axis' : `${ph.moves.length} moves`;
+    const count = ph.singleAxis ? 'one random turn per layer (one axis only)' : `${ph.moves.length} moves`;
     html+=`<div class="phase-label"><b>${pretty(ph.name)}</b> · ${count}</div><div class="phase-moves">`;
     html+=ph.moves.map(m=>{
       const cls = i<pos ? 'done' : (i===pos && stepHi ? 'cur' : '');

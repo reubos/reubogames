@@ -115,15 +115,37 @@ function buildSolved(shape){
   });
 }
 
-// Name the solved shape's positions inside `box` in layout notation, checking
-// the name rebuilds exactly those positions; null if it can't be written so.
-function describeBox(spec, shape, box){
-  const S=shape.filter(p=>inBox(p,box)), key=ps=>ps.map(p=>p.join(',')).sort().join('|');
-  const core=spec.core.map((n,k)=>{
-    const lo=Math.max(-(n-1),box[k][0]), hi=Math.min(n-1,box[k][1]);
-    return lo===-hi ? hi+1 : null;
+// Name a set of positions in layout notation, choosing whichever core gives
+// the shortest name that rebuilds exactly those positions (e.g. "3x3x3" rather
+// than "3x1x3 +U +D"); null if no core can describe them.
+const positionsKey = ps => ps.map(p=>p.join(',')).sort().join('|');
+const nameSizes = name => (name.match(/\d+x\d+(?=[,)])/g)||[]).length;
+const nameScore = name => (name.match(/\+/g)||[]).length + nameSizes(name);
+function nameShape(S){
+  if(!S.length) return null;
+  const occ=new Set(S.map(p=>p.join(','))), key=positionsKey(S), bb=boundingBox(S);
+  // core sizes per axis: centred, matching the lattice's parity, inside the shape
+  const sizes=[0,1,2].map(k=>{
+    const out=[], max=Math.min(-bb[k][0],bb[k][1]);
+    for(let h=parity(S[0][k]); h<=max; h+=2) out.push(h+1);
+    return out;
   });
-  if(core.includes(null)) return null;
+  let best=null;
+  for(const a of sizes[0]) for(const b of sizes[1]) for(const c of sizes[2]){
+    const core=[a,b,c];
+    if(!centred(a).every(x=>centred(b).every(y=>centred(c).every(z=>occ.has(x+','+y+','+z))))) continue;
+    const spec=describeWithCore(S,key,core);
+    if(!spec) continue;
+    // shortest name; then bare faces over written sizes; then the larger core
+    const name=formatSpec(spec), cand={name, score:nameScore(name), sizes:nameSizes(name), vol:a*b*c};
+    if(!best || cand.score<best.score || (cand.score===best.score &&
+       (cand.sizes<best.sizes || (cand.sizes===best.sizes && cand.vol>best.vol)))) best=cand;
+  }
+  return best && best.name;
+}
+// S written as `core` plus a centred rectangle per layer on each face, if that
+// rebuilds exactly S
+function describeWithCore(S, key, core){
   const ext={};
   for(const f of FACE_ORDER){
     ext[f]=[];
@@ -137,7 +159,7 @@ function describeBox(spec, shape, box){
     }
   }
   const named={core,ext};
-  return key(shapePositions(named))===key(S) ? formatSpec(named) : null;
+  return positionsKey(shapePositions(named))===key ? named : null;
 }
 
 /* ---------- moves ---------- */
@@ -156,10 +178,13 @@ function selectCoords(cubies,mv){
   const coords=[...new Set(cubies.map(c=>c.fc[k]))].sort((a,b)=>pos?b-a:a-b);
   return new Set(wide?coords.slice(0,layer):[coords[layer-1]]);
 }
+function moveRotation(mv){
+  const sign=baseSign(mv.face), exp=mv.mod==='2'?2:mv.mod==="'"?-sign:sign;
+  return matPow(P[AXIS[mv.face]],exp);
+}
 function applyMove(cubies,mv){
   const ax=AXIS[mv.face], k=IDX[ax];
-  const sel=selectCoords(cubies,mv);
-  const sign=baseSign(mv.face), exp=mv.mod==='2'?2:mv.mod==="'"?-sign:sign, R=matPow(P[ax],exp);
+  const sel=selectCoords(cubies,mv), R=moveRotation(mv);
   for(const c of cubies){
     if(!sel.has(c.fc[k])) continue;
     c.pos=matVec(R,c.pos); c.ori=matMul(R,c.ori); c.fc=matVec(R,c.fc);
@@ -246,6 +271,12 @@ class Puzzle {
     const s=this.selection(mv);
     if(!s) return null;
     const members=this.cubies.filter(c=>s.fcs.has(c.fc[s.axK]));
+    // A turn whose pieces land exactly on the positions they occupied can't
+    // change the shape, so it keeps the phase even if its functional
+    // cross-section looks off-centre (the Diorama's 5x5 B slab, whose overhang
+    // is folded onto the 4x4x4 grid).
+    const R=moveRotation(mv), at=new Set(members.map(c=>c.pos.join(',')));
+    if(members.every(c=>at.has(matVec(R,c.pos).join(',')))) return this.eff;
     return mv.mod==='2' ? effAfterHalfTurn(this.eff,s.axK,members) : effAfterQuarterTurn(this.eff,s.axK,members);
   }
   move(mv){
@@ -294,9 +325,15 @@ class Puzzle {
     const k=IDX[AXIS[face]], n=boxSize(this.eff)[k];
     return this.offCentre(k) && n%2===1 && !POSITIVE.has(face) ? Math.floor(n/2) : this.maxLayers(face);
   }
+  // the unreduced puzzle keeps the layout as written; a reduced phase gets the
+  // simplest name for the solved shape's pieces inside its box
   boxName(box=this.eff){
     if(boxEq(box,this.fullBox)) return formatSpec(this.spec);
-    return describeBox(this.spec,this.shape,box) || boxSize(box).join('x')+' box';
+    const k=boxKey(box);
+    this.names = this.names || new Map();
+    if(!this.names.has(k))
+      this.names.set(k, nameShape(this.shape.filter(p=>inBox(p,box))) || boxSize(box).join('x')+' box');
+    return this.names.get(k);
   }
 }
 
@@ -342,9 +379,9 @@ function triggerMoves(p, wide){
   return out;
 }
 
-// Sequence of phase boxes to reduce through from p: the most phases that
-// actually get scrambled (skipped single-axis phases don't count), then the
-// most phases overall, ties broken at random.
+// Sequence of phase boxes to reduce through from p: the most phases that get
+// a full scramble (single-axis phases don't count), then the most phases
+// overall, ties broken at random.
 function planPhases(p, wide, rng=Math.random){
   return planFrom(p,wide,rng,new Map()).path;
 }
@@ -356,7 +393,7 @@ function planFrom(p, wide, rng, memo){
   for(const r of reductionsFrom(p,wide,triggerMoves(p,wide))){
     const sub=planFrom(r.state,wide,rng,memo);
     const axes=phaseAxes(r.state,wide), isLast=!sub.path.length;
-    const cand={path:[r.box,...sub.path], score:sub.score+(!skipsPhase(axes,isLast) && axes.size>0 ? 1 : 0)};
+    const cand={path:[r.box,...sub.path], score:sub.score+(!isSingleAxisPhase(axes,isLast) && axes.size>0 ? 1 : 0)};
     const better = cand.score>best.score || (cand.score===best.score && cand.path.length>best.path.length);
     const tie = cand.score===best.score && cand.path.length===best.path.length;
     if(better){ best=cand; ties=1; }
@@ -383,18 +420,19 @@ function phaseHasMoves(p, wide){
 function phaseAxes(p, wide){
   return new Set(candidateMoves(p,wide).filter(mv=>keepsPhase(p,mv)).map(mv=>AXIS[mv.face]));
 }
-// A phase that can only turn about one axis (or none) adds little but the
-// relative angle of its layers, so the scrambler goes straight on to the next
-// reduction -- unless it's the last phase, which still gets its moves.
-const skipsPhase = (axes, isLast) => !isLast && axes.size<=1;
+// A phase that can only turn about one axis (or none) can only change the
+// relative angle of its layers, so instead of a full scramble it gets one
+// random turn (or none) per layer -- unless it's the last phase, which still
+// gets its full move count.
+const isSingleAxisPhase = (axes, isLast) => !isLast && axes.size<=1;
 
-// How each planned phase will be treated: {box, axes, skipped} per phase,
+// How each planned phase will be treated: {box, axes, singleAxis} per phase,
 // found by walking the plan's reductions from a solved puzzle.
 function phaseSummary(spec, plan, wide){
   const p=new Puzzle(spec), out=[];
   for(let i=0;i<=plan.length;i++){
     const axes=phaseAxes(p,wide);
-    out.push({box:p.eff, axes:axes.size, skipped:skipsPhase(axes,i===plan.length)});
+    out.push({box:p.eff, axes:axes.size, singleAxis:isSingleAxisPhase(axes,i===plan.length)});
     if(i===plan.length) break;
     const r=reductionsFrom(p,wide,triggerMoves(p,wide)).find(r=>boxEq(r.box,plan[i]));
     if(!r) break;
@@ -464,7 +502,7 @@ function generateScramble(spec, opts={}){
     // count only the axes this phase can actually turn: a 3x3x3 +D phase of an
     // off-centre puzzle may allow U/D turns alone, and is then single-axis
     const axes=phaseAxes(p,wide), singleAxis=axes.size===1;
-    const skipped=skipsPhase(axes,!plan.length);
+    const perLayer=isSingleAxisPhase(axes,!plan.length);
     let usable=pool;
     if(opts.efficient && plan.length){
       const f=efficientFilter(p,plan[0]), restricted=f && pool.filter(f);
@@ -478,7 +516,23 @@ function generateScramble(spec, opts={}){
       }
       return null;
     };
-    while(!skipped && moves.length<n){
+    if(perLayer){
+      // each layer independently: a random turn that keeps the phase, or none,
+      // equally likely (so every relative angle is equally likely); the layers
+      // share one axis, so their order doesn't matter
+      // stick to the axis found at the start: turning these layers can open up
+      // other axes part-way through, which would make it more than one turn per layer
+      const byLayer=new Map();
+      for(const mv of usable.filter(m=>axes.has(AXIS[m.face]))){ const id=mv.face+':'+mv.layer; if(!byLayer.has(id)) byLayer.set(id,[]); byLayer.get(id).push(mv); }
+      for(const options of byLayer.values()){
+        const keeping=options.filter(mv=>keepsPhase(p,mv));
+        if(!keeping.length) continue;
+        const pick=Math.floor(rng()*(keeping.length+1));
+        if(pick===keeping.length) continue;
+        p.move(keeping[pick]); blocker.record(keeping[pick]); moves.push(formatMove(keeping[pick]));
+      }
+    }
+    while(!perLayer && moves.length<n){
       // prefer unblocked moves; if none keeps the phase, allow a blocked one
       // rather than ending the phase early, but never the same layer twice running
       const allowed=usable.filter(m=>blocker.allows(m,singleAxis));
@@ -487,9 +541,8 @@ function generateScramble(spec, opts={}){
       if(!picked) break;
       p.move(picked); blocker.record(picked); moves.push(formatMove(picked));
     }
-    // a skipped first phase contributes no moves of its own; a skipped later
-    // one is just the move that reduces into it
-    if(moves.length) phases.push({box:p.eff, name:p.boxName(), moves, opensWithReduction:i>0, skipped});
+    // a first phase that can't turn at all (the Diorama's) contributes no moves
+    if(moves.length) phases.push({box:p.eff, name:p.boxName(), moves, opensWithReduction:i>0, singleAxis:perLayer});
     if(!plan.length) break;
   }
   return {phases, moves:phases.flatMap(ph=>ph.moves), final:p};
@@ -498,7 +551,7 @@ function generateScramble(spec, opts={}){
 const Engine = {
   COLORS, DIRS, I3, AXIS, IDX, POSITIVE, FACES, FACE_ORDER,
   matVec, transpose, matMul, vecEq,
-  parseSpec, formatSpec, shapePositions, buildSolved, describeBox,
+  parseSpec, formatSpec, shapePositions, buildSolved, nameShape,
   boundingBox, layerGrid, boxSize, inBox, boxEq, boxKey, clampToBox,
   parseMove, moveStr, formatMove, selectCoords, applyMove, worldStickers,
   Puzzle, planPhases, generateScramble, keepsPhase, phaseHasMoves, phaseSummary,
