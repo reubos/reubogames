@@ -119,6 +119,37 @@ console.log('--- phase names');
   eq(E.nameShape(E.shapePositions(E.parseSpec('3x5x3 +R(3x3) +L(3x3)'))), '3x3x3 +U +D +R +L', 'nameShape: equal-length names prefer bare faces to written sizes');
 }
 
+console.log('--- typed sequences');
+{
+  const ok=(t,exp,msg)=>eq(E.parseSequence(t).join(' '), exp, msg);
+  ok("R U R' U'", "R U R' U'", 'spaced moves');
+  ok("RUR'U'", "R U R' U'", 'moves without spaces');
+  ok("R, U ,F2", "R U F2", 'commas');
+  ok("R’ U′ F`", "R' U' F'", 'other prime marks');
+  ok("R2' 2R 3Fw2 Rw", "R2 2R 3Fw2 2Rw", "R2' as R2, layer numbers, Rw as 2Rw");
+  ok("(R F)3", "R F R F R F", 'bracket repeated 3 times');
+  ok("((R U)2 F)2", "R U R U F R U R U F", 'nested brackets');
+  ok("(R U)' D", "U' R' D", "bracket inverted with '");
+  ok("(R U2 F')'2", "F U2 R' F U2 R'", 'inverted then repeated');
+  ok("RF", "R F", 'RF is R F');
+  ok("R ' U", "R' U", 'a prime after a space');
+  ok("( R U ) 2 F", "R U R U F", 'spaces inside a bracket and before its count');
+  ok("(R U) ' 2", "U' R' U' R'", 'spaces before a bracket prime and count');
+  ok("(R U) 3R", "R U 3R", 'digits that start the next move are not a count');
+  // layouts: spacing anywhere the meaning stays clear
+  const same=(a,b,msg)=>eq(E.formatSpec(E.parseSpec(a)), E.formatSpec(E.parseSpec(b)), msg);
+  same('3 x 3 x 3 + R + L', '3x3x3 +R +L', 'layout: spaces around x and +');
+  same('3x3x3+R+L+D', '3x3x3 +R +L +D', 'layout: no spaces');
+  same('3x3x3RLD', '3x3x3 +R +L +D', 'layout: +s left out');
+  same('3x3x3 + 2 U', '3x3x3 +2U', 'layout: space between count and face');
+  same('3x4x5 +F( 5 x 4 , 3x2 )', '3x4x5 +F(5x4,3x2)', 'layout: spaces inside sizes');
+  same('3x3x3 +r +u', '3x3x3 +R +U', 'layout: lower-case faces');
+  for(const [bad,why] of [['(R U','missing )'],['R U)','unmatched )'],['R Q','unreadable move'],['0R','layer 0'],['(R)0','repeat 0'],['(R)20000','too many moves']]){
+    let threw=false; try{ E.parseSequence(bad); }catch(e){ threw=true; }
+    check(threw, `rejects "${bad}" (${why})`);
+  }
+}
+
 console.log('--- no lost cubies');
 {
   // random legal moves on every preset and some cuboids: no two cubies may
@@ -246,6 +277,21 @@ console.log('      phases per preset: '+Object.entries(PRESETS).map(([n,s])=>{
   // phase 1 -> 2 narrows z from 7 to 5: only the outer F/B layer is about to freeze
   const zMoves=res.phases[0].moves.filter(m=>/[FB]/.test(m));
   check(res.phases[0].name==='3x5x7' && zMoves.every(m=>/^[FB]/.test(m)), `efficient mode: phase 1 of 3x5x7 only turns the outer F/B layers (${zMoves.length} of them)`);
+}
+
+console.log('--- page');
+{
+  // index.html loads engine.js?v=<hash of engine.js>, so browsers refetch it
+  // whenever it changes instead of running a stale cached copy
+  const fs=require('fs'), path=require('path');
+  const hash=require('crypto').createHash('sha1').update(fs.readFileSync(path.join(__dirname,'engine.js'))).digest('hex').slice(0,8);
+  const tag=(fs.readFileSync(path.join(__dirname,'index.html'),'utf8').match(/engine\.js\?v=([0-9a-f]+)/)||[])[1];
+  check(tag===hash, `index.html loads engine.js?v=${hash}`+(tag===hash?'':` (it has ${tag}; run: node engine.test.js --fix-version)`));
+  if(tag!==hash && process.argv.includes('--fix-version')){
+    const f=path.join(__dirname,'index.html');
+    fs.writeFileSync(f, fs.readFileSync(f,'utf8').replace(/engine\.js\?v=[0-9a-f]+/, 'engine.js?v='+hash));
+    console.log('      updated index.html to engine.js?v='+hash);
+  }
 }
 
 console.log(failures ? `\n${failures} failing` : '\nall passing');

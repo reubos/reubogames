@@ -36,19 +36,29 @@ const FACE_SIGN = {R:1,U:1,F:1,L:-1,D:-1,B:-1};
 const FACE_ORDER = ['U','D','R','L','F','B'];
 const centred = n => { const r=[]; for(let v=-(n-1);v<=n-1;v+=2) r.push(v); return r; };
 
+// Spacing is forgiving wherever the meaning is still clear: "3 x 3 x 3",
+// "3x3x3+R+L", "3x3x3RL", "+ 2 U", "+F( 5x4 , 3x2 )" all read as expected.
 function parseSpec(text){
-  const toks=text.trim().replace(/×/g,'x').split(/\s+/).filter(Boolean);
-  const m=(toks.shift()||'').match(/^(\d+)x(\d+)x(\d+)$/i);
+  const s=text.replace(/×/g,'x');
+  const m=/^\s*(\d+)\s*x\s*(\d+)\s*x\s*(\d+)/i.exec(s);
   if(!m) throw new Error('Start with the core size, e.g. 3x3x3');
   const core=[+m[1],+m[2],+m[3]];
   if(core.some(n=>n<1)) throw new Error('Core sizes must be at least 1');
   const ext={}; for(const f of FACE_ORDER) ext[f]=[];
-  for(const t of toks){
-    const e=t.match(/^\+(\d*)([UDRLFB])(?:\(([^)]*)\))?$/i);
-    if(!e) throw new Error(`Can't read "${t}" (expected e.g. +U, +2U or +F(5x4))`);
+  // each extension: an optional "+", an optional count, a face, optional sizes
+  const item=/^[\s+]*(\d*)\s*([UDRLFB])\s*(?:\(([^)]*)\))?/i;
+  let rest=s.slice(m[0].length);
+  while(rest.trim()){
+    const e=item.exec(rest);
+    if(!e){
+      const at=rest.trim();
+      throw new Error(`Can't read "${at.length>14 ? at.slice(0,14)+'…' : at}" (expected e.g. +U, +2U or +F(5x4))`);
+    }
+    rest=rest.slice(e[0].length);
+    const t=e[0].replace(/\s+/g,'').replace(/^\+*/,'+');
     const face=e[2].toUpperCase(), [a,b]=FACE_AXES[face], count=e[1]===''?1:+e[1];
     const sizes = e[3]===undefined ? [[core[a],core[b]]] : e[3].split(',').map(s=>{
-      const q=s.trim().match(/^(\d+)x(\d+)$/i);
+      const q=s.trim().match(/^(\d+)\s*x\s*(\d+)$/i);
       if(!q) throw new Error(`Can't read the size "${s}" in "${t}"`);
       return [+q[1],+q[2]];
     });
@@ -169,6 +179,54 @@ function parseMove(m){
   return {layer:x[1]?+x[1]:1,face:x[2],wide:x[3]==='w',mod:x[4]||''};
 }
 const moveStr = (face,layer,mod,wide) => (layer>1?String(layer):'')+face+(wide&&layer>1?'w':'')+mod;
+
+// Typed sequences. Moves with or without spaces or commas (R U R' U', RUR'U'),
+// any prime mark (' ’ ′), R2' read as R2, Rw as the usual two-layer 2Rw, and
+// brackets with a repeat count, nestable: (R U)3, ((R U)2 F)3. A ' after a
+// bracket inverts it: (R U)' is U' R'. Throws with where reading failed.
+const MAX_SEQUENCE = 10000;
+const invertMove = m => m.endsWith("'") ? m.slice(0,-1) : m.endsWith('2') ? m : m+"'";
+function parseSequence(text){
+  const s=text.replace(/[’′`´]/g,"'");
+  let i=0;
+  const fail=msg=>{ const at=s.slice(i).trim(); throw new Error(at ? `${msg} at "${at.slice(0,12)}"` : `${msg} at the end`); };
+  const skip=()=>{ while(i<s.length && /[\s,]/.test(s[i])) i++; };
+  function seq(depth){
+    const out=[];
+    for(;;){
+      skip();
+      if(i>=s.length){ if(depth) fail('Missing )'); return out; }
+      if(s[i]===')'){ if(!depth) fail('Unmatched )'); i++; return out; }
+      let part;
+      if(s[i]==='('){
+        i++;
+        part=seq(depth+1);
+        // after the bracket, spaces are fine before a ' or a count, as long as
+        // the digits aren't the start of the next move: "(R U) 3" vs "(R U) 3R"
+        const prime=/^\s*'/.exec(s.slice(i));
+        if(prime){ i+=prime[0].length; part=part.slice().reverse().map(invertMove); }
+        const n=/^\s*(\d+)(?![RLUDFBw])/i.exec(s.slice(i));
+        if(n){ i+=n[0].length; if(+n[1]<1) fail('Repeat count must be at least 1'); }
+        const times=n ? +n[1] : 1;
+        if(out.length+part.length*times>MAX_SEQUENCE) fail(`More than ${MAX_SEQUENCE} moves`);
+        for(let k=0;k<times;k++) out.push(...part);
+        continue;
+      }
+      const m=/^(\d*)([RLUDFB])(w?)(2'|2|')?/.exec(s.slice(i));
+      if(!m) fail("Can't read a move");
+      if(m[1]!=='' && +m[1]<1) fail('Layer numbers start at 1');
+      const wide=m[3]==='w', layer=m[1]!=='' ? +m[1] : wide ? 2 : 1;
+      i+=m[0].length;
+      let mod = m[4]===undefined ? '' : m[4]==="'" ? "'" : '2';
+      // a prime after a space still belongs to the move: "R '" is R'
+      const lone=mod==='' && /^\s+'/.exec(s.slice(i));
+      if(lone){ i+=lone[0].length; mod="'"; }
+      out.push(moveStr(m[2], layer, mod, wide));
+      if(out.length>MAX_SEQUENCE) fail(`More than ${MAX_SEQUENCE} moves`);
+    }
+  }
+  return seq(0);
+}
 const formatMove = mv => moveStr(mv.face,mv.layer,mv.mod,mv.wide);
 
 // functional layers grabbed by a move: bandaged layers share an fc value
@@ -559,7 +617,7 @@ const Engine = {
   matVec, transpose, matMul, vecEq,
   parseSpec, formatSpec, shapePositions, buildSolved, nameShape,
   boundingBox, layerGrid, boxSize, inBox, boxEq, boxKey, clampToBox,
-  parseMove, moveStr, formatMove, selectCoords, applyMove, worldStickers,
+  parseMove, moveStr, formatMove, parseSequence, selectCoords, applyMove, worldStickers,
   Puzzle, planPhases, generateScramble, keepsPhase, phaseHasMoves, phaseSummary,
 };
 if(typeof module!=='undefined' && module.exports) module.exports=Engine;

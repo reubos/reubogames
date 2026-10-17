@@ -71,7 +71,7 @@
   .move-row { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
   .move-face { width: 18px; font-size: 12px; font-weight: 600; color: var(--muted-strong); border: none; }
   .mbtn { min-width: 40px; text-align: center; padding: 4px 6px; font-size: 13px; }
-  /* what a move does to the shape: background tint (the border shows the face) */
+  /* what a move does to the shape: background tint */
   .mbtn.mv-keeps { background: var(--keep); }
   .mbtn.mv-keeps:hover { background: var(--keep-hover); }
   .mbtn.mv-reduces { background: var(--reduce); }
@@ -174,7 +174,7 @@
 </div>
 
 <div class="row">
-  <input type="text" id="seq-input" placeholder='e.g. R U R′ U′  or  2R  3Fw'>
+  <input type="text" id="seq-input" placeholder="e.g. R U R' U'  or  (R F)3  or  (2R U)' 3Fw2" aria-label="Moves to apply" title="Moves with or without spaces; (…)3 repeats a bracket, (…)' inverts it, and brackets can be nested">
   <button id="btn-apply">Apply</button>
 </div>
 
@@ -205,10 +205,10 @@
   <div id="scramble-out"></div>
 </section>
 
-<script src="engine.js"></script>
+<script src="engine.js?v=e56a7586"></script>
 <script>
 const { DIRS, AXIS, IDX, POSITIVE, matVec, parseSpec, formatSpec, parseMove, moveStr,
-  worldStickers, inBox, boxSize, Puzzle, planPhases, generateScramble, phaseSummary } = Engine;
+  worldStickers, inBox, boxSize, Puzzle, planPhases, generateScramble, phaseSummary, parseSequence } = Engine;
 const HEX = { Red:'#dd2222', Orange:'#ff8800', White:'#f0f0f0', Yellow:'#ffdd00', Green:'#00aa55', Blue:'#0066cc', Body:'#2a2a2a' };
 const MAX_CUBIES = 4000;
 
@@ -488,7 +488,7 @@ function refreshMoveButtons(){
     row.innerHTML=`<span class="move-face ${COL_CLASS[face]}">${face}</span>`;
     for(const m of moves){
       const btn=document.createElement('button'), fx=moveEffect(m);
-      btn.className=`btn mbtn ${COL_CLASS[face]} mv-${fx.kind}`;
+      btn.className=`btn mbtn mv-${fx.kind}`;
       btn.dataset.move=m; btn.textContent=m;
       btn.title = fx.kind==='reduces' ? `Turn ${m}: reduces to ${pretty(fx.to)}`
         : fx.kind==='restores' ? `Turn ${m}: restores ${pretty(fx.to)}`
@@ -532,14 +532,26 @@ function updateHistory(){
 }
 
 /* ===================== sequence input ===================== */
+// Unreadable input applies nothing and stays in the box to fix; otherwise the
+// moves run in order and stop at the first one the shape refuses.
 function applySequence(){
-  const raw=document.getElementById('seq-input').value;
-  // normalise: replace ' with standard ' and split
-  const tokens=raw.replace(/['']/g,"'").trim().split(/\s+/).filter(Boolean);
-  for(const tok of tokens){
-    try{ parseMove(tok); doMove(tok); } catch(e){ console.warn('skipped', tok); }
+  const input=document.getElementById('seq-input');
+  let moves;
+  try { moves=parseSequence(input.value); }
+  catch(e){ showMsg(e.message); return; }
+  let done=0;
+  for(const m of moves){
+    if(!puzzle.move(m)) break;
+    history.push(m); done++;
   }
-  document.getElementById('seq-input').value='';
+  hover=null; stepHi=null;
+  showMsg(done<moves.length
+    ? `Stopped at move ${done+1} of ${moves.length}: ${moves[done]} isn't possible in the current shape`
+    : '');
+  if(done===moves.length) input.value='';
+  refreshMoveButtons();
+  redraw();
+  updateHistory();
 }
 
 /* ===================== scrambler ===================== */
