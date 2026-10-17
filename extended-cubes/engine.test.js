@@ -100,11 +100,25 @@ eq(trace('3x3x3 +R +L +D',['2R']), ['5x3x3'], 'T-cube: 2R reduces to 3x3x3 +R +L
   p.move('F2');
   eq([p.boxName(), p.layerCount(1), p.move('U')], ['5x1x5',1,false], 'Triangle Prism: F2 bandages every tier to the base, and U (a whole-puzzle rotation) is refused');
   eq(trace('3x3x1',['F','F2','U2']), ['✗','✗','3x3x1'], '3x3x1: F and F2 would turn every piece, so they are refused');
-  const res=E.generateScramble('5x1x5 +U(3x5,1x5)',{movesPerPhase:[60],rng:mulberry32(4)});
-  const mid=res.phases.find(ph=>ph.name==='3x1x3 +U(3x3,1x3)');
-  check(mid && mid.singleAxis && mid.moves.length<=4, `Triangle Prism: the U/D-only phase 3x1x3 +U(3x3,1x3) gets at most one turn per layer after its reducing move (${mid && mid.moves.join(' ')})`);
+  // a quarter turn of its top two tiers leaves a whole prism running the other
+  // way, so it isn't a reduction (it used to open a U/D-only mini phase)
+  const tw=new E.Puzzle('5x1x5 +U(3x5,1x5)'); tw.move('2Uw');
+  check(!tw.isReduced() && tw.phaseStack.length===0, 'Triangle Prism: 2Uw turns the whole prism the other way, so nothing is reduced');
   const tp=new E.Puzzle('5x1x5 +U(3x5,1x5)');
   check(tp.maxLayers('U')===2 && tp.selection(E.parseMove('2U'))!==null, 'Triangle Prism: the middle tier is reachable as 2U on the off-centre axis');
+}
+
+{
+  // the whole L-cube turned upside down (+U becomes +D) is a whole L-cube again:
+  // unreduced, and its new bottom slab turns on its own
+  const p=new E.Puzzle('3x3x3 +R +U');
+  p.move('2Rw2'); const mid=p.isReduced(); p.move('2Lw2');
+  const s=p.selection(E.parseMove('D'));
+  eq([mid, p.isReduced(), p.boxName(), p.cubies.filter(c=>s.fcs.has(c.fc[1])).length, p.effAfter(E.parseMove('D'))===p.eff],
+    [true, false, '3x3x3 +U +R', 9, true], 'L-cube 2Rw2 2Lw2: upside down but whole, so D turns just the 3x3 slab without reducing');
+  const q=new E.Puzzle('3x3x3 +R +U');
+  E.parseSequence("R2 U2 R U R U R2 U2 R2 U2 R2 U2 R U' R2 U R U R' U2 R' U' R U R' U' R U2 R' U' R U R2 U' R' U' R U2 R U 2Lw' L2 R 2Rw L' L R R2 2Rw 2Rw' 2Rw2 L' R2 R L L2 L' 2Rw' 2Lw 2Lw 2Lw L R").forEach(m=>q.move(m));
+  check(!q.isReduced() && q.effAfter(E.parseMove('D'))===q.eff, "L-cube: the user's long sequence ends unreduced with D free");
 }
 
 console.log('--- phase names');

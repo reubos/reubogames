@@ -296,28 +296,60 @@ function effAfterHalfTurn(eff,k,members){
   return nb;
 }
 
+// The 24 rotations of the whole puzzle about its centre, identity first.
+const ROTATIONS = (()=>{
+  const out=[I3];
+  const perms=[[0,1,2],[0,2,1],[1,0,2],[1,2,0],[2,0,1],[2,1,0]];
+  for(const pm of perms) for(const s of [[1,1,1],[1,1,-1],[1,-1,1],[1,-1,-1],[-1,1,1],[-1,1,-1],[-1,-1,1],[-1,-1,-1]]){
+    const M=[0,1,2].map(r=>[0,1,2].map(c=>c===pm[r]?s[r]:0));
+    const det=M[0][0]*(M[1][1]*M[2][2]-M[1][2]*M[2][1])-M[0][1]*(M[1][0]*M[2][2]-M[1][2]*M[2][0])+M[0][2]*(M[1][0]*M[2][1]-M[1][1]*M[2][0]);
+    if(det===1 && !matEq(M,I3)) out.push(M);
+  }
+  return out;
+})();
+const frameKey = M => M.flat().join(',');
+// a box carried along by a whole-puzzle rotation (still axis-aligned)
+function rotateBox(M, b){
+  return [0,1,2].map(r=>{ const c=[0,1,2].find(j=>M[r][j]!==0);
+    return M[r][c]>0 ? [b[c][0],b[c][1]] : [-b[c][1],-b[c][0]]; });
+}
+
 class Puzzle {
   constructor(spec){
     this.spec = typeof spec==='string' ? parseSpec(spec) : spec;
     this.shape = shapePositions(this.spec);   // solved positions
     this.fullBox = layerGrid(this.spec);      // the unreduced phase's box
+    this.shared = {frames:new Map(), cells:new Map(), names:new Map()};   // caches, same for clones
     this.reset();
   }
   reset(){
     this.cubies = buildSolved(this.shape);
     this.eff = this.fullBox;
-    this.phaseStack = [];   // boxes of the phases left behind, oldest first
+    // A phase's shape can sit in any orientation of the whole puzzle: `frame`
+    // is the rotation taking the solved shape to this phase's reference shape
+    // (an L-cube turned upside down, +U becoming +D, is still a whole L-cube).
+    this.frame = I3;
+    this.phaseStack = [];   // {box, frame} of the phases left behind, oldest first
     for(const c of this.cubies) c.fc=clampToBox(c.pos,this.eff);
   }
   // Cubie arrays and boxes are only ever replaced, never mutated in place, so
   // a shallow copy of each cubie is a full copy.
   clone(){
     const q=Object.create(Puzzle.prototype);
-    q.spec=this.spec; q.shape=this.shape; q.fullBox=this.fullBox;
+    q.spec=this.spec; q.shape=this.shape; q.fullBox=this.fullBox; q.shared=this.shared;
     q.cubies=this.cubies.map(c=>({home:c.home,stickers:c.stickers,pos:c.pos,ori:c.ori,fc:c.fc}));
-    q.eff=this.eff; q.phaseStack=[...this.phaseStack];
-    q.names=this.names || (this.names=new Map());   // same shape, so names carry over
+    q.eff=this.eff; q.frame=this.frame; q.phaseStack=[...this.phaseStack];
     return q;
+  }
+  // the solved shape's cells inside `box`, with the shape turned by `frame`
+  cellsFor(box, frame){
+    const k=boxKey(box)+'/'+frameKey(frame), s=this.shared;
+    if(!s.cells.has(k)){
+      const fk=frameKey(frame);
+      if(!s.frames.has(fk)) s.frames.set(fk, this.shape.map(p=>matVec(frame,p)));
+      s.cells.set(k, s.frames.get(fk).filter(p=>inBox(p,box)).map(p=>p.join(',')));
+    }
+    return s.cells.get(k);
   }
   layerCount(k){ return new Set(this.cubies.map(c=>c.fc[k])).size; }
   // the fc values a move would turn, or null if it names no layer or would
@@ -350,7 +382,7 @@ class Puzzle {
     if(!ne) return false;
     // a reduction never changes the turning axis's range, so the same layer is
     // still selected after coarsening
-    if(ne!==this.eff) this.phaseStack.push(this.eff);
+    if(ne!==this.eff) this.phaseStack.push({box:this.eff, frame:this.frame});
     this.eff=ne;
     // Every piece belongs to the layer it touches: its position clamped into
     // the phase box. A turn then always moves whole planes of pieces about its
@@ -363,23 +395,33 @@ class Puzzle {
     this.undoReductions();
     return true;
   }
-  // An earlier phase is turnable again once every position the solved shape
-  // has inside its box is filled (for a cuboid: the sub-cuboid is intact).
-  // Pieces outside the box attach to the layer they touch. The earliest wins.
+  // An earlier phase is turnable again once every position its shape has
+  // inside its box is filled (for a cuboid: the sub-cuboid is intact). Pieces
+  // outside the box attach to the layer they touch. The earliest wins.
+  // The unreduced phase also counts in any orientation of the whole puzzle:
+  // once all the pieces form the solved shape turned some way (an L-cube
+  // after 2Rw2 2Lw2, its +U now underneath), it is simply the whole puzzle
+  // again. Intermediate phases keep their own orientation, as in
+  // cuboid-scrambler (a 3x5x7's F after U U R U gives 3x3x3).
   undoReductions(){
     if(!this.phaseStack.length) return;
     const occ=new Set(this.cubies.map(c=>c.pos.join(',')));
     for(let i=0;i<this.phaseStack.length;i++){
       const e=this.phaseStack[i];
-      if(!this.shape.every(p=>!inBox(p,e) || occ.has(p.join(',')))) continue;
-      this.eff=e;
-      this.phaseStack.length=i;
-      for(const c of this.cubies) c.fc=clampToBox(c.pos,e);
-      return;
+      for(const Q of i===0 ? ROTATIONS : [I3]){
+        const box=rotateBox(Q,e.box), frame=matMul(Q,e.frame);
+        if(!this.cellsFor(box,frame).every(k=>occ.has(k))) continue;
+        this.eff=box; this.frame=frame;
+        this.phaseStack.length=i;
+        for(const c of this.cubies) c.fc=clampToBox(c.pos,box);
+        return;
+      }
     }
   }
   isSolved(){ return this.cubies.every(c=>vecEq(c.pos,c.home)&&matEq(c.ori,I3)); }
-  isReduced(){ return !boxEq(this.eff,this.fullBox); }
+  // the full layer grid, in the current phase's orientation
+  unreducedBox(){ return rotateBox(this.frame,this.fullBox); }
+  isReduced(){ return !boxEq(this.eff,this.unreducedBox()); }
   // Layers a face can name: up to half the axis, as on an N×N×N, where a middle
   // slice is equivalent to the two outer layers plus a rotation. On an
   // off-centre axis (a Triangle Prism's base-to-apex) that equivalence fails,
@@ -398,21 +440,18 @@ class Puzzle {
   // The cells a phase's name describes: the solved shape's positions inside its
   // box (a phase box can be larger than its shape, e.g. a 5x3x3 box around
   // the Diamond Prism's plus-shaped 3x1x3 +U +D +R +L).
-  shapeCells(box=this.eff){
-    const k=boxKey(box);
-    this.cells = this.cells || new Map();
-    if(!this.cells.has(k)) this.cells.set(k, new Set(this.shape.filter(p=>inBox(p,box)).map(p=>p.join(','))));
-    return this.cells.get(k);
+  shapeCells(box=this.eff, frame=this.frame){
+    return new Set(this.cellsFor(box,frame));
   }
   // the unreduced puzzle keeps the layout as written; a reduced phase gets the
-  // simplest name for the solved shape's pieces inside its box
-  boxName(box=this.eff){
-    if(boxEq(box,this.fullBox)) return formatSpec(this.spec);
-    const k=boxKey(box);
-    this.names = this.names || new Map();
-    if(!this.names.has(k))
-      this.names.set(k, nameShape(this.shape.filter(p=>inBox(p,box))) || boxSize(box).join('x')+' box');
-    return this.names.get(k);
+  // simplest name for its shape's pieces inside its box. Boxes passed in from
+  // a plan are in the solved orientation; the current phase uses its own.
+  boxName(box=this.eff, frame = box===this.eff ? this.frame : I3){
+    if(boxEq(box,rotateBox(frame,this.fullBox))) return formatSpec(this.spec);
+    const k=boxKey(box)+'/'+frameKey(frame), s=this.shared;
+    if(!s.names.has(k))
+      s.names.set(k, nameShape(this.cellsFor(box,frame).map(c=>c.split(',').map(Number))) || boxSize(box).join('x')+' box');
+    return s.names.get(k);
   }
 }
 
