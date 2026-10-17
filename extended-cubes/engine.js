@@ -338,16 +338,25 @@ function triggerMoves(p, wide){
   return out;
 }
 
-// longest sequence of phase boxes reachable from p, ties broken at random
-function planPhases(p, wide, rng=Math.random, memo=new Map()){
+// Sequence of phase boxes to reduce through from p: the most phases that
+// actually get scrambled (skipped single-axis phases don't count), then the
+// most phases overall, ties broken at random.
+function planPhases(p, wide, rng=Math.random){
+  return planFrom(p,wide,rng,new Map()).path;
+}
+function planFrom(p, wide, rng, memo){
   const key=boxKey(p.eff);
   if(memo.has(key)) return memo.get(key);
-  memo.set(key,[]);   // guards against cycles while searching
-  let best=[], ties=0;
+  memo.set(key,{path:[],score:0});   // guards against cycles while searching
+  let best={path:[],score:0}, ties=0;
   for(const r of reductionsFrom(p,wide,triggerMoves(p,wide))){
-    const path=[r.box, ...planPhases(r.state,wide,rng,memo)];
-    if(path.length>best.length){ best=path; ties=1; }
-    else if(path.length===best.length && rng()<1/(++ties)) best=path;
+    const sub=planFrom(r.state,wide,rng,memo);
+    const axes=phaseAxes(r.state,wide), isLast=!sub.path.length;
+    const cand={path:[r.box,...sub.path], score:sub.score+(!skipsPhase(axes,isLast) && axes.size>0 ? 1 : 0)};
+    const better = cand.score>best.score || (cand.score===best.score && cand.path.length>best.path.length);
+    const tie = cand.score===best.score && cand.path.length===best.path.length;
+    if(better){ best=cand; ties=1; }
+    else if(tie && rng()<1/(++ties)) best=cand;
   }
   memo.set(key,best);
   return best;
@@ -365,6 +374,29 @@ function keepsPhase(p, mv){
 // can anything be turned in p's phase without leaving it?
 function phaseHasMoves(p, wide){
   return candidateMoves(p,wide).some(mv=>keepsPhase(p,mv));
+}
+// the axes p's phase can turn about without leaving it
+function phaseAxes(p, wide){
+  return new Set(candidateMoves(p,wide).filter(mv=>keepsPhase(p,mv)).map(mv=>AXIS[mv.face]));
+}
+// A phase that can only turn about one axis (or none) adds little but the
+// relative angle of its layers, so the scrambler goes straight on to the next
+// reduction -- unless it's the last phase, which still gets its moves.
+const skipsPhase = (axes, isLast) => !isLast && axes.size<=1;
+
+// How each planned phase will be treated: {box, axes, skipped} per phase,
+// found by walking the plan's reductions from a solved puzzle.
+function phaseSummary(spec, plan, wide){
+  const p=new Puzzle(spec), out=[];
+  for(let i=0;i<=plan.length;i++){
+    const axes=phaseAxes(p,wide);
+    out.push({box:p.eff, axes:axes.size, skipped:skipsPhase(axes,i===plan.length)});
+    if(i===plan.length) break;
+    const r=reductionsFrom(p,wide,triggerMoves(p,wide)).find(r=>boxEq(r.box,plan[i]));
+    if(!r) break;
+    p.move(r.moves[0]);
+  }
+  return out;
 }
 
 // Efficient mode: on an axis the next phase narrows, only the layers about to
@@ -427,7 +459,8 @@ function generateScramble(spec, opts={}){
     const pool=candidateMoves(p,wide);
     // count only the axes this phase can actually turn: a 3x3x3 +D phase of an
     // off-centre puzzle may allow U/D turns alone, and is then single-axis
-    const singleAxis=new Set(pool.filter(m=>keepsPhase(p,m)).map(m=>AXIS[m.face])).size===1;
+    const axes=phaseAxes(p,wide), singleAxis=axes.size===1;
+    const skipped=skipsPhase(axes,!plan.length);
     let usable=pool;
     if(opts.efficient && plan.length){
       const f=efficientFilter(p,plan[0]), restricted=f && pool.filter(f);
@@ -441,7 +474,7 @@ function generateScramble(spec, opts={}){
       }
       return null;
     };
-    while(moves.length<n){
+    while(!skipped && moves.length<n){
       // prefer unblocked moves; if none keeps the phase, allow a blocked one
       // rather than ending the phase early, but never the same layer twice running
       const allowed=usable.filter(m=>blocker.allows(m,singleAxis));
@@ -450,9 +483,9 @@ function generateScramble(spec, opts={}){
       if(!picked) break;
       p.move(picked); blocker.record(picked); moves.push(formatMove(picked));
     }
-    // an off-centre start (e.g. a 4x4x4 grid around a 3x3x3's centre) can have
-    // no turn that keeps it, so it contributes no moves of its own
-    if(moves.length) phases.push({box:p.eff, name:p.boxName(), moves, opensWithReduction:i>0});
+    // a skipped first phase contributes no moves of its own; a skipped later
+    // one is just the move that reduces into it
+    if(moves.length) phases.push({box:p.eff, name:p.boxName(), moves, opensWithReduction:i>0, skipped});
     if(!plan.length) break;
   }
   return {phases, moves:phases.flatMap(ph=>ph.moves), final:p};
@@ -464,7 +497,7 @@ const Engine = {
   parseSpec, formatSpec, shapePositions, buildSolved, describeBox,
   boundingBox, layerGrid, boxSize, inBox, boxEq, boxKey, clampToBox,
   parseMove, moveStr, formatMove, selectCoords, applyMove, worldStickers,
-  Puzzle, planPhases, generateScramble, keepsPhase, phaseHasMoves,
+  Puzzle, planPhases, generateScramble, keepsPhase, phaseHasMoves, phaseSummary,
 };
 if(typeof module!=='undefined' && module.exports) module.exports=Engine;
 else root.Engine=Engine;
