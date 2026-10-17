@@ -217,7 +217,7 @@
   <div id="phase-sliders"></div>
   <div class="row">
     <label title="On the axis that bandages next phase, only scramble the layers whose independence is about to be lost. Deeper layers survive the reduction and get mixed in later phases."><input type="checkbox" id="opt-efficient"> Efficient mode</label>
-    <span class="muted">Moves per phase, used by the Scramble buttons above the moves</span>
+    <button id="btn-scramble-2" title="Scramble from the current position through each reduction phase, using these settings (same as the Scramble button above the moves)">Scramble</button>
   </div>
   <div id="scramble-out"></div>
 </section>
@@ -840,6 +840,7 @@ document.getElementById('opt-slice').onchange=()=>{ saveOptions(); clearScramble
 document.getElementById('opt-efficient').onchange=()=>{ saveOptions(); clearScramble(); };
 document.getElementById('btn-scramble').onclick=()=>generate(false);
 document.getElementById('btn-scramble-keep').onclick=()=>generate(true);
+document.getElementById('btn-scramble-2').onclick=()=>generate(false);
 
 /* ===================== wiring ===================== */
 document.getElementById('compass').onclick=()=>{ viewYaw=-0.6; viewPitch=0.5; renderSVG(); };
