@@ -288,6 +288,12 @@ class Puzzle {
     return this.offCentre(k) ? Math.ceil(n/2) : Math.floor(n/2);
   }
   offCentre(k){ return this.eff[k][0]!==-this.eff[k][1]; }
+  // layers to offer from a face when listing moves: as maxLayers, but an
+  // off-centre axis's middle layer only from its positive face (2U, not 2D)
+  listedLayers(face){
+    const k=IDX[AXIS[face]], n=boxSize(this.eff)[k];
+    return this.offCentre(k) && n%2===1 && !POSITIVE.has(face) ? Math.floor(n/2) : this.maxLayers(face);
+  }
   boxName(box=this.eff){
     if(boxEq(box,this.fullBox)) return formatSpec(this.spec);
     return describeBox(this.spec,this.shape,box) || boxSize(box).join('x')+' box';
@@ -302,9 +308,7 @@ class Puzzle {
 function candidateMoves(p, wide){
   const out=[];
   for(const face of FACES){
-    const k=IDX[AXIS[face]], n=boxSize(p.eff)[k];
-    // an off-centre odd axis adds its middle layer, offered from one face only
-    const max = p.offCentre(k) && n%2===1 && !POSITIVE.has(face) ? Math.floor(n/2) : p.maxLayers(face);
+    const max=p.listedLayers(face);
     for(let l=1;l<=max;l++) for(const mod of ['',"'",'2']) out.push({face,layer:l,mod,wide:wide&&l>1});
   }
   return out;

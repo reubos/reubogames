@@ -24,9 +24,10 @@
   button:hover { background: #333; }
 
   /* move button grid */
-  .move-panel { display: grid; grid-template-columns: repeat(3, auto) 20px repeat(3, auto); gap: 4px; align-items: center; margin-bottom: 10px; }
-  .move-sep { width: 1px; height: 100%; background: #333; margin: 0 4px; }
-  .mbtn { min-width: 36px; text-align: center; padding: 5px 8px; font-size: 13px; }
+  .move-panel { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
+  .move-row { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+  .move-face { width: 18px; font-size: 12px; font-weight: 600; color: #aaa; border: none; }
+  .mbtn { min-width: 40px; text-align: center; padding: 4px 6px; font-size: 13px; }
   .mbtn:active { background: #444; }
   .r-col { border-color: #992222; }
   .l-col { border-color: #885500; }
@@ -35,9 +36,6 @@
   .f-col { border-color: #006633; }
   .b-col { border-color: #004488; }
 
-  .layer-row { font-size: 13px; margin-bottom: 10px; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
-  .lbtn { min-width: 30px; text-align: center; padding: 3px 7px; font-size: 12px; }
-  .lbtn.active { background: #446; border-color: #88a; }
 
   .stage-wrap { position: relative; margin-top: 4px; }
   #stage { background: #181818; border: 1px solid #333; border-radius: 8px; display: block; touch-action: none; user-select: none; }
@@ -108,14 +106,6 @@
   </ul>
   <p>Layer sizes leave out the face's own axis (U/D: W×D, R/L: H×D, F/B: W×H) and must match the core's parity on both sides, e.g. on the F face of a 3x4x5: 3x4, 5x4, 5x2, 1x2.</p>
 </details>
-
-<div class="layer-row">
-  <span>Layer:</span>
-  <button class="btn lbtn" id="layer-dec">−</button>
-  <input type="number" id="layer-input" min="1" value="1" style="width:46px;text-align:center;">
-  <button class="btn lbtn" id="layer-inc">+</button>
-  <span id="layer-max" class="muted"></span>
-</div>
 
 <div class="move-panel" id="move-panel">
   <!-- filled by JS -->
@@ -307,7 +297,6 @@ function renderCompass(M){
 /* ===================== state ===================== */
 let puzzle = new Puzzle('3x3x3');
 let history = [];
-let currentLayer = 1;
 let hover = null; // {axK, fc} of the layer under the cursor
 let hoveredBtn = null, btnHover = null; // move button under the pointer, and {axK, fcs} it would turn
 let boxHover = false; // pointer is on the reduced size: highlight that shape
@@ -322,12 +311,10 @@ function rebuild(){
   document.getElementById('spec').value=formatSpec(puzzle.spec);
   syncPreset();
   history=[];
-  currentLayer=1;
   showMsg('');
   clearScramble();
   renderPhaseSliders();
-  updateLayerButtons();
-  updateMoveButtons();
+  refreshMoveButtons();
   redraw();
   updateHistory();
 }
@@ -342,7 +329,7 @@ function doMove(mv){
   showMsg('');
   hover=null; stepHi=null;
   history.push(mv);
-  updateLayerButtons();
+  refreshMoveButtons();
   redraw();
   updateHistory();
 }
@@ -351,7 +338,7 @@ function replayHistory(moves){
   puzzle.reset();
   for(const m of moves) puzzle.move(m);
   hover=null; stepHi=null;
-  updateLayerButtons();
+  refreshMoveButtons();
 }
 
 function showMsg(t){ document.getElementById('move-msg').textContent=t; }
@@ -400,83 +387,56 @@ function handleFaceClick(face, axK, fcVal, mod){
   doMove(moveStr(face,layer,mod));
 }
 
-/* ===================== layer buttons ===================== */
-function maxLayersFor(face){
-  return puzzle.maxLayers(face);
-}
-function maxLayerGlobal(){
-  return Math.max(...boxSize(puzzle.eff).map(e=>Math.floor(e/2)));
-}
-
-function updateLayerButtons(){
-  const max=Math.max(maxLayerGlobal(),1);
-  currentLayer=Math.max(1,Math.min(currentLayer,max));
-  const inp=document.getElementById('layer-input');
-  inp.max=max; inp.value=currentLayer;
-  document.getElementById('layer-max').textContent=`/ ${max}`;
-  refreshMoveLabels();
-}
-
 /* ===================== move buttons ===================== */
-// The selected layer, or that face's deepest layer if the selection is deeper.
-function buttonMove(face,mod){
-  const l=Math.min(currentLayer, maxLayersFor(face));
-  return l<1 ? null : moveStr(face,l,mod);
+// Every move the puzzle can make right now, one row per face. Moves the
+// current shape refuses (R on a 3x3x4, a turn of every piece) aren't listed;
+// the list is rebuilt after every move since that changes with the shape.
+const MOVE_FACES=['R','L','U','D','F','B'];
+let lastPointer=null;
+document.addEventListener('pointermove',e=>{ lastPointer=[e.clientX,e.clientY]; });
+
+function possibleMoves(face){
+  const out=[];
+  for(let l=1;l<=puzzle.listedLayers(face);l++)
+    for(const mod of ['',"'",'2'])
+      if(puzzle.effAfter({face,layer:l,mod,wide:false})) out.push(moveStr(face,l,mod));
+  return out;
 }
-function refreshMoveLabels(){
-  for(const btn of document.querySelectorAll('#move-panel button[data-face]')){
-    const m=buttonMove(btn.dataset.face, btn.dataset.mod);
-    btn.textContent = m || btn.dataset.face+btn.dataset.mod;
-    btn.disabled = !m;
-    btn.title = m ? `Turn ${m}` : 'This face has no turnable layer';
+
+function refreshMoveButtons(){
+  const panel=document.getElementById('move-panel');
+  panel.innerHTML='';
+  for(const face of MOVE_FACES){
+    const moves=possibleMoves(face);
+    if(!moves.length) continue;
+    const row=document.createElement('div');
+    row.className='move-row';
+    row.innerHTML=`<span class="move-face ${COL_CLASS[face]}">${face}</span>`;
+    for(const m of moves){
+      const btn=document.createElement('button');
+      btn.className=`btn mbtn ${COL_CLASS[face]}`;
+      btn.dataset.move=m; btn.textContent=m; btn.title=`Turn ${m}`;
+      btn.onclick=()=>doMove(m);
+      btn.addEventListener('pointerenter',()=>setHoveredBtn(btn));
+      btn.addEventListener('pointerleave',()=>setHoveredBtn(null));
+      row.appendChild(btn);
+    }
+    panel.appendChild(row);
   }
+  if(!panel.children.length) panel.innerHTML='<span class="muted">No moves possible</span>';
+  // the buttons were replaced, so re-find whichever one is under the pointer
+  const under=lastPointer && document.elementFromPoint(...lastPointer);
+  hoveredBtn = under && under.closest ? under.closest('#move-panel button[data-move]') : null;
   updateBtnHover();
 }
-// the same group performMove would turn for the hovered button's move
+// the same group the hovered button's move would turn
 function updateBtnHover(){
-  btnHover=null;
-  const m=hoveredBtn && buttonMove(hoveredBtn.dataset.face, hoveredBtn.dataset.mod);
-  if(!m) return;
-  btnHover=puzzle.selection(parseMove(m));
+  btnHover = hoveredBtn ? puzzle.selection(parseMove(hoveredBtn.dataset.move)) : null;
 }
 function setHoveredBtn(btn){
   hoveredBtn=btn;
   updateBtnHover();
   renderSVG();
-}
-function updateMoveButtons(){
-  const panel=document.getElementById('move-panel');
-  panel.innerHTML='';
-  hoveredBtn=null; btnHover=null;
-  const pairs=[['R','L'],['U','D'],['F','B']];
-  for(const [a,b] of pairs){
-    for(const [face,mods] of [[a,['',"'","2"]],[b,['',"'","2"]]]){
-      for(const mod of mods){
-        const btn=document.createElement('button');
-        btn.className=`btn mbtn ${COL_CLASS[face]}`;
-        btn.dataset.face=face; btn.dataset.mod=mod;
-        btn.onclick=()=>{ const m=buttonMove(face,mod); if(m) doMove(m); };
-        btn.addEventListener('pointerenter',()=>setHoveredBtn(btn));
-        btn.addEventListener('pointerleave',()=>setHoveredBtn(null));
-        panel.appendChild(btn);
-      }
-      // separator between the two halves of a pair
-      if(face===a){
-        const sep=document.createElement('div');
-        sep.style.cssText='width:1px;background:#333;height:28px;margin:0 4px;';
-        panel.appendChild(sep);
-      }
-    }
-    // empty spacer row between face pairs
-    if(a!=='F'){
-      for(let i=0;i<7;i++){
-        const sp=document.createElement('div');
-        sp.style.height='4px';
-        panel.appendChild(sp);
-      }
-    }
-  }
-  refreshMoveLabels();
 }
 
 /* ===================== history display ===================== */
@@ -606,17 +566,6 @@ document.getElementById('opt-efficient').onchange=()=>{ saveOptions(); clearScra
 document.getElementById('btn-scramble').onclick=generate;
 
 /* ===================== wiring ===================== */
-document.getElementById('layer-input').addEventListener('change', e=>{
-  currentLayer=Math.max(1,+e.target.value||1);
-  updateLayerButtons();
-});
-document.getElementById('layer-dec').onclick=()=>{
-  currentLayer=Math.max(1,currentLayer-1); updateLayerButtons();
-};
-document.getElementById('layer-inc').onclick=()=>{
-  const max=Math.max(maxLayerGlobal(),1);
-  currentLayer=Math.min(max,currentLayer+1); updateLayerButtons();
-};
 document.getElementById('compass').onclick=()=>{ viewYaw=-0.6; viewPitch=0.5; renderSVG(); };
 document.getElementById('btn-new').onclick=rebuild;
 function syncPreset(){
@@ -647,8 +596,7 @@ document.getElementById('seq-input').addEventListener('keydown',e=>{ if(e.key===
 // init
 loadOptions();
 renderPhaseSliders(false);
-updateLayerButtons();
-updateMoveButtons();
+refreshMoveButtons();
 redraw();
 updateHistory();
 </script>
