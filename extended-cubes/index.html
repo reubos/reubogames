@@ -176,6 +176,12 @@ function viewMatrix(){
   const cy=Math.cos(viewYaw), sy=Math.sin(viewYaw), cp=Math.cos(viewPitch), sp=Math.sin(viewPitch);
   return [[cy,0,sy],[sp*sy,cp,-sp*cy],[-cp*sy,sp,cp*cy]];
 }
+// Weak perspective (as in cuboid-scrambler): eye distance is PERSP times the
+// puzzle's radius, so the near edge draws ~1.14x the far one. Without it the
+// back of the solid looks as large as the front and reads as flaring out.
+const PERSP=4.5;
+// exact worst-case magnification of the divide over the bounding sphere
+const PERSP_MAG=1/Math.sqrt(1-1/(PERSP*PERSP));
 const LIGHT=(()=>{ const v=[0.35,0.6,1], l=Math.hypot(...v); return v.map(x=>x/l); })();
 const FACE_FROM_DIR = {'+x':'R','-x':'L','+y':'U','-y':'D','+z':'F','-z':'B'};
 const AXK_FROM_DIR = {'+x':0,'-x':0,'+y':1,'-y':1,'+z':2,'-z':2};
@@ -192,6 +198,9 @@ INPLANE['-x']=INPLANE['+x']; INPLANE['-y']=INPLANE['+y']; INPLANE['-z']=INPLANE[
 function renderSVG(cubies){
   const M=viewMatrix();
   const toCam=p=>matVec(M,p);
+  const E=[0,1,2].map(k=>Math.max(...cubies.map(c=>Math.abs(c.pos[k])+1)));
+  const Rw=Math.hypot(...E)||1, eye=PERSP*Rw;
+  const projectPt=p=>{ const q=toCam(p), f=eye/(eye-q[2]); return [q[0]*S*f, -q[1]*S*f]; };
   const occ = new Set(cubies.map(c=>c.pos.join(',')));
   const faces = [];
   for(const c of cubies){
@@ -199,26 +208,26 @@ function renderSVG(cubies){
     for(const dir of Object.keys(DIRS)){
       const n=DIRS[dir];
       const nc=toCam(n);
-      if(nc[2]<=1e-6) continue;
       const nb=[c.pos[0]+2*n[0],c.pos[1]+2*n[1],c.pos[2]+2*n[2]];
       if(occ.has(nb.join(',')))continue;
       const [u0,v0]=INPLANE[dir];
       const center=[c.pos[0]+n[0],c.pos[1]+n[1],c.pos[2]+n[2]];
-      const corners=[[+1,+1],[+1,-1],[-1,-1],[-1,+1]].map(([su,sv])=>{
-        const q=toCam([center[0]+su*u0[0]+sv*v0[0], center[1]+su*u0[1]+sv*v0[1], center[2]+su*u0[2]+sv*v0[2]]);
-        return [q[0]*S, -q[1]*S];
-      });
+      const cv=toCam(center);
+      // with a finite eye at (0,0,eye), facing depends on the face's position too
+      if(-nc[0]*cv[0]-nc[1]*cv[1]+nc[2]*(eye-cv[2]) <= 1e-9) continue;
+      const corners=[[+1,+1],[+1,-1],[-1,-1],[-1,+1]].map(([su,sv])=>
+        projectPt([center[0]+su*u0[0]+sv*v0[0], center[1]+su*u0[1]+sv*v0[1], center[2]+su*u0[2]+sv*v0[2]]));
       const isHi = hover && c.fc[hover.axK]===hover.fc;
       const light=(0.55+0.45*Math.max(0,dot(nc,LIGHT))) * (hover && !isHi ? 0.45 : 1);
       const col = shade(HEX[ws[dir]]||HEX.Body, light);
       const axK = AXK_FROM_DIR[dir];
-      faces.push({corners, col, isHi, depth:toCam(center)[2], face:FACE_FROM_DIR[dir], axK, fcVal:c.fc[axK]});
+      faces.push({corners, col, isHi, depth:cv[2], face:FACE_FROM_DIR[dir], axK, fcVal:c.fc[axK]});
     }
   }
   faces.sort((a,b)=>a.depth-b.depth);
 
   // fixed frame from the bounding sphere so rotating never rescales the view
-  const R=(Math.max(...cubies.map(c=>Math.hypot(...c.pos)))+1.8)*S+10;
+  const R=Rw*S*PERSP_MAG+10;
   const svg=document.getElementById('stage');
   svg.setAttribute('viewBox',`${(-R).toFixed(1)} ${(-R).toFixed(1)} ${(2*R).toFixed(1)} ${(2*R).toFixed(1)}`);
   let body='';
