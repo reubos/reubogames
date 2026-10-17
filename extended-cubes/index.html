@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Cuboid Simulator</title>
+<title>Extended Cuboid Simulator</title>
 <style>
   :root { color-scheme: light dark; }
   * { box-sizing: border-box; }
@@ -12,6 +12,7 @@
   .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
   label { font-size: 13px; display: flex; align-items: center; gap: 5px; }
   input[type=number] { width: 52px; }
+  .ext-row input[type=number] { width: 42px; }
   input[type=text] { flex: 1; min-width: 200px; }
   input, button { font: inherit; padding: 4px 6px; background: #222; color: #eee; border: 1px solid #444; border-radius: 5px; }
   button { cursor: pointer; }
@@ -53,7 +54,7 @@
 </style>
 </head>
 <body>
-<h1>Cuboid Simulator</h1>
+<h1>Extended Cuboid Simulator</h1>
 
 <div class="row">
   <label>W <input type="number" id="iw" min="1" max="13" value="3"></label>
@@ -62,6 +63,16 @@
   <button id="btn-new">New Puzzle</button>
   <span id="solved-indicator"></span>
   <span id="move-msg" style="color:#e88;font-size:12px;"></span>
+</div>
+<div class="row ext-row">
+  <span class="muted">Extra layers:</span>
+  <label>U <input type="number" id="ext-U" min="0" max="6" value="0"></label>
+  <label>D <input type="number" id="ext-D" min="0" max="6" value="0"></label>
+  <label>R <input type="number" id="ext-R" min="0" max="6" value="0"></label>
+  <label>L <input type="number" id="ext-L" min="0" max="6" value="0"></label>
+  <label>F <input type="number" id="ext-F" min="0" max="6" value="0"></label>
+  <label>B <input type="number" id="ext-B" min="0" max="6" value="0"></label>
+  <button id="btn-icube" title="3×3×3 with one extra layer on U">I-cube</button>
 </div>
 
 <div class="layer-row">
@@ -116,19 +127,25 @@ const AXIS = {R:'x',L:'x',U:'y',D:'y',F:'z',B:'z'};
 const IDX = {x:0,y:1,z:2};
 const POSITIVE = new Set(['R','U','F']);
 const baseSign = f => POSITIVE.has(f)?-1:1;
-const span = n => Array.from({length:n},(_,i)=>-(n-1)+2*i);
+// A puzzle is a core cuboid centred on the origin (every turn rotates about its
+// centre) plus `ext[face]` whole extra layers on each face. Boxes are per-axis
+// [lo,hi] bounds on the doubled lattice, so they can sit off-centre.
+function shapeBox(core,ext){
+  const neg={0:'L',1:'D',2:'B'}, pos={0:'R',1:'U',2:'F'};
+  return core.map((n,k)=>[-(n-1)-2*(ext[neg[k]]||0), (n-1)+2*(ext[pos[k]]||0)]);
+}
+const boxSize = b => b.map(([lo,hi])=>(hi-lo)/2+1);
+const inBox = (p,b) => p.every((v,k)=>v>=b[k][0] && v<=b[k][1]);
+const boxEq = (a,b) => a.every((r,k)=>r[0]===b[k][0] && r[1]===b[k][1]);
 
-function buildSolved(w,h,d){
-  const xs=span(w),ys=span(h),zs=span(d);
-  const xmax=Math.max(...xs),xmin=Math.min(...xs);
-  const ymax=Math.max(...ys),ymin=Math.min(...ys);
-  const zmax=Math.max(...zs),zmin=Math.min(...zs);
+function buildSolved(core,ext){
+  const b=shapeBox(core,ext), range=([lo,hi])=>{ const r=[]; for(let v=lo;v<=hi;v+=2) r.push(v); return r; };
   const cubies=[];
-  for(const x of xs) for(const y of ys) for(const z of zs){
+  for(const x of range(b[0])) for(const y of range(b[1])) for(const z of range(b[2])){
     const st={};
-    if(x===xmax)st['+x']=COLORS['+x']; if(x===xmin)st['-x']=COLORS['-x'];
-    if(y===ymax)st['+y']=COLORS['+y']; if(y===ymin)st['-y']=COLORS['-y'];
-    if(z===zmax)st['+z']=COLORS['+z']; if(z===zmin)st['-z']=COLORS['-z'];
+    if(x===b[0][1])st['+x']=COLORS['+x']; if(x===b[0][0])st['-x']=COLORS['-x'];
+    if(y===b[1][1])st['+y']=COLORS['+y']; if(y===b[1][0])st['-y']=COLORS['-y'];
+    if(z===b[2][1])st['+z']=COLORS['+z']; if(z===b[2][0])st['-z']=COLORS['-z'];
     cubies.push({home:[x,y,z],pos:[x,y,z],ori:I3,fc:[x,y,z],stickers:st});
   }
   return cubies;
@@ -152,7 +169,8 @@ function applyMove(cubies,move){
   const sign=baseSign(mv.face), exp=mv.mod==='2'?2:mv.mod==="'"?-sign:sign, R=matPow(P[ax],exp);
   for(const c of cubies){
     if(!sel.has(c.fc[k]))continue;
-    c.pos=matVec(R,c.pos); c.ori=matMul(R,c.ori); c.fc=matVec(R,c.fc);  }
+    c.pos=matVec(R,c.pos); c.ori=matMul(R,c.ori); c.fc=matVec(R,c.fc);
+  }
 }
 function worldStickers(c){
   const out={}, oriT=transpose(c.ori);
@@ -166,9 +184,9 @@ function worldStickers(c){
 function isSolved(cubies){
   return cubies.every(c=>vecEq(c.pos,c.home)&&matEq(c.ori,I3));
 }
-function coarsen(cubies,eff){
-  const lim=eff.map(e=>e-1);
-  for(const c of cubies) c.fc=c.fc.map((v,k)=>Math.max(-lim[k],Math.min(lim[k],v)));
+const clampToBox = (p,b) => p.map((v,k)=>Math.max(b[k][0],Math.min(b[k][1],v)));
+function coarsen(cubies,box){
+  for(const c of cubies) c.fc=clampToBox(c.fc,box);
 }
 function moveStr(face,layer,mod){ return (layer>1?String(layer):'')+face+mod; }
 
@@ -222,7 +240,7 @@ function renderSVG(cubies){
       const corners=[[+1,+1],[+1,-1],[-1,-1],[-1,+1]].map(([su,sv])=>
         projectPt([center[0]+su*u0[0]+sv*v0[0], center[1]+su*u0[1]+sv*v0[1], center[2]+su*u0[2]+sv*v0[2]]));
       const highlighting = boxHover || hover;
-      const isHi = boxHover ? c.pos.every((v,k)=>Math.abs(v)<eff[k]) : hover && c.fc[hover.axK]===hover.fc;
+      const isHi = boxHover ? inBox(c.pos,eff) : hover && c.fc[hover.axK]===hover.fc;
       // headlight, as in cuboid-scrambler: brightness tracks how face-on a side is
       const light=(AMBIENT+DIFFUSE*Math.max(0,nc[2])) * (highlighting && !isHi ? 0.45 : 1);
       const col = shade(HEX[ws[dir]]||HEX.Body, light);
@@ -313,18 +331,19 @@ function renderCompass(M){
 })();
 
 /* ===================== state ===================== */
-let gW=3, gH=3, gD=3;
-let cubies = buildSolved(gW, gH, gD);
+const EXT_FACES=['U','D','R','L','F','B'];
+let gCore=[3,3,3], gExt={};
+let cubies = buildSolved(gCore, gExt);
 let history = [];
 let currentLayer = 1;
 let hover = null; // {axK, fc} of the layer under the cursor
 let boxHover = false; // pointer is on the reduced size: highlight that sub-cuboid
 
 function rebuild(){
-  gW=Math.max(1,+document.getElementById('iw').value||1);
-  gH=Math.max(1,+document.getElementById('ih').value||1);
-  gD=Math.max(1,+document.getElementById('id').value||1);
-  cubies=buildSolved(gW,gH,gD);
+  gCore=['iw','ih','id'].map(id=>Math.max(1,+document.getElementById(id).value||1));
+  gExt={};
+  for(const f of EXT_FACES) gExt[f]=Math.max(0,+document.getElementById('ext-'+f).value||0);
+  cubies=buildSolved(gCore,gExt);
   resetPhases();
   history=[];
   currentLayer=1;
@@ -335,27 +354,41 @@ function rebuild(){
   updateHistory();
 }
 
-// Reduction phases, as in cuboid-scrambler. `eff` is the current phase's
-// effective dims. A quarter turn needs the turning face's cross-section to be
-// square in eff; if it isn't but both sides share parity, the turn starts a new
-// phase: the larger side reduces to the smaller and the outer layers bandage
-// onto the outermost remaining one (coarsen) before the turn is applied.
-// Half turns keep the shape, so they never change the phase.
-let eff = [gW, gH, gD];
-let phaseStack = []; // effective dims of the phases left behind, oldest first
+// Reduction phases, as in cuboid-scrambler. `eff` is the current phase's box
+// ([lo,hi] per axis). A quarter turn keeps the box in shape only if its
+// cross-section is square and centred on the turning axis. Otherwise, if both
+// sides share parity, the turn starts a new phase: the cross-section shrinks to
+// the largest centred square inside it and the outer layers bandage onto the
+// outermost remaining one (coarsen) before the turn is applied. On a plain
+// cuboid this is the scrambler's "larger side reduces to the smaller".
+// A half turn only needs each side centred, so on a plain cuboid it never
+// reduces, but on an extended one (an I-cube's R2) it trims each side to its
+// largest centred range.
+let eff = shapeBox(gCore, gExt);
+let phaseStack = []; // boxes of the phases left behind, oldest first
+const parity = v => ((v%2)+2)%2;
 function effAfterQuarterTurn(face){
   const k=IDX[AXIS[face]], [i,j]=[0,1,2].filter(a=>a!==k);
-  if(eff[i]===eff[j]) return eff;
-  if(eff[k]<2 || eff[i]<2 || eff[j]<2 || eff[i]%2!==eff[j]%2) return null;
-  const nd=[...eff], lo=Math.min(eff[i],eff[j]);
-  nd[i]=lo; nd[j]=lo;
-  return nd;
+  const [li,hi]=eff[i], [lj,hj]=eff[j];
+  if(li===-hi && lj===-hj && hi===hj) return eff;
+  const r=Math.min(hi,-li,hj,-lj);
+  if(boxSize(eff)[k]<2 || r<1 || parity(hi)!==parity(hj)) return null;
+  const nb=eff.map(x=>[...x]);
+  nb[i]=[-r,r]; nb[j]=[-r,r];
+  return nb;
+}
+function effAfterHalfTurn(face){
+  const k=IDX[AXIS[face]], sides=[0,1,2].filter(a=>a!==k);
+  if(sides.every(a=>eff[a][0]===-eff[a][1])) return eff;
+  const nb=eff.map(x=>[...x]);
+  for(const a of sides){ const r=Math.min(eff[a][1],-eff[a][0]); nb[a]=[-r,r]; }
+  return nb;
 }
 function performMove(mv){
-  const ne = mv.mod==='2' ? eff : effAfterQuarterTurn(mv.face);
+  const ne = mv.mod==='2' ? effAfterHalfTurn(mv.face) : effAfterQuarterTurn(mv.face);
   if(!ne) return false;
-  const k=IDX[AXIS[mv.face]], lim=ne[k]-1;
-  const layers=new Set(cubies.map(c=>Math.max(-lim,Math.min(lim,c.fc[k])))).size;
+  const k=IDX[AXIS[mv.face]], [lo,hi]=ne[k];
+  const layers=new Set(cubies.map(c=>Math.max(lo,Math.min(hi,c.fc[k])))).size;
   if(!mv.wide && mv.layer>layers) return false;
   if(ne!==eff) phaseStack.push(eff);
   eff=ne;
@@ -370,17 +403,16 @@ function performMove(mv){
 // box attach to the layer they touch. The earliest such phase wins.
 function undoReductions(){
   for(let i=0;i<phaseStack.length;i++){
-    const e=phaseStack[i], lim=e.map(x=>x-1);
-    const inside=cubies.filter(c=>c.pos.every((v,k)=>Math.abs(v)<=lim[k])).length;
-    if(inside!==e[0]*e[1]*e[2]) continue;
+    const e=phaseStack[i], s=boxSize(e);
+    if(cubies.filter(c=>inBox(c.pos,e)).length!==s[0]*s[1]*s[2]) continue;
     eff=e;
     phaseStack.length=i;
-    for(const c of cubies) c.fc=c.pos.map((v,k)=>Math.max(-lim[k],Math.min(lim[k],v)));
+    for(const c of cubies) c.fc=clampToBox(c.pos,e);
     return;
   }
 }
 function resetPhases(){
-  eff=[gW,gH,gD];
+  eff=shapeBox(gCore,gExt);
   phaseStack=[];
 }
 
@@ -400,7 +432,7 @@ function doMove(mv){
 }
 
 function replayHistory(moves){
-  cubies=buildSolved(gW,gH,gD);
+  cubies=buildSolved(gCore,gExt);
   resetPhases();
   for(const m of moves) performMove(parseMove(m));
   hover=null;
@@ -426,8 +458,9 @@ function rewindTo(idx){
 
 function updateSizeNote(){
   const note=document.getElementById('size-note');
-  const full=`${gW}×${gH}×${gD}`, cur=eff.join('×');
-  const reduced=cur!==full;
+  const exts=EXT_FACES.filter(f=>gExt[f]).map(f=>f+(gExt[f]>1?gExt[f]:'')).join(' ');
+  const full=gCore.join('×')+(exts?` + ${exts}`:''), cur=boxSize(eff).join('×');
+  const reduced=!boxEq(eff,shapeBox(gCore,gExt));
   note.className=reduced?'reduced':'';
   note.innerHTML = reduced
     ? `Reduced to<br><b title="Highlight this sub-cuboid">${cur}</b><br>from ${full}`
@@ -455,10 +488,10 @@ function handleFaceClick(face, axK, fcVal, mod){
 
 /* ===================== layer buttons ===================== */
 function maxLayersFor(face){
-  return Math.floor(eff[IDX[AXIS[face]]]/2);
+  return Math.floor(boxSize(eff)[IDX[AXIS[face]]]/2);
 }
 function maxLayerGlobal(){
-  return Math.max(...eff.map(e=>Math.floor(e/2)));
+  return Math.max(...boxSize(eff).map(e=>Math.floor(e/2)));
 }
 
 function updateLayerButtons(){
@@ -542,6 +575,11 @@ document.getElementById('layer-inc').onclick=()=>{
 };
 document.getElementById('compass').onclick=()=>{ viewYaw=-0.6; viewPitch=0.5; renderSVG(cubies); };
 document.getElementById('btn-new').onclick=rebuild;
+document.getElementById('btn-icube').onclick=()=>{
+  ['iw','ih','id'].forEach(id=>document.getElementById(id).value=3);
+  for(const f of EXT_FACES) document.getElementById('ext-'+f).value = f==='U' ? 1 : 0;
+  rebuild();
+};
 document.getElementById('btn-undo').onclick=undoMove;
 document.getElementById('btn-reset').onclick=()=>{
   history=[];
