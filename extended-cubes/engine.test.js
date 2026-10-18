@@ -17,11 +17,13 @@ function mulberry32(seed){
 // phase name after each move; '✗' marks a refused move
 function trace(spec, moves){
   const p=new E.Puzzle(spec);
-  return moves.map(m=>p.move(m) ? p.boxName() : '✗');
+  return moves.map(m=>p.move(m) ? p.phaseName() : '✗');
 }
 const layerCounts=(p,k)=>{ const m={}; for(const c of p.cubies) m[c.pos[k]]=(m[c.pos[k]]||0)+1;
   return Object.keys(m).map(Number).sort((a,b)=>b-a).map(v=>m[v]); };
-const state=p=>JSON.stringify([p.cubies.map(c=>[c.pos,c.ori,c.fc]),p.eff,p.phaseStack]);
+const state=p=>JSON.stringify(p.cubies.map(c=>[c.pos,c.ori,c.fc,c.body]));
+// pieces (stickered: the ones a real puzzle has) a move would turn
+const turns=(p,m)=>{ const s=p.selection(E.parseMove(m)); return s ? p.cubies.filter(c=>s.fcs.has(c.fc[s.axK]) && Object.keys(c.stickers).length).length : 0; };
 
 const PRESETS = {
   'Cuboid':'3x3x3', 'I-cube':'3x3x3 +U', 'Double I-cube':'3x3x3 +2U', 'T-cube':'3x3x3 +R +L +D',
@@ -61,7 +63,7 @@ eq(trace('3x3x5',['R','U',"U'","R'"]), ['3x3x3','3x3x3','3x3x3','3x3x5'], '3x3x5
 }
 eq(trace('3x5x7',['U','U','R','U','F','F','F','F']),
   ['3x5x3','3x5x7','3x5x5','3x5x3','3x3x3','3x5x3','3x3x3','3x5x3'], '3x5x7 reduction and undo sequence');
-eq(trace('3x5x7',['L',"R'",'F2','R',"F'"]).slice(-1), ['3x3x5'], '3x5x7: intact 3x3x5 sub-cuboid restores immediately');
+eq(trace('3x5x7',['U','R']), ['3x5x3','3x3x3'], '3x5x7: U R reduces to 3x3x3 (the old intact-box restore wrongly went back to 3x5x3)');
 eq(trace('2x2x3',['R','R2']), ['✗','2x2x3'], '2x2x3: R refused (parity), R2 allowed');
 
 console.log('--- extended shapes');
@@ -69,7 +71,7 @@ console.log('--- extended shapes');
   const p=new E.Puzzle('3x3x3 +U');
   check(p.layerCount(1)===4 && !p.isReduced(), 'I-cube starts with 4 U/D layers, unreduced');
   p.move('R2');
-  eq([p.boxName(), layerCounts(p,1)], ['3x3x3',[6,9,9,9,3]], 'I-cube R2 reduces to 3x3x3 with layers 6,9,9,9,3');
+  eq([p.phaseName(), layerCounts(p,1)], ['3x3x3',[6,9,9,9,3]], 'I-cube R2 reduces to 3x3x3 with layers 6,9,9,9,3');
   p.move('R2');
   check(p.isSolved() && !p.isReduced(), 'I-cube R2 R2 is solved and unreduced');
 }
@@ -82,15 +84,14 @@ eq(trace('3x3x3 +R +L +D',['2R']), ['5x3x3'], 'T-cube: 2R reduces to 3x3x3 +R +L
   // overlapping oversized layers: a 4x4x4 grid from x,y,z = -4 to +2, with the
   // layers' overhang at +4 attached to the layer it touches
   const p=new E.Puzzle('3x3x3 +D(5x5) +L(5x5) +B(5x5)');
-  eq(E.boxSize(p.fullBox), [4,4,4], 'overlapping 5x5 layers on D, L, B: turnable grid is 4x4x4');
-  eq([0,1,2].map(k=>p.layerCount(k)), [4,4,4], '...with 4 turnable layers on every axis');
+  eq(p.layerCounts(), [4,4,4], 'overlapping 5x5 layers on D, L, B: 4 turnable layers on every axis');
   const fringe=p.cubies.filter(c=>c.pos[0]===4), s=p.selection(E.parseMove('R'));
   check(fringe.length>0 && fringe.every(c=>s.fcs.has(c.fc[0])), `...and R turns the overhanging x=+4 fringe (${fringe.length} cubies) with the x=+2 layer`);
   const q=p.clone(); q.move('R'); q.move("R'");
   check(q.isSolved() && !q.isReduced(), "...R R' is solved and unreduced");
   // the 5x5 B, L and D slabs map onto themselves, so they turn without reducing
   const free=[];
-  for(const f of E.FACES) for(let l=1;l<=p.maxLayers(f);l++) if(p.effAfter({face:f,layer:l,mod:'',wide:false})===p.eff) free.push(E.moveStr(f,l,''));
+  for(const f of E.FACES) for(let l=1;l<=p.maxLayers(f);l++) if(E.moveEffect(p,{face:f,layer:l,mod:'',wide:false})==='keeps') free.push(E.moveStr(f,l,''));
   eq(free.sort(), ['B','D','L'], '...only its B, L and D slabs turn without reducing it');
 }
 
@@ -98,12 +99,12 @@ eq(trace('3x3x3 +R +L +D',['2R']), ['5x3x3'], 'T-cube: 2R reduces to 3x3x3 +R +L
   // Triangle Prism: core one layer tall, so the turning centre is in the base
   const p=new E.Puzzle('5x1x5 +U(3x5,1x5)');
   p.move('F2');
-  eq([p.boxName(), p.layerCount(1), p.move('U')], ['5x1x5',1,false], 'Triangle Prism: F2 bandages every tier to the base, and U (a whole-puzzle rotation) is refused');
+  eq([p.phaseName(), p.layerCount(1), p.move('U')], ['5x1x5',1,false], 'Triangle Prism: F2 bandages every tier to the base, and U (a whole-puzzle rotation) is refused');
   eq(trace('3x3x1',['F','F2','U2']), ['✗','✗','3x3x1'], '3x3x1: F and F2 would turn every piece, so they are refused');
   // a quarter turn of its top two tiers leaves a whole prism running the other
   // way, so it isn't a reduction (it used to open a U/D-only mini phase)
   const tw=new E.Puzzle('5x1x5 +U(3x5,1x5)'); tw.move('2Uw');
-  check(!tw.isReduced() && tw.phaseStack.length===0, 'Triangle Prism: 2Uw turns the whole prism the other way, so nothing is reduced');
+  check(!tw.isReduced(), 'Triangle Prism: 2Uw turns the whole prism the other way, so nothing is reduced');
   const tp=new E.Puzzle('5x1x5 +U(3x5,1x5)');
   check(tp.maxLayers('U')===2 && tp.selection(E.parseMove('2U'))!==null, 'Triangle Prism: the middle tier is reachable as 2U on the off-centre axis');
 }
@@ -114,7 +115,7 @@ eq(trace('3x3x3 +R +L +D',['2R']), ['5x3x3'], 'T-cube: 2R reduces to 3x3x3 +R +L
   const p=new E.Puzzle('3x3x3 +R +U');
   p.move('2Rw2'); const mid=p.isReduced(); p.move('2Lw2');
   const s=p.selection(E.parseMove('D'));
-  eq([mid, p.isReduced(), p.boxName(), p.cubies.filter(c=>s.fcs.has(c.fc[1])).length, p.effAfter(E.parseMove('D'))===p.eff],
+  eq([mid, p.isReduced(), p.phaseName(), p.cubies.filter(c=>s.fcs.has(c.fc[1])).length, E.moveEffect(p,E.parseMove('D'))==='keeps'],
     [true, false, '3x3x3 +D +R', 9, true], 'L-cube 2Rw2 2Lw2: upside down but whole (named 3x3x3 +D +R), so D turns just the 3x3 slab without reducing');
   // rotateSpec must build exactly the rotated shape, for every rotation of
   // layouts with uneven sizes
@@ -131,7 +132,7 @@ eq(trace('3x3x3 +R +L +D',['2R']), ['5x3x3'], 'T-cube: 2R reduces to 3x3x3 +R +L
   check(bad===0, `rotateSpec rebuilds exactly the rotated shape for every axis mapping (${bad} mismatches)`);
   const q=new E.Puzzle('3x3x3 +R +U');
   E.parseSequence("R2 U2 R U R U R2 U2 R2 U2 R2 U2 R U' R2 U R U R' U2 R' U' R U R' U' R U2 R' U' R U R2 U' R' U' R U2 R U 2Lw' L2 R 2Rw L' L R R2 2Rw 2Rw' 2Rw2 L' R2 R L L2 L' 2Rw' 2Lw 2Lw 2Lw L R").forEach(m=>q.move(m));
-  check(!q.isReduced() && q.effAfter(E.parseMove('D'))===q.eff, "L-cube: the user's long sequence ends unreduced with D free");
+  check(!q.isReduced() && E.moveEffect(q,E.parseMove('D'))==='keeps', "L-cube: the user's long sequence ends unreduced with D free");
 }
 
 {
@@ -140,11 +141,34 @@ eq(trace('3x3x3 +R +L +D',['2R']), ['5x3x3'], 'T-cube: 2R reduces to 3x3x3 +R +L
     ['exact','rotated','no','rotated','no','exact'], 'solved, solved up to a whole-puzzle rotation, or not');
 }
 
+console.log('--- physical results');
+{
+  // positions the user checked on physical puzzles (and pCubes); turn counts
+  // are real pieces, without the unstickered interior
+  const at=(spec,seq)=>{ const p=new E.Puzzle(spec); E.parseSequence(seq).forEach(m=>p.move(m)); return p; };
+  const A=at('3x5x7',"3D' 2F' 2R' U2 2L2 2F'"), B=at('3x5x7',"2L 3F 2B2 F2 2D 2F'");
+  eq([turns(A,'U'), turns(B,'U')], [21,21], '3x5x7: after A and after B, U turns the same top two levels');
+  const ruf=at('3x5x7','R U F');
+  eq([turns(ruf,'F'), ruf.phaseName()], [38,'3x3x3'], '3x5x7 R U F: F turns the front three levels together (not just the front 21)');
+  const ur=at('3x5x7','U R');
+  eq([ur.phaseName(), turns(ur,'U')], ['3x3x3',36], '3x5x7 U R: 3x3x3, U turns the top three levels');
+  eq([turns(at('3x3x3 +U +D +R +L',''),'R'), turns(at('3x3x3 +U +D +R +L','2U'),'R'), turns(at('3x3x3 +U +D +R +L','2R F D'),'R')], [9,21,9],
+    'X-cube: R extension turns alone when solved, not after 2U, and again after 2R F D');
+  // the same position always turns the same way, however it was reached
+  const p1=at('3x3x3 +U +D +R +L +F',"3R2 L'"), p2=at('3x3x3 +U +D +R +L +F',"3R L' 3L'");
+  check(state(p1)===state(p2), "Penta Cross: 3R2 L' and 3R L' 3L' reach the same position with the same turns");
+  const bars=at('4x4x6','R L');
+  check(E.FACES.every(f=>[1,2,3].every(l=>{ const s=bars.selection({face:f,layer:l,mod:'2',wide:false}); return !s || turns(bars,E.moveStr(f,l,'2'))!==8; })),
+    '4x4x6 R L: the sticking-out 8-piece block never turns on its own');
+}
+
 console.log('--- phase names');
 {
   // reduced phases get the simplest name for the same pieces, whatever the layout's core
-  const names=spec=>{ const p=new E.Puzzle(spec); return E.planPhases(p.clone(),true,mulberry32(2)).map(b=>p.boxName(b)); };
-  eq(names('5x1x5 +U(5x3,5x1) +D(5x3,5x1)').slice(-1), ['3x3x3'], 'Diamond Prism written along x: last phase is plainly 3x3x3, not 3x1x3 +U +D');
+  const names=spec=>{ const p=new E.Puzzle(spec); return E.planPhases(p.clone(),true,mulberry32(2)).map(ph=>ph.name||ph.counts.join('x')); };
+  const n357=names('3x5x7');
+  check(n357.length===3 && n357[0]==='3x5x5' && ['3x3x5','3x5x3'].includes(n357[1]) && n357[2]==='3x3x3',
+    `3x5x7 phases are named by the shape their box holds (${n357.join(' → ')})`);
   const n=new E.Puzzle('3x3x5 +U(1x5) +D(1x5) +R(1x5) +L(1x5)');
   eq(E.nameShape(n.shape.filter(p=>E.inBox(p,[[-4,4],[-2,2],[-2,2]]))), '3x1x3 +U +D +R +L', 'a 5x3x3 layer grid with 1x3 side rows is a plus-shaped prism, not 5x3x3');
   eq(E.nameShape(E.shapePositions(E.parseSpec('3x1x3 +U +D'))), '3x3x3', 'nameShape: 3x1x3 +U +D is 3x3x3');
@@ -253,7 +277,7 @@ function oldStageCount(w,h,d){
 }
 console.log('      phases per preset: '+Object.entries(PRESETS).map(([n,s])=>{
   const p=new E.Puzzle(s), plan=E.planPhases(p,true,mulberry32(7));
-  return `${n} ${1+plan.length} (${[p.boxName(), ...plan.map(b=>p.boxName(b))].join(' → ')})`;
+  return `${n} ${1+plan.length} (${[p.phaseName(), ...plan.map(ph=>ph.name||ph.counts.join('x'))].join(' → ')})`;
 }).join('; '));
 
 // Every generated scramble must replay on a fresh puzzle with every move
@@ -269,13 +293,13 @@ console.log('      phases per preset: '+Object.entries(PRESETS).map(([n,s])=>{
     const p=new E.Puzzle(spec);
     res.phases.forEach((ph,i)=>{
       ph.moves.forEach((m,j)=>{
-        const depthBefore=p.phaseStack.length;
+        const before=p.layerCounts(), total=p.totalLayers();
         if(!p.move(m)) problems.push(`${spec} ${m} refused`);
         const isOpening=ph.opensWithReduction && j===0;
-        if(isOpening && p.phaseStack.length!==depthBefore+1) problems.push(`${spec} phase ${i+1}: ${m} didn't reduce`);
-        if(!isOpening && p.phaseStack.length!==depthBefore) problems.push(`${spec} phase ${i+1}: ${m} changed the phase`);
+        if(isOpening && p.totalLayers()>=total) problems.push(`${spec} phase ${i+1}: ${m} didn't reduce`);
+        if(!isOpening && p.layerCounts().join()!==before.join()) problems.push(`${spec} phase ${i+1}: ${m} changed the phase`);
       });
-      if(!E.boxEq(p.eff,ph.box)) problems.push(`${spec} phase ${i+1} ended in the wrong box`);
+      if(p.phase().key!==ph.key) problems.push(`${spec} phase ${i+1} ended in the wrong phase`);
     });
     const summary=E.phaseSummary(spec,E.planPhases(new E.Puzzle(spec),wide,mulberry32(3)),wide);
     // a first phase is left out when it gets no moves: always if nothing can
@@ -317,10 +341,10 @@ console.log('      phases per preset: '+Object.entries(PRESETS).map(([n,s])=>{
   const spec='3x5x7', start=new E.Puzzle(spec); ['U','R','F2'].forEach(m=>start.move(m));
   const res=E.generateScramble(spec,{start,movesPerPhase:[20],rng:mulberry32(5)});
   const q=start.clone(); const ok=res.moves.every(m=>q.move(m));
-  check(ok && E.boxEq(q.eff,res.phases[res.phases.length-1].box) && res.phases[0].name===start.boxName(), `scramble from a reduced position (${start.boxName()}) replays on top of it`);
+  check(ok && q.phase().key===res.phases[res.phases.length-1].key && res.phases[0].name===start.phaseName(), `scramble from a reduced position (${start.phaseName()}) replays on top of it`);
   const keep=E.generateScramble(spec,{start,keepShape:true,movesPerPhase:[40],rng:mulberry32(6)});
-  const k=start.clone(); const kept=keep.moves.every(m=>{ const d=k.phaseStack.length, b=k.eff; return k.move(m) && k.phaseStack.length===d && E.boxEq(k.eff,b); });
-  check(kept && keep.phases.length===1 && keep.moves.length===40, `keep-shape scramble: 40 moves, none leaving ${start.boxName()}`);
+  const k=start.clone(); const kept=keep.moves.every(m=>{ const b=k.layerCounts().join(); return k.move(m) && k.layerCounts().join()===b; });
+  check(kept && keep.phases.length===1 && keep.moves.length===40, `keep-shape scramble: 40 moves, none leaving ${start.phaseName()}`);
   const cube=new E.Puzzle('3x3x3 +R +U'), keepL=E.generateScramble('3x3x3 +R +U',{start:cube,keepShape:true,movesPerPhase:[30],rng:mulberry32(7)});
   const c=cube.clone(); check(keepL.moves.every(m=>c.move(m)) && !c.isReduced(), `keep-shape scramble on a solved L-cube stays unreduced (${keepL.moves.slice(0,8).join(' ')}...)`);
 }

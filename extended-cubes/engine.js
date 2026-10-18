@@ -100,19 +100,10 @@ function shapePositions({core,ext}){
 
 /* ---------- boxes: per-axis [lo,hi] bounds on the doubled lattice ---------- */
 const boundingBox = ps => [0,1,2].map(k=>[Math.min(...ps.map(p=>p[k])), Math.max(...ps.map(p=>p[k]))]);
-// The solved puzzle's layer grid: on each axis, the core's layers plus the
-// layers stacked on its two faces. Oversized layers can overhang this grid
-// (3x3x3 +D(5x5) +L(5x5) +B(5x5) is a 4x4x4 grid with an overhanging fringe);
-// those pieces aren't a layer of their own and attach to the one they touch.
-function layerGrid({core,ext}){
-  const neg=['L','D','B'], pos=['R','U','F'];
-  return core.map((n,k)=>[-(n-1)-2*ext[neg[k]].length, (n-1)+2*ext[pos[k]].length]);
-}
 const boxSize = b => b.map(([lo,hi])=>(hi-lo)/2+1);
 const inBox = (p,b) => p.every((v,k)=>v>=b[k][0] && v<=b[k][1]);
 const boxEq = (a,b) => a.every((r,k)=>r[0]===b[k][0] && r[1]===b[k][1]);
 const boxKey = b => b.map(r=>r.join(':')).join('|');
-const clampToBox = (p,b) => p.map((v,k)=>Math.max(b[k][0],Math.min(b[k][1],v)));
 
 // every exposed side of the solved shape is stickered in that direction's colour
 function buildSolved(shape){
@@ -121,7 +112,7 @@ function buildSolved(shape){
     const st={};
     for(const [dir,n] of Object.entries(DIRS))
       if(!occ.has([p[0]+2*n[0],p[1]+2*n[1],p[2]+2*n[2]].join(','))) st[dir]=COLORS[dir];
-    return {home:[...p],pos:[...p],ori:I3,fc:[...p],stickers:st};
+    return {home:[...p],pos:[...p],ori:I3,stickers:st};
   });
 }
 
@@ -229,13 +220,6 @@ function parseSequence(text){
 }
 const formatMove = mv => moveStr(mv.face,mv.layer,mv.mod,mv.wide);
 
-// functional layers grabbed by a move: bandaged layers share an fc value
-function selectCoords(cubies,mv){
-  const {face,layer,wide}=mv;
-  const k=IDX[AXIS[face]], pos=POSITIVE.has(face);
-  const coords=[...new Set(cubies.map(c=>c.fc[k]))].sort((a,b)=>pos?b-a:a-b);
-  return new Set(wide?coords.slice(0,layer):[coords[layer-1]]);
-}
 function moveRotation(mv){
   const sign=baseSign(mv.face), exp=mv.mod==='2'?2:mv.mod==="'"?-sign:sign;
   return matPow(P[AXIS[mv.face]],exp);
@@ -245,14 +229,6 @@ function moveRotation(mv){
 function moveSweep(mv){
   const sign=baseSign(mv.face), quarters=mv.mod==='2'?2*sign:mv.mod==="'"?-sign:sign;
   return {axK:IDX[AXIS[mv.face]], angle:quarters*Math.PI/2};
-}
-function applyMove(cubies,mv){
-  const ax=AXIS[mv.face], k=IDX[ax];
-  const sel=selectCoords(cubies,mv), R=moveRotation(mv);
-  for(const c of cubies){
-    if(!sel.has(c.fc[k])) continue;
-    c.pos=matVec(R,c.pos); c.ori=matMul(R,c.ori); c.fc=matVec(R,c.fc);
-  }
 }
 function worldStickers(c){
   const out={}, oriT=transpose(c.ori);
@@ -264,36 +240,39 @@ function worldStickers(c){
   return out;
 }
 
-/* ---------- reduction phases ---------- */
-// As in cuboid-scrambler. `eff` is the current phase's box; pieces' functional
-// coords are clamped into it. What matters for a turn is the cross-section of
-// the layer actually being turned (in functional coords). A quarter turn keeps
-// the phase if that cross-section is a square centred on the turning axis;
-// otherwise, if both sides share parity, it starts a new phase: those two sides
-// of the box shrink to the largest centred square inside the cross-section, so
-// the outer layers bandage onto the outermost remaining one before the turn is
-// applied. On a plain cuboid this is the scrambler's "larger side reduces to
-// the smaller". A half turn only needs each side centred, so it never reduces a
-// plain cuboid, but an I-cube's R2 trims each side to its largest centred range.
-function crossSection(members,a){
-  return [Math.min(...members.map(c=>c.fc[a])), Math.max(...members.map(c=>c.fc[a]))];
+/* ---------- physical pieces ---------- */
+// Turning is decided by the position alone, as on the real puzzle, which
+// behaves like a bigger cube puzzle with some layers bandaged together (pCubes
+// models its cuboids this way). Every axis is cut on one shared grid: the
+// lattice midpoints of the puzzle's bounding cube, so wherever pieces end up
+// after shapeshifting there is a cut between them. A cut is blocked when a
+// piece's body crosses it, and the layers either side then turn as one.
+//
+// A piece's body is its own cell, except that a stickered core piece on a
+// core face with nothing stacked on it reaches outward past the bounding cube
+// through that face. On a 3x5x7 the pieces of the short faces stand in for the
+// missing 7x7x7 layers; on an X-cube, the F/B core pieces that a 2U carries
+// round to the R side stop the R extension turning on its own. Extension
+// pieces are single cells. Unstickered pieces never block (pCubes and the
+// physical puzzles have nothing there); they just move with their layer.
+const FACE_OF_DIR = {'+x':'R','-x':'L','+y':'U','-y':'D','+z':'F','-z':'B'};
+function pieceBody(c, spec, reach){
+  if(!Object.keys(c.stickers).length) return null;
+  const box=c.home.map(v=>[v-1,v+1]);
+  if(!c.home.every((v,k)=>Math.abs(v)<=spec.core[k]-1)) return box;
+  // a core piece's sticker is on the core's own face that way (both ways on
+  // a one-layer core, like the Triangle Prism's 5x1x5 base)
+  for(const d of Object.keys(c.stickers)){
+    const n=DIRS[d], k=n.findIndex(x=>x!==0), s=n[k];
+    if(spec.ext[FACE_OF_DIR[d]].length) continue;
+    box[k] = s>0 ? [box[k][0], reach] : [-reach, box[k][1]];
+  }
+  return box;
 }
-function effAfterQuarterTurn(eff,k,members){
-  const [i,j]=[0,1,2].filter(a=>a!==k);
-  const [li,hi]=crossSection(members,i), [lj,hj]=crossSection(members,j);
-  if(li===-hi && lj===-hj && hi===hj) return eff;
-  const r=Math.min(hi,-li,hj,-lj);
-  if(boxSize(eff)[k]<2 || r<1 || parity(hi)!==parity(hj)) return null;
-  const nb=eff.map(x=>[...x]);
-  nb[i]=[-r,r]; nb[j]=[-r,r];
-  return nb;
-}
-function effAfterHalfTurn(eff,k,members){
-  const sides=[0,1,2].filter(a=>a!==k).map(a=>[a,crossSection(members,a)]);
-  if(sides.every(([,[l,h]])=>l===-h)) return eff;
-  const nb=eff.map(x=>[...x]);
-  for(const [a,[l,h]] of sides) if(l!==-h){ const r=Math.min(h,-l); nb[a]=[-r,r]; }
-  return nb;
+// a body carried along by a turn (R is a signed permutation matrix)
+function rotateBody(R, b){
+  return [0,1,2].map(r=>{ const c=[0,1,2].find(j=>R[r][j]!==0);
+    return R[r][c]>0 ? b[c] : [-b[c][1],-b[c][0]]; });
 }
 
 // The 24 rotations of the whole puzzle about its centre, identity first.
@@ -308,11 +287,6 @@ const ROTATIONS = (()=>{
   return out;
 })();
 const frameKey = M => M.flat().join(',');
-// a box carried along by a whole-puzzle rotation (still axis-aligned)
-function rotateBox(M, b){
-  return [0,1,2].map(r=>{ const c=[0,1,2].find(j=>M[r][j]!==0);
-    return M[r][c]>0 ? [b[c][0],b[c][1]] : [-b[c][1],-b[c][0]]; });
-}
 
 // A layout turned by a whole-puzzle rotation: the core's sizes move to their
 // new axes and each face's stack moves to the face it now points at, so
@@ -337,105 +311,73 @@ class Puzzle {
   constructor(spec){
     this.spec = typeof spec==='string' ? parseSpec(spec) : spec;
     this.shape = shapePositions(this.spec);   // solved positions
-    this.fullBox = layerGrid(this.spec);      // the unreduced phase's box
-    this.shared = {frames:new Map(), cells:new Map(), names:new Map()};   // caches, same for clones
+    const M=Math.max(...this.shape.flatMap(p=>p.map(Math.abs)));
+    this.reach = M+3;   // past the bounding cube
+    // cuts on each axis: between lattice cells, which keep the core's parity
+    this.cuts = this.spec.core.map(n=>{ const out=[]; for(let q=-M;q<=M;q++) if(parity(q)===n%2) out.push(q); return out; });
+    this.shared = {frames:new Map(), names:new Map()};   // caches, same for clones
     this.reset();
+    this.startTotal = this.totalLayers();
   }
   reset(){
     this.cubies = buildSolved(this.shape);
-    this.eff = this.fullBox;
-    // A phase's shape can sit in any orientation of the whole puzzle: `frame`
-    // is the rotation taking the solved shape to this phase's reference shape
-    // (an L-cube turned upside down, +U becoming +D, is still a whole L-cube).
-    this.frame = I3;
-    this.phaseStack = [];   // {box, frame} of the phases left behind, oldest first
-    for(const c of this.cubies) c.fc=clampToBox(c.pos,this.eff);
+    for(const c of this.cubies) c.body=pieceBody(c,this.spec,this.reach);
+    this.regroup();
   }
-  // Cubie arrays and boxes are only ever replaced, never mutated in place, so
-  // a shallow copy of each cubie is a full copy.
+  // Cubie arrays and bodies are only ever replaced, never mutated in place,
+  // so a shallow copy of each cubie is a full copy.
   clone(){
     const q=Object.create(Puzzle.prototype);
-    q.spec=this.spec; q.shape=this.shape; q.fullBox=this.fullBox; q.shared=this.shared;
-    q.cubies=this.cubies.map(c=>({home:c.home,stickers:c.stickers,pos:c.pos,ori:c.ori,fc:c.fc}));
-    q.eff=this.eff; q.frame=this.frame; q.phaseStack=[...this.phaseStack];
+    q.spec=this.spec; q.shape=this.shape; q.reach=this.reach; q.cuts=this.cuts;
+    q.shared=this.shared; q.startTotal=this.startTotal;
+    q.cubies=this.cubies.map(c=>({home:c.home,stickers:c.stickers,pos:c.pos,ori:c.ori,fc:c.fc,body:c.body}));
     return q;
   }
-  // the solved shape's cells inside `box`, with the shape turned by `frame`
-  cellsFor(box, frame){
-    const k=boxKey(box)+'/'+frameKey(frame), s=this.shared;
-    if(!s.cells.has(k)){
-      const fk=frameKey(frame);
-      if(!s.frames.has(fk)) s.frames.set(fk, this.shape.map(p=>matVec(frame,p)));
-      s.cells.set(k, s.frames.get(fk).filter(p=>inBox(p,box)).map(p=>p.join(',')));
-    }
-    return s.cells.get(k);
+  // fc[k]: which turnable layer a piece is in along axis k, counted upwards as
+  // the number of open cuts below it, so pieces sharing a value turn together
+  regroup(){
+    const open=this.cuts.map((qs,k)=>qs.filter(q=>!this.cubies.some(c=>c.body && c.body[k][0]<q && q<c.body[k][1])));
+    for(const c of this.cubies) c.fc=[0,1,2].map(k=>open[k].filter(q=>q<c.pos[k]).length);
   }
   layerCount(k){ return new Set(this.cubies.map(c=>c.fc[k])).size; }
+  layerCounts(){ return [0,1,2].map(k=>this.layerCount(k)); }
+  totalLayers(){ return this.layerCounts().reduce((a,b)=>a+b,0); }
   // the fc values a move would turn, or null if it names no layer or would
-  // turn every piece (a whole-puzzle rotation, e.g. U once a 1-layer core has
-  // bandaged all its tiers together)
+  // turn every piece (a whole-puzzle rotation)
   selection(mv){
-    const k=IDX[AXIS[mv.face]];
-    if(mv.layer<1 || (!mv.wide && mv.layer>this.layerCount(k))) return null;
-    const fcs=selectCoords(this.cubies,mv);
+    const k=IDX[AXIS[mv.face]], pos=POSITIVE.has(mv.face);
+    const coords=[...new Set(this.cubies.map(c=>c.fc[k]))].sort((a,b)=>pos?b-a:a-b);
+    if(mv.layer<1 || (!mv.wide && mv.layer>coords.length)) return null;
+    const fcs=new Set(mv.wide?coords.slice(0,mv.layer):[coords[mv.layer-1]]);
     if(this.cubies.every(c=>fcs.has(c.fc[k]))) return null;
     return {axK:k, fcs};
   }
-  // the phase box after `mv` (=== this.eff when it keeps the phase), or null if
-  // the move can't be made
-  effAfter(mv){
+  // A half turn always fits. A quarter turn needs the two crossing axes to
+  // share a parity (R on a 3x3x4 would take its layers off the lattice), and,
+  // as in cuboid-scrambler, a layer at least 2x2 around the axis to turn on (a
+  // 3x3x1's 1x3 side bar only half-turns), unless the turn leaves every piece
+  // on a cell the layer already filled (a Pyramid's single top piece).
+  canMove(mv){
     const s=this.selection(mv);
-    if(!s) return null;
+    if(!s) return false;
+    if(mv.mod==='2') return true;
+    const [a,b]=[0,1,2].filter(j=>j!==s.axK);
+    if(this.spec.core[a]%2!==this.spec.core[b]%2) return false;
     const members=this.cubies.filter(c=>s.fcs.has(c.fc[s.axK]));
-    // A turn whose pieces land exactly on the positions they occupied can't
-    // change the shape, so it keeps the phase even if its functional
-    // cross-section looks off-centre (the Diorama's 5x5 B slab, whose overhang
-    // is folded onto the 4x4x4 grid).
-    const R=moveRotation(mv), at=new Set(members.map(c=>c.pos.join(',')));
-    if(members.every(c=>at.has(matVec(R,c.pos).join(',')))) return this.eff;
-    return mv.mod==='2' ? effAfterHalfTurn(this.eff,s.axK,members) : effAfterQuarterTurn(this.eff,s.axK,members);
+    const at=new Set(members.map(c=>c.pos[a]+','+c.pos[b]));
+    const around=this.spec.core[a]%2 ? [-2,0,2] : [-1,1];
+    if(around.every(u=>around.every(v=>at.has(u+','+v)))) return true;
+    const R=moveRotation(mv), cells=new Set(members.map(c=>c.pos.join(',')));
+    return members.every(c=>cells.has(matVec(R,c.pos).join(',')));
   }
   move(mv){
     if(typeof mv==='string') mv=parseMove(mv);
-    const ne=this.effAfter(mv);
-    if(!ne) return false;
-    // a reduction never changes the turning axis's range, so the same layer is
-    // still selected after coarsening
-    if(ne!==this.eff) this.phaseStack.push({box:this.eff, frame:this.frame});
-    this.eff=ne;
-    // Every piece belongs to the layer it touches: its position clamped into
-    // the phase box. A turn then always moves whole planes of pieces about its
-    // own axis, so it can never collide with pieces it leaves behind. (Rotating
-    // a remembered layer along with the piece, as cuboid-scrambler did, let an
-    // overhang carried round a slab keep its old layer and pass through others.)
-    for(const c of this.cubies) c.fc=clampToBox(c.pos,this.eff);
-    applyMove(this.cubies,mv);
-    for(const c of this.cubies) c.fc=clampToBox(c.pos,this.eff);
-    this.undoReductions();
+    if(!this.canMove(mv)) return false;
+    const s=this.selection(mv), R=moveRotation(mv);
+    this.cubies=this.cubies.map(c=>!s.fcs.has(c.fc[s.axK]) ? c :
+      {home:c.home, stickers:c.stickers, pos:matVec(R,c.pos), ori:matMul(R,c.ori), fc:c.fc, body:c.body&&rotateBody(R,c.body)});
+    this.regroup();
     return true;
-  }
-  // An earlier phase is turnable again once every position its shape has
-  // inside its box is filled (for a cuboid: the sub-cuboid is intact). Pieces
-  // outside the box attach to the layer they touch. The earliest wins.
-  // The unreduced phase also counts in any orientation of the whole puzzle:
-  // once all the pieces form the solved shape turned some way (an L-cube
-  // after 2Rw2 2Lw2, its +U now underneath), it is simply the whole puzzle
-  // again. Intermediate phases keep their own orientation, as in
-  // cuboid-scrambler (a 3x5x7's F after U U R U gives 3x3x3).
-  undoReductions(){
-    if(!this.phaseStack.length) return;
-    const occ=new Set(this.cubies.map(c=>c.pos.join(',')));
-    for(let i=0;i<this.phaseStack.length;i++){
-      const e=this.phaseStack[i];
-      for(const Q of i===0 ? ROTATIONS : [I3]){
-        const box=rotateBox(Q,e.box), frame=matMul(Q,e.frame);
-        if(!this.cellsFor(box,frame).every(k=>occ.has(k))) continue;
-        this.eff=box; this.frame=frame;
-        this.phaseStack.length=i;
-        for(const c of this.cubies) c.fc=clampToBox(c.pos,box);
-        return;
-      }
-    }
   }
   isSolved(){ return this.cubies.every(c=>vecEq(c.pos,c.home)&&matEq(c.ori,I3)); }
   // Solved as a whole, possibly turned: every piece is where the solved puzzle
@@ -449,46 +391,94 @@ class Puzzle {
     }
     return null;
   }
-  // the full layer grid, in the current phase's orientation
-  unreducedBox(){ return rotateBox(this.frame,this.fullBox); }
-  isReduced(){ return !boxEq(this.eff,this.unreducedBox()); }
+  // fewer turnable layers than the solved puzzle has: a reduced phase
+  isReduced(){ return this.totalLayers()<this.startTotal; }
+  // The phase's box, for naming it: on each axis, one cell per turnable layer,
+  // the layer's cell nearest the centre. On a 3x5x7 after U R, the layers
+  // reaching from y=2 up to y=6 and from y=-2 down to y=-6 count as y=2 and
+  // y=-2, giving 3x3x3. null if those cells don't line up in a row.
+  phaseBox(){
+    const box=[];
+    for(let k=0;k<3;k++){
+      const by=new Map();
+      for(const c of this.cubies){ const v=c.pos[k], b=by.get(c.fc[k]);
+        if(b===undefined || Math.abs(v)<Math.abs(b) || (Math.abs(v)===Math.abs(b) && v>b)) by.set(c.fc[k],v); }
+      const cs=[...by.entries()].sort((a,b)=>a[0]-b[0]).map(e=>e[1]);
+      if(!cs.every((v,i)=>!i || v===cs[i-1]+2)) return null;
+      box.push([cs[0], cs[cs.length-1]]);
+    }
+    return box;
+  }
+  // the occupied cells of the phase's box
+  shapeCells(box=this.phaseBox()){
+    return new Set(box ? this.cubies.filter(c=>inBox(c.pos,box)).map(c=>c.pos.join(',')) : []);
+  }
+  // the rotation that takes the solved shape to where the pieces are now, if any
+  orientation(){
+    const occ=positionsKey(this.cubies.map(c=>c.pos)), s=this.shared;
+    for(const Q of ROTATIONS){
+      const k=frameKey(Q);
+      if(!s.frames.has(k)) s.frames.set(k, positionsKey(this.shape.map(p=>matVec(Q,p))));
+      if(s.frames.get(k)===occ) return Q;
+    }
+    return null;
+  }
+  // The current phase: key identifies it, counts are its turnable layers per
+  // axis, box is phaseBox(), reduced says whether it turns fewer layers than
+  // the solved puzzle, and name is the layout (as it sits now) when
+  // unreduced, else the shape its box holds ("3x3x3", "3x3x3 +D"), or null
+  // when the pieces there form no nameable shape.
+  phase(){
+    const counts=this.layerCounts(), box=this.phaseBox(), reduced=this.isReduced();
+    const key=box ? boxKey(box) : 'n:'+counts.join('x');
+    let name=null;
+    if(!reduced){
+      const Q=this.orientation();
+      name=formatSpec(!Q || matEq(Q,I3) ? this.spec : rotateSpec(this.spec,Q));
+    } else if(box){
+      const cells=[...this.shapeCells(box)].sort(), ck=cells.join('|'), s=this.shared;
+      if(!s.names.has(ck)) s.names.set(ck, nameShape(cells.map(c=>c.split(',').map(Number))));
+      name=s.names.get(ck);
+    }
+    return {key, counts, box, reduced, name};
+  }
+  // the phase's shape name, or its layer grid ("5x3x3") when it has none
+  phaseName(){ const ph=this.phase(); return ph.name || ph.counts.join('x'); }
   // Layers a face can name: up to half the axis, as on an N×N×N, where a middle
   // slice is equivalent to the two outer layers plus a rotation. On an
   // off-centre axis (a Triangle Prism's base-to-apex) that equivalence fails,
   // so the middle layer is reachable too.
   maxLayers(face){
-    const k=IDX[AXIS[face]], n=boxSize(this.eff)[k];
+    const k=IDX[AXIS[face]], n=this.layerCount(k);
     return this.offCentre(k) ? Math.ceil(n/2) : Math.floor(n/2);
   }
-  offCentre(k){ return this.eff[k][0]!==-this.eff[k][1]; }
+  // the phase's box isn't centred on this axis (a Triangle Prism's tiers run
+  // from the base upward); judged by the box, not by where extension pieces
+  // happen to sit, so an I-cube's 3x3x3 phase is centred wherever its spare
+  // pieces are
+  offCentre(k){
+    const box=this.phaseBox();
+    if(box) return box[k][0]!==-box[k][1];
+    const spans=new Map();
+    for(const c of this.cubies){ const v=c.pos[k], s=spans.get(c.fc[k]);
+      spans.set(c.fc[k], s ? [Math.min(s[0],v),Math.max(s[1],v)] : [v,v]); }
+    const list=[...spans.values()].map(s=>s.join(':')).sort().join('|');
+    const mirror=[...spans.values()].map(([a,b])=>[-b,-a].join(':')).sort().join('|');
+    return list!==mirror;
+  }
   // layers to offer from a face when listing moves: as maxLayers, but an
   // off-centre axis's middle layer only from its positive face (2U, not 2D)
   listedLayers(face){
-    const k=IDX[AXIS[face]], n=boxSize(this.eff)[k];
+    const k=IDX[AXIS[face]], n=this.layerCount(k);
     return this.offCentre(k) && n%2===1 && !POSITIVE.has(face) ? Math.floor(n/2) : this.maxLayers(face);
-  }
-  // The cells a phase's name describes: the solved shape's positions inside its
-  // box (a phase box can be larger than its shape, e.g. a 5x3x3 box around
-  // the Diamond Prism's plus-shaped 3x1x3 +U +D +R +L).
-  shapeCells(box=this.eff, frame=this.frame){
-    return new Set(this.cellsFor(box,frame));
-  }
-  // the unreduced puzzle keeps the layout as written; a reduced phase gets the
-  // simplest name for its shape's pieces inside its box. Boxes passed in from
-  // a plan are in the solved orientation; the current phase uses its own.
-  boxName(box=this.eff, frame = box===this.eff ? this.frame : I3){
-    if(boxEq(box,rotateBox(frame,this.fullBox))) return formatSpec(matEq(frame,I3) ? this.spec : rotateSpec(this.spec,frame));
-    const k=boxKey(box)+'/'+frameKey(frame), s=this.shared;
-    if(!s.names.has(k))
-      s.names.set(k, nameShape(this.cellsFor(box,frame).map(c=>c.split(',').map(Number))) || boxSize(box).join('x')+' box');
-    return s.names.get(k);
   }
 }
 
 /* ---------- scrambler ---------- */
-// Reductions are introduced deliberately, one per phase, along the order that
-// gives the most phases. Every other move must keep the phase exactly as it is:
-// no extra reduction and no accidental undo of an earlier one.
+// A phase is the set of layers the puzzle can turn; a reduction is a move
+// after which it can turn fewer. Reductions are introduced deliberately, one
+// per phase, along the order that gives the most phases. Every other move must
+// keep the phase exactly as it is: no extra reduction and no accidental undo.
 
 function candidateMoves(p, wide){
   const out=[];
@@ -499,19 +489,28 @@ function candidateMoves(p, wide){
   return out;
 }
 
-// moves that start exactly one new phase and aren't undone by themselves
-// (e.g. on a 3x5x7, L R' F2 R F' reduces for the F' and is whole again after);
-// one representative state per resulting box
+// What `mv` does to the phase: 'reduces' (fewer layers can turn), 'restores'
+// (more), 'keeps' (the same number on every axis), or null if it can't be
+// made. The move buttons' tint and the scrambler both use this.
+function moveEffect(p, mv){
+  if(!p.canMove(mv)) return null;
+  const q=p.clone(); q.move(mv);
+  const a=p.layerCounts(), b=q.layerCounts();
+  if(a.every((n,k)=>n===b[k])) return 'keeps';
+  return q.totalLayers()>p.totalLayers() ? 'restores' : 'reduces';
+}
+const keepsPhase = (p, mv) => moveEffect(p,mv)==='keeps';
+
+// moves that reduce the phase; one representative state per resulting phase
 function reductionsFrom(p, wide, allMoves){
-  const found=new Map();
+  const found=new Map(), total=p.totalLayers();
   for(const mv of allMoves){
-    const ne=p.effAfter(mv);
-    if(!ne || ne===p.eff) continue;
-    const key=boxKey(ne);
+    if(!p.canMove(mv)) continue;
     const q=p.clone(); q.move(mv);
-    if(q.phaseStack.length!==p.phaseStack.length+1 || !boxEq(q.eff,ne)) continue;
-    if(!found.has(key)) found.set(key,{box:ne, state:q, moves:[]});
-    found.get(key).moves.push(mv);
+    if(q.totalLayers()>=total) continue;
+    const ph=q.phase();
+    if(!found.has(ph.key)) found.set(ph.key,{phase:ph, state:q, moves:[]});
+    found.get(ph.key).moves.push(mv);
   }
   return [...found.values()];
 }
@@ -527,21 +526,21 @@ function triggerMoves(p, wide){
   return out;
 }
 
-// Sequence of phase boxes to reduce through from p: the most phases that get
-// a full scramble (single-axis phases don't count), then the most phases
-// overall, ties broken at random.
+// Phases to reduce through from p, each a phase() description: the most
+// phases that get a full scramble (single-axis phases don't count), then the
+// most phases overall, ties broken at random.
 function planPhases(p, wide, rng=Math.random){
   return planFrom(p,wide,rng,new Map()).path;
 }
 function planFrom(p, wide, rng, memo){
-  const key=boxKey(p.eff);
+  const key=p.phase().key;
   if(memo.has(key)) return memo.get(key);
   memo.set(key,{path:[],score:0});   // guards against cycles while searching
   let best={path:[],score:0}, ties=0;
   for(const r of reductionsFrom(p,wide,triggerMoves(p,wide))){
     const sub=planFrom(r.state,wide,rng,memo);
     const axes=phaseAxes(r.state,wide), isLast=!sub.path.length;
-    const cand={path:[r.box,...sub.path], score:sub.score+(!isSingleAxisPhase(axes,isLast) && axes.size>0 ? 1 : 0)};
+    const cand={path:[r.phase,...sub.path], score:sub.score+(!isSingleAxisPhase(axes,isLast) && axes.size>0 ? 1 : 0)};
     const better = cand.score>best.score || (cand.score===best.score && cand.path.length>best.path.length);
     const tie = cand.score===best.score && cand.path.length===best.path.length;
     if(better){ best=cand; ties=1; }
@@ -550,21 +549,6 @@ function planFrom(p, wide, rng, memo){
   memo.set(key,best);
   return best;
 }
-
-// What `mv` does to the phase, judged by the net result: 'reduces', 'restores',
-// 'keeps', or null if it can't be made. A move that reduces and is whole again
-// by the end of its own turn keeps the phase. The move buttons' tint and the
-// scrambler both use this, so "keeps the shape" means the same in both.
-function moveEffect(p, mv){
-  const ne=p.effAfter(mv);
-  if(!ne) return null;
-  if(ne===p.eff && !p.phaseStack.length) return 'keeps';   // nothing to undo either
-  const q=p.clone(); q.move(mv);
-  if(q.phaseStack.length>p.phaseStack.length) return 'reduces';
-  if(q.phaseStack.length<p.phaseStack.length) return 'restores';
-  return 'keeps';
-}
-const keepsPhase = (p, mv) => moveEffect(p,mv)==='keeps';
 
 // can anything be turned in p's phase without leaving it?
 function phaseHasMoves(p, wide){
@@ -580,33 +564,31 @@ function phaseAxes(p, wide){
 // gets its full move count.
 const isSingleAxisPhase = (axes, isLast) => !isLast && axes.size<=1;
 
-// How each planned phase will be treated: {box, axes, singleAxis} per phase,
-// found by walking the plan's reductions from a solved puzzle.
+// How each phase will be treated: {phase, name, axes, singleAxis} for the
+// starting phase and each planned one, found by walking the plan's reductions
+// from a solved puzzle.
 function phaseSummary(spec, plan, wide){
   const p=new Puzzle(spec), out=[];
   for(let i=0;i<=plan.length;i++){
     const axes=phaseAxes(p,wide);
-    out.push({box:p.eff, axes:axes.size, singleAxis:isSingleAxisPhase(axes,i===plan.length)});
+    out.push({phase:p.phase(), name:p.phaseName(), axes:axes.size, singleAxis:isSingleAxisPhase(axes,i===plan.length)});
     if(i===plan.length) break;
-    const r=reductionsFrom(p,wide,triggerMoves(p,wide)).find(r=>boxEq(r.box,plan[i]));
+    const r=reductionsFrom(p,wide,triggerMoves(p,wide)).find(r=>r.phase.key===plan[i].key);
     if(!r) break;
     p.move(r.moves[0]);
   }
   return out;
 }
 
-// Efficient mode: on an axis the next phase narrows, only the layers about to
-// lose their independence (outside the next box) are worth scrambling now.
-function efficientFilter(p, nextBox){
-  const narrowing=[0,1,2].filter(k=>nextBox[k][0]>p.eff[k][0] || nextBox[k][1]<p.eff[k][1]);
+// Efficient mode: on an axis the next phase narrows from n layers to m, only
+// the outer layers about to lose their independence are worth scrambling now.
+function efficientFilter(p, next){
+  const now=p.layerCounts();
+  const narrowing=[0,1,2].filter(k=>next.counts[k]<now[k]);
   if(!narrowing.length) return null;
   return mv=>{
     const k=IDX[AXIS[mv.face]];
-    if(!narrowing.includes(k)) return true;
-    const pos=POSITIVE.has(mv.face);
-    const coords=[...new Set(p.cubies.map(c=>c.fc[k]))].sort((a,b)=>pos?b-a:a-b);
-    const v=coords[mv.layer-1];
-    return v<nextBox[k][0] || v>nextBox[k][1];
+    return !narrowing.includes(k) || mv.layer<=Math.ceil((now[k]-next.counts[k])/2);
   };
 }
 
@@ -627,9 +609,9 @@ function makeBlocker(){
   };
 }
 
-// opts: movesPerPhase (array, last value repeats) or countFor(i, box) giving
-// phase i's move count, wide, efficient, rng, plan (boxes from planPhases, so a
-// UI can label phases before generating), start (a Puzzle to scramble from
+// opts: movesPerPhase (array, last value repeats) or countFor(i, phase) giving
+// phase i's move count, wide, efficient, rng, plan (from planPhases, so a UI
+// can label phases before generating), start (a Puzzle to scramble from
 // instead of solved) and keepShape (stay in the starting phase: only moves
 // that don't change it).
 function generateScramble(spec, opts={}){
@@ -638,18 +620,18 @@ function generateScramble(spec, opts={}){
   let plan = opts.keepShape ? [] : opts.plan ? [...opts.plan] : planPhases(p.clone(),wide,rng);
   const phases=[], blocker=makeBlocker();
   for(let i=0;;i++){
-    // (before a later phase's reducing move, its box is the next one planned)
-    const n=opts.countFor ? opts.countFor(i, i===0 || !plan.length ? p.eff : plan[0]) : perPhase[Math.min(i,perPhase.length-1)];
+    // (before a later phase's reducing move, its phase is the next one planned)
+    const n=opts.countFor ? opts.countFor(i, i===0 || !plan.length ? p.phase() : plan[0]) : perPhase[Math.min(i,perPhase.length-1)];
     const moves=[];
     let opening=null;   // face:layer of the move that reduced into this phase
     if(i>0){
       if(!plan.length) break;
       // reach the planned phase; re-plan if this state can't (state-dependent)
-      let opts2=reductionsFrom(p,wide,triggerMoves(p,wide)).filter(r=>boxEq(r.box,plan[0]));
+      let opts2=reductionsFrom(p,wide,triggerMoves(p,wide)).filter(r=>r.phase.key===plan[0].key);
       if(!opts2.length){
         plan=planPhases(p.clone(),wide,rng);
         if(!plan.length) break;
-        opts2=reductionsFrom(p,wide,triggerMoves(p,wide)).filter(r=>boxEq(r.box,plan[0]));
+        opts2=reductionsFrom(p,wide,triggerMoves(p,wide)).filter(r=>r.phase.key===plan[0].key);
       }
       // Prefer a move within the outer half, as the rest of the scramble uses,
       // and one the no-repeat rule allows: the move before it may well have
@@ -713,18 +695,21 @@ function generateScramble(spec, opts={}){
       p.move(picked); blocker.record(picked); moves.push(formatMove(picked));
     }
     // a first phase that can't turn at all (the Diorama's) contributes no moves
-    if(moves.length) phases.push({box:p.eff, name:p.boxName(), moves, opensWithReduction:i>0, singleAxis:perLayer});
+    if(moves.length){
+      const ph=p.phase();
+      phases.push({key:ph.key, counts:ph.counts, name:p.phaseName(), moves, opensWithReduction:i>0, singleAxis:perLayer});
+    }
     if(!plan.length) break;
   }
   return {phases, moves:phases.flatMap(ph=>ph.moves), final:p};
 }
 
 const Engine = {
-  COLORS, DIRS, I3, AXIS, IDX, POSITIVE, FACES, FACE_ORDER,
+  COLORS, DIRS, I3, AXIS, IDX, POSITIVE, FACES, FACE_ORDER, ROTATIONS,
   matVec, transpose, matMul, vecEq,
   parseSpec, formatSpec, rotateSpec, shapePositions, buildSolved, nameShape,
-  boundingBox, layerGrid, boxSize, inBox, boxEq, boxKey, clampToBox,
-  parseMove, moveStr, formatMove, parseSequence, moveSweep, selectCoords, applyMove, worldStickers,
+  boundingBox, boxSize, inBox, boxEq, boxKey,
+  parseMove, moveStr, formatMove, parseSequence, moveSweep, worldStickers,
   Puzzle, planPhases, generateScramble, keepsPhase, moveEffect, phaseHasMoves, phaseSummary,
 };
 if(typeof module!=='undefined' && module.exports) module.exports=Engine;

@@ -232,7 +232,7 @@
   <div id="scramble-out"></div>
 </section>
 
-<script src="engine.js?v=0ced2b11"></script>
+<script src="engine.js?v=7ab905c7"></script>
 <script>
 const { DIRS, AXIS, IDX, POSITIVE, matVec, parseSpec, formatSpec, parseMove, moveStr,
   worldStickers, inBox, boxSize, Puzzle, planPhases, generateScramble, phaseSummary, parseSequence, moveSweep } = Engine;
@@ -287,7 +287,8 @@ function drawPuzzle(cubies, spin){
   const projectPt=p=>{ const q=toCam(p), f=eye/(eye-q[2]); return [q[0]*S*f, -q[1]*S*f]; };
   const Rs = spin ? axisRotation(spin.axK, spin.angle) : null;
   // hovering the reduced size highlights the pieces on that named shape's cells
-  const reducedCells = boxHover && !boxHoverWhole ? puzzle.shapeCells() : null;
+  const phaseBox = boxHover ? puzzle.phaseBox() : null;
+  const reducedCells = boxHover && !boxHoverWhole ? puzzle.shapeCells(phaseBox) : null;
   const moving = i => !!spin && spin.members.has(i);
   // a face is hidden only by a neighbour that moves with it: mid-turn, the
   // faces along the cut are exposed (in the body colour)
@@ -321,7 +322,7 @@ function drawPuzzle(cubies, spin){
         projectPt(place([center0[0]+su*u0[0]+sv*v0[0], center0[1]+su*u0[1]+sv*v0[1], center0[2]+su*u0[2]+sv*v0[2]])));
       const highlighting = !spin && (boxHover || btnHover || hover || stepHi);
       const isHi = !highlighting ? false
-        : boxHover ? (boxHoverWhole ? inBox(c.pos,puzzle.eff) : reducedCells.has(c.pos.join(',')))
+        : boxHover ? (boxHoverWhole ? !!phaseBox && inBox(c.pos,phaseBox) : reducedCells.has(c.pos.join(',')))
         : btnHover ? btnHover.fcs.has(c.fc[btnHover.axK])
         : hover ? c.fc[hover.axK]===hover.fc
         : stepHi.fcs.has(c.fc[stepHi.axK]);
@@ -549,19 +550,18 @@ function rewindTo(idx){
 
 function updateSizeNote(){
   const note=document.getElementById('size-note');
-  const full=pretty(puzzle.boxName(puzzle.fullBox));
-  const reduced=puzzle.isReduced();
+  const full=pretty(formatSpec(puzzle.spec));
+  // The phase comes from the position alone: which layers can turn now.
+  // Unreduced, it's the layout as it currently sits (an upside-down L-cube is
+  // +D +R). Reduced, it's named by the shape its layers' central pieces form;
+  // if they form none, by the layer grid it turns as.
+  const ph=puzzle.phase(), reduced=ph.reduced;
   note.className=reduced?'reduced':'';
-  // Name the reduced shape only while the pieces actually form it; otherwise
-  // say which layer grid the puzzle turns as (a reduction can leave e.g. an
-  // arm standing upright that the named shape has lying flat).
-  const occ=new Set(puzzle.cubies.map(c=>c.pos.join(',')));
-  boxHoverWhole = reduced && ![...puzzle.shapeCells()].every(k=>occ.has(k));
-  // unreduced: the layout as it currently sits (an upside-down L-cube is +D +R)
-  note.innerHTML = !reduced ? `<b>${pretty(puzzle.boxName())}</b>`
+  boxHoverWhole = reduced && !ph.name;
+  note.innerHTML = !reduced ? `<b>${pretty(ph.name)}</b>`
     : boxHoverWhole
-      ? `Turns as<br><b title="Highlight the pieces in this layer grid">${boxSize(puzzle.eff).join('×')}</b><br>from ${full}`
-      : `Reduced to<br><b title="Highlight this shape">${pretty(puzzle.boxName())}</b><br>from ${full}`;
+      ? `Turns as<br><b title="Highlight the pieces in this layer grid">${ph.counts.join('×')}</b><br>from ${full}`
+      : `Reduced to<br><b title="Highlight this shape">${pretty(ph.name)}</b><br>from ${full}`;
   if(!reduced){ boxHover=false; return; }
   const b=note.querySelector('b');
   b.addEventListener('pointerenter',()=>{ boxHover=true; renderSVG(); });
@@ -583,7 +583,7 @@ function handleFaceClick(face, axK, fcVal, mod){
   const layer=coords.indexOf(fcVal)+1;
   if(layer<1) return;
   // a layer that can only half-turn (R on a 3x3x4) does that on a plain click
-  if(mod!=='2' && !puzzle.effAfter({face,layer,mod,wide:false}) && puzzle.effAfter({face,layer,mod:'2',wide:false})) mod='2';
+  if(mod!=='2' && !puzzle.canMove({face,layer,mod,wide:false}) && puzzle.canMove({face,layer,mod:'2',wide:false})) mod='2';
   doMove(moveStr(face,layer,mod));
 }
 
@@ -600,7 +600,7 @@ function possibleMoves(face){
   const out=[], wide=isWide();
   for(let l=1;l<=puzzle.listedLayers(face);l++)
     for(const mod of ['',"'",'2'])
-      if(puzzle.effAfter({face,layer:l,mod,wide:wide&&l>1})) out.push(moveStr(face,l,mod,wide));
+      if(puzzle.canMove({face,layer:l,mod,wide:wide&&l>1})) out.push(moveStr(face,l,mod,wide));
   return out;
 }
 
@@ -610,7 +610,7 @@ function moveEffect(m){
   const mv=parseMove(m), kind=Engine.moveEffect(puzzle,mv);
   if(kind==='keeps') return {kind};
   const q=puzzle.clone(); q.move(mv);
-  return {kind, to:q.boxName()};
+  return {kind, to:q.phaseName()};
 }
 
 function refreshMoveButtons(){
@@ -698,7 +698,7 @@ function applySequence(){
 /* ===================== scrambler ===================== */
 let scramble = null;       // {phases, moves} of the last generated scramble
 let stepHi = null;         // {axK, fcs} turned by the scramble move about to be made
-let plannedPhases = [];    // boxes of the phases after the first
+let plannedPhases = [];    // the phases after the first (Puzzle.phase() descriptions)
 
 const isWide = () => !document.getElementById('opt-slice').checked;
 
@@ -707,15 +707,15 @@ const isWide = () => !document.getElementById('opt-slice').checked;
 function renderPhaseSliders(keep){
   const prev = keep ? [...document.querySelectorAll('.phase-num')].map(i=>+i.value) : [];
   plannedPhases=planPhases(puzzle.clone(), isWide());
-  const boxes=[puzzle.fullBox, ...plannedPhases];
   // phases that can turn about one axis get one random turn per layer instead
   // of a move count, and ones that can't turn at all get none
   const summary=phaseSummary(puzzle.spec, plannedPhases, isWide());
+  const phases=[puzzle.phase(), ...plannedPhases];
   const wrap=document.getElementById('phase-sliders');
-  wrap.innerHTML=boxes.map((b,i)=>{
-    const val=prev[i] ?? Math.min(100,Math.max(5,10*Math.max(...boxSize(b))));
+  wrap.innerHTML=phases.map((ph,i)=>{
+    const val=prev[i] ?? Math.min(100,Math.max(5,10*Math.max(...ph.counts)));
     const s=summary[i], locked=!!(s && s.singleAxis);
-    const name = boxes.length===1 ? 'Moves' : `Phase ${i+1} · ${pretty(puzzle.boxName(b))}`;
+    const name = phases.length===1 ? 'Moves' : `Phase ${i+1} · ${pretty(ph.name || ph.counts.join('x'))}`;
     const label = !locked ? name
       : `${name} · ${s.axes ? 'one random turn per layer (one axis only)' : 'no moves (every turn reduces it)'}`;
     return `<div class="slider-row"><span title="${label}">${label}</span>`+
@@ -735,11 +735,11 @@ function renderPhaseSliders(keep){
 // default. keepShape: only moves that keep the current phase.
 function generate(keepShape){
   const counts=new Map();
-  [puzzle.fullBox, ...plannedPhases].forEach((b,i)=>{
+  [puzzle.phase(), ...plannedPhases].forEach((ph,i)=>{
     const n=document.querySelector(`.phase-num[data-i="${i}"]`);
-    if(n) counts.set(Engine.boxKey(b), Math.min(100,Math.max(5,+n.value||5)));
+    if(n) counts.set(ph.key, Math.min(100,Math.max(5,+n.value||5)));
   });
-  const countFor=(i,box)=>counts.get(Engine.boxKey(box)) ?? Math.min(100,Math.max(5,10*Math.max(...boxSize(box))));
+  const countFor=(i,ph)=>counts.get(ph.key) ?? Math.min(100,Math.max(5,10*Math.max(...ph.counts)));
   stopAnimation();
   const start=puzzle.clone(), base=[...history];
   const res=generateScramble(puzzle.spec,{
